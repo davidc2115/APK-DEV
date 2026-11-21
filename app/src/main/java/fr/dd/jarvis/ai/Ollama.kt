@@ -135,7 +135,7 @@ object Ollama {
     /** Message natif Ollama → message OpenAI (tool_calls avec id et arguments en texte JSON). */
     internal fun versOpenAi(m: JSONObject): JSONObject {
         val msg = JSONObject().put("role", "assistant")
-        val brut = m.optString("content")
+        val brut = m.texteIA()
         val contenu = if (brut.isBlank()) "" else nettoyerRaisonnement(brut)
         val appels = m.optJSONArray("tool_calls")
         if (appels != null && appels.length() > 0) {
@@ -176,7 +176,7 @@ object Ollama {
 
     fun generer(app: JarvisApp, system: String, user: String): String =
         chat(app, JSONArray().put(JSONObject().put("role", "system").put("content", system)).put(JSONObject().put("role", "user").put("content", user)), null, 2048)
-            .optString("content").trim()
+            .texteIA().trim()
 
     private fun appel(b: String, modele: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int): JSONObject {
         fun corps(avecOutils: Boolean) = JSONObject().put("model", modele).put("messages", versNatif(messages)).put("stream", false)

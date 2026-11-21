@@ -78,7 +78,9 @@ class Brain(
         fr.dd.jarvis.voice.Presence.debutReflexion()
         // « Recommence / reprends là où tu en étais » après une demande interrompue (délai, coupure) : elle est relancée.
         val debutReprise = System.currentTimeMillis()
-        val h = runCatching { fr.dd.jarvis.hermes.Reprise.reecrire(app, history) }.getOrNull()?.also { onStatus("🔁 Reprise de la demande interrompue…") } ?: history
+        // Anciennes réponses « null » (contenu vide d'un fournisseur) : retirées du fil, les modèles finissaient par les imiter.
+        val propre = history.filter { it.fromUser || !estNul(it.text) }
+        val h = runCatching { fr.dd.jarvis.hermes.Reprise.reecrire(app, propre) }.getOrNull()?.also { onStatus("🔁 Reprise de la demande interrompue…") } ?: propre
         fr.dd.jarvis.voice.JournalVoix.noter("brain", "vérification reprise en ${System.currentTimeMillis() - debutReprise} ms")
         try {
             sortieDirecte = false
@@ -89,20 +91,27 @@ class Brain(
             memoireAjouteeCeTour = false
             captureConsignes = apprendre && !pourHermes
             val apprentissage = if (!captureConsignes) null else runCatching { lancerApprentissage(h) }.getOrNull()
-            val brut = replyInterne(h, pourHermes, onTexte, onStatus)
+            val brut = replyInterne(h, pourHermes, onTexte, onStatus).let { r ->
+                if (!estNul(r)) r else {
+                    fr.dd.jarvis.voice.JournalVoix.noter("brain", "réponse vide (« null ») évitée")
+                    "Je n'ai pas obtenu de réponse exploitable pour cette demande (l'IA a renvoyé une réponse vide). Peux-tu la redire ?"
+                }
+            }
             // Réponse rendue sans l'IA (réflexe, résultat d'outil direct) : tes consignes de forme s'y appliquent aussi.
             var finale = brut
             if (!pourHermes && sortieDirecte) {
                 val demande = h.lastOrNull { it.fromUser }?.text.orEmpty()
                 val remise = runCatching { Restitution.appliquer(app, demande, brut) }
                     .getOrElse { e -> if (e is kotlinx.coroutines.CancellationException) throw e; Restitution.Resultat(brut) }
-                finale = remise.texte
+                finale = remise.texte.takeUnless { estNul(it) } ?: brut
                 // Une consigne demande une information que ce résultat brut n'a pas : le cerveau refait la demande (une
                 // lecture seulement — une action n'est jamais exécutée deux fois) en appliquant la consigne.
                 if (remise.incomplet && sortieLecture) {
                     onStatus("📌 J'applique tes consignes…")
                     forcerCerveau = true
-                    finale = try { replyInterne(h, pourHermes, onTexte, onStatus) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { finale } finally { forcerCerveau = false }
+                    val avant = finale
+                    finale = try { replyInterne(h, pourHermes, onTexte, onStatus) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { avant } finally { forcerCerveau = false }
+                    if (estNul(finale)) finale = avant
                 }
             }
             if (pourHermes) return finale
@@ -221,7 +230,7 @@ class Brain(
         // puis au plus 3 s pour Groq / ses relais. Ensuite, réponse locale immédiate.
         val cloud = kotlinx.coroutines.withTimeoutOrNull(3_000L) {
             try {
-                app.llm.groqChat(msgs, null, forceText = true).optString("content").trim().takeIf { it.isNotBlank() }
+                app.llm.groqChat(msgs, null, forceText = true).texteIA().trim().takeIf { it.isNotBlank() }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
         }
         // Dernier recours strictement local : ne jamais laisser un bavardage simple tomber dans la chaîne Hermès.
@@ -664,7 +673,7 @@ class Brain(
             fr.dd.jarvis.voice.JournalVoix.noter("brain", "appel Groq tour ${tour + 1} en ${System.currentTimeMillis() - debutAppelIA} ms")
             val calls = msg.optJSONArray("tool_calls")
             if (calls == null || calls.length() == 0) {
-                return msg.optString("content", "").trim().ifBlank { "…" }
+                return msg.texteIA().trim().ifBlank { "Je n'ai pas obtenu de réponse exploitable de l'IA pour cette demande. Peux-tu la redire ?" }
             }
 
             messages.put(
@@ -749,7 +758,7 @@ class Brain(
         val dernierTour = try { llm.groqChat(synthese, JSONArray(), forceText = true) }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (_: Exception) { null }
-        return dernierTour?.optString("content")?.trim()?.takeIf { it.isNotBlank() }
+        return dernierTour.texteIA().trim().takeIf { it.isNotBlank() }
             ?: "La demande a atteint la limite d'étapes disponible. Je n'ai pas de confirmation suffisante pour annoncer sa réussite ; les résultats déjà obtenus restent dans le suivi."
 
     }

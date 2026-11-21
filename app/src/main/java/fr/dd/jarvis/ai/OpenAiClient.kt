@@ -21,7 +21,7 @@ class OpenAiClient(private val ring: KeyRing, private val model: () -> String) {
             .put(JSONObject().put("role", "system").put("content", system))
             .put(JSONObject().put("role", "user").put("content", user))
         return ring.run { key -> withContext(Dispatchers.IO) { call(key, messages, null, 1024, false) } }
-            .optString("content").trim()
+            .texteIA().trim()
     }
 
     suspend fun ping(key: String) = withContext(Dispatchers.IO) {

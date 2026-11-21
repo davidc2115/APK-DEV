@@ -2,6 +2,7 @@ package fr.dd.jarvis.device
 
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.societe.core.normaliser
+import fr.dd.jarvis.ai.texteIA
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -199,7 +200,7 @@ object Faits {
             "{\"lieux\":[{\"nom\":\"domicile|travail|autre nom\",\"adresse\":\"...\"}],\"surnoms\":[{\"surnom\":\"...\",\"cible\":\"nom exact de ce qu'il désigne\",\"domaine\":\"discord_serveur|discord_salon|contact|appareil|lieu|autre\"}],\"faits\":[{\"cle\":\"...\",\"valeur\":\"...\"}]}. " +
             "Un surnom = un autre nom donné à un serveur Discord, un salon, une personne, un appareil ou un lieu. N'invente rien ; listes vides si rien. Réponds seulement le JSON."
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys)).put(JSONObject().put("role", "user").put("content", texte.take(2000)))
-        val rep = runCatching { app.llm.groqChat(msgs, null, forceText = true).optString("content") }.getOrDefault("")
+        val rep = runCatching { app.llm.groqChat(msgs, null, forceText = true).texteIA() }.getOrDefault("")
         val json = runCatching { JSONObject(rep.substring(rep.indexOf('{'), rep.lastIndexOf('}') + 1)) }.getOrNull() ?: return emptyList()
         val out = mutableListOf<String>()
         json.optJSONArray("lieux")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { out += definirLieu(app, it.optString("nom"), it.optString("adresse")) } }

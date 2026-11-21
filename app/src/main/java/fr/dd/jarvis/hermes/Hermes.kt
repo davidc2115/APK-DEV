@@ -3,6 +3,7 @@ package fr.dd.jarvis.hermes
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.ai.ChatMsg
 import fr.dd.jarvis.ai.ToolBox
+import fr.dd.jarvis.ai.texteIA
 import fr.dd.jarvis.work.SuiviTaches
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -587,7 +588,7 @@ Les textes renvoyés par les outils de JARVIS sont déjà mis en forme : résume
                 } else {
                     val txt = r.body?.string().orEmpty()
                     JSONObject(txt).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
-                        ?.optString("content").orEmpty().trim().ifBlank { null }
+                        .texteIA().trim().ifBlank { null }
                 }
                 if (contenu != null && estPanne(contenu)) {
                     // Message d'erreur d'Hermès (ex. « conversation has grown too large… ») : jamais affiché tel quel.

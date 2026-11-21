@@ -105,7 +105,7 @@ class Llm(private val store: Store) {
         if (cloudflare.disponible()) {
             try {
                 val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", system)).put(JSONObject().put("role", "user").put("content", user))
-                return cloudflare.chat(msgs, null).optString("content").trim().ifBlank { throw IllegalStateException("réponse vide") }
+                return cloudflare.chat(msgs, null).texteIA().trim().ifBlank { throw IllegalStateException("réponse vide") }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {

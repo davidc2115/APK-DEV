@@ -18,7 +18,7 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
         val msgs = JSONArray()
             .put(JSONObject().put("role", "system").put("content", system))
             .put(JSONObject().put("role", "user").put("content", user))
-        return ring.run { key -> withContext(Dispatchers.IO) { call(key, msgs, null, 1024, Http.fast) } }.optString("content", "").trim()
+        return ring.run { key -> withContext(Dispatchers.IO) { call(key, msgs, null, 1024, Http.fast) } }.texteIA().trim()
     }
 
     /** Groq configuré (au moins une clé) : sert aussi à la dictée vocale (Whisper) en voiture. */
@@ -105,6 +105,14 @@ class GroqClient(private val ring: KeyRing, private val model: () -> String) {
             if (msg.has("content") && !msg.isNull("content")) msg.put("content", nettoyerRaisonnement(msg.optString("content")))
             if (choix.optString("finish_reason") == "length") msg.put("_coupe", true)
             msg
+        }
+        val sansAppel = (m.optJSONArray("tool_calls")?.length() ?: 0) == 0
+        // Ni texte ni appel d'outil (contenu null : réflexion d'un modèle de raisonnement qui a tout consommé, réponse
+        // filtrée…) : plus de place si elle a été coupée, sinon échec propre — le relais suivant (Gemini…) répond, au
+        // lieu d'afficher « null ».
+        if (sansAppel && m.texteIA().isBlank() && maxTokens != 1) {
+            if (m.optBoolean("_coupe") && out < 4096) return call(key, messages, tools, maxTokens, client, minOf(out * 2, 4096), forceText)
+            throw ApiException(422, "Groq : réponse vide")
         }
         // Réponse coupée par la limite de sortie au milieu d'un appel d'outil (commande, fichier) : jamais exécutée telle
         // quelle — on redemande avec plus de place, puis on abandonne ce fournisseur si ça ne suffit pas.
@@ -271,7 +279,7 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
     /** Test réel d'une clé sur ce point d'accès (celui qu'utilisent Jarvis et Hermès), en une réponse très courte. */
     suspend fun ping(key: String): String = withContext(Dispatchers.IO) {
         val m = appel(key, JSONArray().put(JSONObject().put("role", "user").put("content", "Réponds juste : ok")), null, 256, false)
-        if (m.optString("content").isBlank() && m.optJSONArray("tool_calls") == null) throw ApiException(502, "Gemini : réponse vide")
+        if (m.texteIA().isBlank() && m.optJSONArray("tool_calls") == null) throw ApiException(502, "Gemini : réponse vide")
         GeminiModeles.pour(key, model().ifBlank { "gemini-2.5-flash" }.removePrefix("models/"))
     }
 
@@ -419,7 +427,12 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
             if (!a.has("type")) a.put("type", "function")
         }
         if (msg.has("content") && !msg.isNull("content")) msg.put("content", nettoyerRaisonnement(msg.optString("content")))
-        if ((appels == null || appels.length() == 0) && msg.optString("content").isBlank()) throw ApiException(502, "Gemini : réponse vide")
+        if ((appels == null || appels.length() == 0) && msg.texteIA().isBlank()) {
+            // Réflexion qui a consommé toute la sortie (contenu null) : une fois, avec plus de place et moins de réflexion.
+            if (racine.optJSONArray("choices")?.optJSONObject(0)?.optString("finish_reason") == "length" && out < 8192)
+                return call(key, mdl, messages, tools, minOf(out * 2, 8192), forceText, true, bearer)
+            throw ApiException(502, "Gemini : réponse vide")
+        }
         return msg
     }
 
@@ -478,7 +491,7 @@ class GeminiChatClient(private val ring: KeyRing, private val model: () -> Strin
             }
             for (i in 0 until messages.length()) {
                 val m = messages.optJSONObject(i) ?: continue
-                val texte = m.optString("content")
+                val texte = m.texteIA()
                 when (m.optString("role")) {
                     "system" -> if (texte.isNotBlank()) systeme.append(if (systeme.isEmpty()) "" else "\n\n").append(texte)
                     "assistant" -> {

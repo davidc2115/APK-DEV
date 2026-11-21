@@ -40,6 +40,7 @@ class JarvisApp : Application() {
             if (!f.exists()) return
             val arr = org.json.JSONArray(f.readText())
             val l = (0 until arr.length()).map { arr.getJSONObject(it).let { o -> fr.dd.jarvis.ai.ChatMsg(o.getBoolean("u"), o.getString("t"), o.optLong("ts")) } }
+                .filter { it.fromUser || !fr.dd.jarvis.ai.estNul(it.text) }
             android.os.Handler(android.os.Looper.getMainLooper()).let { h -> if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) chat.addAll(l) else h.post { chat.addAll(l) } }
         }
     }
