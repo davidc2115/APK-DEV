@@ -18,6 +18,8 @@ object RoutageAudit {
         fr.dd.jarvis.societe.Frais.intention(t)?.let { return "Frais:${it::class.simpleName}$comb" }
         fr.dd.jarvis.device.RappelsLieu.intention(t)?.let { return "RappelLieu$comb" }
         fr.dd.jarvis.device.Courrier.intention(t)?.let { return "Courrier:${it.javaClass.simpleName}$comb" }
+        fr.dd.jarvis.device.Anniversaires.intention(t)?.let { return "Anniv:${it::class.simpleName}$comb" }
+        fr.dd.jarvis.device.SilenceRdv.intention(t)?.let { return "ModeRdv:${it::class.simpleName}$comb" }
         fr.dd.jarvis.device.Listes.intention(t)?.let { return "Liste:${it::class.simpleName}$comb" }
         fr.dd.jarvis.device.Stationnement.intention(t)?.let { return "Parking:${it.javaClass.simpleName}$comb" }
         MailCommandes.intention(t)?.let { return "Mail:${it.first}$comb" }

@@ -105,6 +105,8 @@ object Carnet {
         if (SUPPRIMER_DERNIERE.matches(t)) return Intention.SupprimerDerniere
         // Notes de frais (Société) : jamais dans le carnet.
         if (Regex("\\bnotes? de frais\\b", RegexOption.IGNORE_CASE).containsMatchIn(t)) return null
+        // Anniversaire avec une date (« note que l'anniversaire de Marie c'est le 14 mars ») : retenu par les anniversaires.
+        if (Anniversaires.intention(t) is Anniversaires.Intention.Ajouter) return null
         for (r in LIRE) r.find(t)?.let { m -> if (t.length <= 160) return Intention.Lire(sujetDemande(m.groupValues.getOrNull(1).orEmpty())) }
         val m = NOTER.find(t) ?: return null
         // « Ajoute le code du portail dans mes notes » : le contenu est AVANT « dans mes notes ».

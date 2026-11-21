@@ -57,6 +57,12 @@ class AuditFonctionnelTest {
             "rappelle-moi d'acheter du pain quand j'arrive à la maison" to "RappelLieu",
             "où en sont mes colis" to "Courrier:Colis",
             "fais le point du soir" to "CD:morning_briefing",
+            "lance la série Lupin saison 2 épisode 3 sur la télé" to "Plex:plex_lancer",
+            "quels sont les prochains anniversaires" to "Anniv:Lister",
+            "l'anniversaire de Marie c'est le 14 mars" to "Anniv:Ajouter",
+            "active le mode rendez-vous" to "ModeRdv:Activer",
+            "mets-moi en silencieux pendant mes rendez-vous" to "ModeRdv:Activer",
+            "mets le téléphone en silencieux" to "ModeSonore:npd",
         )
         val erreurs = attendus.filter { (p, a) -> r(p) != a }.map { (p, a) -> "« $p » → ${r(p)} (attendu $a)" }
         assertTrue(erreurs.joinToString("\n"), erreurs.isEmpty())
@@ -72,6 +78,8 @@ class AuditFonctionnelTest {
             "mets les coordonnées GPS dans mon rendez-vous de demain" to listOf("NavRdv"),
             "remplace l'adresse de mon rendez-vous par le point GPS" to listOf("NavRdv"),
             "qu'est-ce qui passe sur Plex en ce moment" to listOf("Plex:plex_lancer"),
+            "mets un rappel pour regarder le film demain" to listOf("Plex:plex_lancer"),
+            "je regarde un film ce soir mets le mode cinéma" to listOf("Plex:plex_lancer"),
             "éteins tout et active le mode nuit" to listOf("ModeJarvis"),
             "il fait combien dans la maison" to listOf("CD:meteo"),
             "ouvre le portail" to listOf("CD:phone_action"),

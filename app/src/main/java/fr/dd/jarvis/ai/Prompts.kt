@@ -90,7 +90,7 @@ Structure :
 2. Le planning du jour (aujourd'hui seulement : le lendemain est traité par le point du soir).
 $planningFormat
 3. `## 📧 Mails importants` : au maximum 5 lignes (expéditeur — résumé — action), les plus urgents d'abord.
-4. `## ⚠️ À retenir` : conflits d'agenda, deadlines, rappels et tâches du jour, météo du jour si elle gêne (pluie, orage, vent), colis attendus (omets la rubrique si rien).
+4. `## ⚠️ À retenir` : conflits d'agenda, deadlines, rappels et tâches du jour, météo du jour si elle gêne (pluie, orage, vent), colis attendus, anniversaires du jour (avec l'âge s'il est donné) et de la semaine (omets la rubrique si rien).
 5. `## 💶 Factures impayées` : reprends les factures impayées fournies (n°, client, montant, échéance, ⚠️ si en retard) ; omets la rubrique si aucune.
 Si une source n'est pas disponible (permission ou mails non configurés), dis-le en une ligne. N'invente rien.
 Les consignes enregistrées de l'utilisateur pour le briefing (agenda précis, rubriques à omettre ou à ajouter) priment sur la structure ci-dessus.
@@ -106,7 +106,7 @@ Structure :
 $planningFormat
 4. `## 🚗 Départ` : pour le premier rendez-vous de demain qui a une adresse, l'heure conseillée de départ si elle est fournie ; omets sinon.
 5. `## 🌦️ Météo de demain` : une ou deux lignes à partir de la météo fournie ; signale pluie / orage / vent / gel utiles pour les interventions.
-6. `## ⏰ À ne pas oublier demain` : rappels et tâches à échéance demain, colis attendus, factures qui arrivent à échéance ; omets si rien.
+6. `## ⏰ À ne pas oublier demain` : rappels et tâches à échéance demain, colis attendus, factures qui arrivent à échéance, anniversaires de demain (propose d'écrire un message) ; omets si rien.
 7. Une phrase de fin courte (ex. « Bonne soirée »).
 Si une source n'est pas disponible, dis-le en une ligne. N'invente rien. Pas de rubrique mails détaillée le soir : au plus une ligne « N mails non lus, dont … » si un mail est vraiment urgent.
 Les consignes enregistrées de l'utilisateur pour le briefing priment sur la structure ci-dessus.

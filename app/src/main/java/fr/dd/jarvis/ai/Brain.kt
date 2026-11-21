@@ -338,6 +338,16 @@ class Brain(
                 onStatus("📍 Rappel à l'arrivée…")
                 return reflexe(fr.dd.jarvis.device.RappelsLieu.creer(app, d))
             }
+            // Anniversaires (« prochains anniversaires », « c'est quand l'anniversaire de Paul ? », « l'anniversaire de Marie c'est le 14 mars »).
+            fr.dd.jarvis.device.Anniversaires.intention(texteUser)?.let { i ->
+                onStatus("🎂 Anniversaires…")
+                return reflexe(fr.dd.jarvis.device.Anniversaires.executer(app, i), lecture = i is fr.dd.jarvis.device.Anniversaires.Intention.Lister || i is fr.dd.jarvis.device.Anniversaires.Intention.DeQui)
+            }
+            // Mode rendez-vous (silencieux pendant les rendez-vous, SMS « je te rappelle »).
+            fr.dd.jarvis.device.SilenceRdv.intention(texteUser)?.let { i ->
+                onStatus("🔕 Mode rendez-vous…")
+                return reflexe(fr.dd.jarvis.device.SilenceRdv.executer(app, i), lecture = i is fr.dd.jarvis.device.SilenceRdv.Intention.Etat)
+            }
             // Listes à cocher (courses…) — avant le découpage en plusieurs actions (« du lait ET des œufs »).
             fr.dd.jarvis.device.Listes.intention(texteUser)?.let { i ->
                 onStatus("🛒 Liste…")
@@ -408,9 +418,9 @@ class Brain(
             // Plex (lancer un film sur la télé, pause, reprise…) : directement par l'API de Plex, sans Home Assistant ni Hermès.
             if (app.store.plexToken.value.isNotBlank()) PlexTools.intention(texteUser)?.let { (outil, args) ->
                 // « Lance X sur la télé » sans le mot film / série : seulement si X est bien dans la bibliothèque Plex.
+                // Le média trouvé est passé par son identifiant : pas de seconde recherche.
                 val ok = args.optString("verifier") != "oui" || runCatching {
-                    val t = fr.dd.jarvis.societe.core.normaliser(args.optString("titre"))
-                    Plex.rechercher(app, args.optString("titre"), 5).any { fr.dd.jarvis.societe.core.normaliser(it.optString("title")).let { x -> x == t || (t.length >= 4 && x.contains(t)) } }
+                    Plex.trouver(app, args.optString("titre"), strict = true).meilleur?.optString("ratingKey")?.takeIf { it.isNotBlank() }?.also { args.put("titre", it) } != null
                 }.getOrDefault(false)
                 if (ok) {
                     onStatus("🎬 Plex…")

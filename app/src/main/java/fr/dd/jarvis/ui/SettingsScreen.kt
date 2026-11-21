@@ -1551,6 +1551,36 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
             }
         },
+        VoletReglages("agents", "anniversaires", "Anniversaires", "anniversaires contacts rappel veille fete") {
+            HudPanel(Modifier.fillMaxWidth(), title = "🎂 Anniversaires") {
+                Text("Les anniversaires des fiches de tes contacts (et ceux que tu me dis : « l'anniversaire de Marie c'est le 14 mars ») sont annoncés au point du matin, la veille au point du soir, et par une notification avec « Lui écrire ».", color = HudDim, fontSize = 12.sp)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.anniversairesOn.set(!store.anniversairesOn.value) }) {
+                    Text((if (store.anniversairesOn.value) "✅ " else "⬜ ") + "Notification la veille (18 h) et le jour même (8 h)", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+                }
+            }
+        },
+        VoletReglages("agents", "rendez-vous", "Mode rendez-vous", "silencieux ne pas deranger rendez vous client reunion sms automatique je te rappelle appel manque") {
+            HudPanel(Modifier.fillMaxWidth(), title = "🔕 Mode rendez-vous") {
+                Text("Pendant un rendez-vous de l'agenda, le téléphone passe en Ne pas déranger (les contacts favoris et les alarmes passent toujours) et le son revient à la fin, avec la liste des appels manqués.", color = HudDim, fontSize = 12.sp)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable {
+                    store.silenceRdvOn.set(!store.silenceRdvOn.value); runCatching { fr.dd.jarvis.device.SilenceRdv.planifier(app) }
+                }) {
+                    Text((if (store.silenceRdvOn.value) "✅ " else "⬜ ") + "Silencieux automatique pendant les rendez-vous", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+                }
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    HudChip("Rendez-vous clients", !store.silenceRdvTous.value) { store.silenceRdvTous.set(false); runCatching { fr.dd.jarvis.device.SilenceRdv.planifier(app) } }
+                    HudChip("Tous les rendez-vous", store.silenceRdvTous.value) { store.silenceRdvTous.set(true); runCatching { fr.dd.jarvis.device.SilenceRdv.planifier(app) } }
+                }
+                Text("« Clients » : titre ou lieu avec un client de la Société, ou les mots RDV, intervention, chantier, visite, devis, dépannage, réunion…", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.silenceRdvSms.set(!store.silenceRdvSms.value) }) {
+                    Text((if (store.silenceRdvSms.value) "✅ " else "⬜ ") + "SMS automatique aux contacts dont l'appel est manqué (une fois par personne, jamais aux numéros inconnus)", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+                }
+                HudTextField(store.silenceRdvMessage.value, { store.silenceRdvMessage.set(it) }, Modifier.fillMaxWidth(), label = "Message ({fin} = heure de fin du rendez-vous)")
+                if (!fr.dd.jarvis.device.SilenceRdv.accesNpd(app)) HudButton("Autoriser « Ne pas déranger » pour JARVIS", Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                    runCatching { app.startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+            }
+        },
         VoletReglages("agents", "modes", "Modes", "modes a la demande creer modifier supprimer mode cinema nuit vacances automatiques voiture chantier maison") {
             fr.dd.jarvis.ui.SystemesPanel(app, onAsk)
             Spacer(Modifier.height(10.dp))

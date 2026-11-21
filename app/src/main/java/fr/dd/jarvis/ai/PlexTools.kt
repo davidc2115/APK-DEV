@@ -55,12 +55,29 @@ object Plex {
     /** Adresse du serveur Plex à utiliser (gardée 5 minutes) : maison d'abord, distante ensuite, tunnel SSH en dernier recours. */
     private fun base(app: JarvisApp): String {
         baseCache?.takeIf { System.currentTimeMillis() - it.second < 5 * 60_000L }?.let { return it.first }
-        val b = ipsLocales(app).filter { Serveur.telephoneSurReseau(it) }.map { "http://$it:$PORT" }.firstOrNull { repond(it) }
+        val loc = locales(app)
+        val b = loc.filter { it.second > 0 }.maxByOrNull { it.second }?.first
             ?: distantes(app).firstOrNull { repond(it.trimEnd('/')) }?.trimEnd('/')
+            ?: loc.firstOrNull { it.second >= 0 }?.first ?: loc.firstOrNull()?.first
             ?: "http://127.0.0.1:${Serveur.tunnel(app, PORT)}"
         baseCache = b to System.currentTimeMillis()
         return b
     }
+
+    /** Nombre de bibliothèques que le jeton voit sur ce serveur (-1 s'il ne répond pas ou refuse le jeton). */
+    private fun nbBibliotheques(app: JarvisApp, base: String): Int = runCatching {
+        rapide.newCall(Request.Builder().url("$base/library/sections").header("Accept", "application/json").header("X-Plex-Token", token(app)).build()).execute().use { r ->
+            if (!r.isSuccessful) -1 else JSONObject(r.body?.string().orEmpty()).let { (it.optJSONObject("MediaContainer") ?: it).optJSONArray("Directory")?.length() ?: 0 }
+        }
+    }.getOrDefault(-1)
+
+    /**
+     * Serveur Plex de la maison. Plusieurs appareils peuvent répondre sur le port 32400 (box, NAS, télé avec un serveur
+     * Plex vide…) : on garde celui dont le jeton voit le plus de bibliothèques, pas simplement le premier qui répond.
+     */
+    private fun locales(app: JarvisApp): List<Pair<String, Int>> =
+        ipsLocales(app).filter { Serveur.telephoneSurReseau(it) }.map { "http://$it:$PORT" }.asSequence().filter { repond(it) }.take(4)
+            .map { it to nbBibliotheques(app, it) }.toList()
 
     /** Comment JARVIS joint le serveur Plex en ce moment (pour l'utilisateur). */
     fun chemin(app: JarvisApp): String = base(app).let { b ->
@@ -133,27 +150,135 @@ object Plex {
             }
     }
 
+    /** Éléments d'un conteneur, quelle que soit la clé employée par la version du serveur (Metadata, Directory, Video, Track). */
+    fun elements(o: JSONObject): List<JSONObject> = listOf("Metadata", "Directory", "Video", "Track").flatMap { liste(o, it) }
+
+    val TYPES_MEDIA = setOf("movie", "show", "episode", "season", "artist", "album", "track", "collection")
+
     fun rechercher(app: JarvisApp, texte: String, limite: Int = 15): List<JSONObject> {
         require(texte.isNotBlank()) { "Précise le titre à rechercher dans Plex." }
-        val hubs = liste(mc(app, "/hubs/search", mapOf("query" to texte.trim(), "limit" to limite.coerceIn(1, 30).toString())), "Hub")
+        val q = texte.trim()
         val resultats = linkedMapOf<String, JSONObject>()
-        for (h in hubs) for (item in liste(h)) {
+        fun garder(item: JSONObject) {
             val key = item.optString("ratingKey").ifBlank { item.optString("key") }
             if (key.isNotBlank()) resultats.putIfAbsent(key, item)
+        }
+        for (h in liste(mc(app, "/hubs/search", mapOf("query" to q, "limit" to limite.coerceIn(1, 30).toString())), "Hub")) elements(h).forEach(::garder)
+        // Nouvelle recherche des serveurs récents (résultats dans SearchResult) quand /hubs/search ne donne rien.
+        if (resultats.isEmpty()) runCatching {
+            liste(mc(app, "/library/search", mapOf("query" to q, "limit" to limite.coerceIn(1, 30).toString(), "searchTypes" to "movies,tv,music")), "SearchResult")
+                .forEach { r -> (r.optJSONObject("Metadata") ?: r.optJSONObject("Directory"))?.let(::garder); elements(r).forEach(::garder) }
         }
         return resultats.values.toList()
     }
 
+    /** Recherche « le titre contient » dans chaque bibliothèque : fiable sur toutes les versions du serveur. */
+    fun parBibliotheques(app: JarvisApp, texte: String, limite: Int = 10): List<JSONObject> =
+        runCatching { sections(app) }.getOrDefault(emptyList()).filter { it.optString("type") in setOf("movie", "show", "artist") }.flatMap { s ->
+            runCatching { elements(mc(app, "/library/sections/${s.optString("key")}/all", mapOf("title" to texte, "X-Plex-Container-Start" to "0", "X-Plex-Container-Size" to limite.toString()))) }
+                .getOrDefault(emptyList())
+        }
+
     fun metadata(app: JarvisApp, id: String): JSONObject = liste(mc(app, "/library/metadata/$id")).firstOrNull()
         ?: throw IllegalStateException("Média Plex $id introuvable.")
+
+    private val CHIFFRES = mapOf("un" to "1", "une" to "1", "deux" to "2", "trois" to "3", "quatre" to "4", "cinq" to "5", "six" to "6", "sept" to "7", "huit" to "8", "neuf" to "9", "dix" to "10")
+
+    /** Titre comparable : minuscules, sans accents ni ponctuation, sans article de tête ni année. */
+    internal fun comparable(t: String): String = fr.dd.jarvis.societe.core.normaliser(t.replace(Regex("\\((?:19|20)\\d{2}\\)"), " ").replace('’', '\''))
+        .replace(Regex("^(le|la|les|l|un|une|des|the|a|an) "), "").split(' ').joinToString(" ") { CHIFFRES[it] ?: it }.trim()
+
+    /** Façons de chercher un titre dicté : tel quel, sans article, sans ponctuation, sans accents, sans année. */
+    internal fun variantes(titre: String): List<String> {
+        val base = titre.trim().replace(Regex("[«»\"“”]"), "").replace(Regex("\\s+"), " ").trim()
+        val sansAnnee = base.replace(Regex("\\s*\\(?(?:19|20)\\d{2}\\)?\\s*$"), "").trim()
+        val sansArticle = sansAnnee.replace(Regex("(?i)^(?:le|la|les|un|une|des|the)\\s+|^(?i)l['’]\\s*"), "").trim()
+        val sansPonct = sansArticle.replace(Regex("[:;,.!?–—-]"), " ").replace(Regex("\\s+"), " ").trim()
+        val ascii = java.text.Normalizer.normalize(sansPonct, java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+        val chiffres = sansPonct.split(' ').joinToString(" ") { CHIFFRES[it.lowercase()] ?: it }
+        return listOf(base, sansAnnee, sansArticle, sansPonct, ascii, chiffres).filter { it.length >= 2 }.distinct()
+    }
+
+    private fun levenshtein(a: String, b: String): Int {
+        val d = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prec = d[0]; d[0] = i
+            for (j in 1..b.length) { val t = d[j]; d[j] = minOf(d[j] + 1, d[j - 1] + 1, prec + if (a[i - 1] == b[j - 1]) 0 else 1); prec = t }
+        }
+        return d[b.length]
+    }
+
+    /** Ressemblance entre un média et le titre demandé (0 à 100). */
+    internal fun score(item: JSONObject, demande: String): Int {
+        val d = comparable(demande)
+        if (d.isBlank()) return 0
+        val mots = d.split(' ').filter { it.length >= 3 }.toSet()
+        val titres = listOf("title", "originalTitle", "titleSort", "grandparentTitle").map { comparable(item.optString(it)) }.filter { it.isNotBlank() }
+        val brut = titres.maxOfOrNull { x ->
+            when {
+                x == d -> 100
+                x.startsWith("$d ") || (d.startsWith("$x ") && x.length >= 4) -> 85
+                levenshtein(x, d) <= maxOf(1, minOf(x.length, d.length) / 6) -> 82
+                d.length >= 4 && x.contains(d) -> 72
+                x.length >= 5 && d.contains(x) -> 62
+                else -> {
+                    val mx = x.split(' ').filter { it.length >= 3 }.toSet()
+                    if (mots.isEmpty() || mx.isEmpty()) 0 else (50 * (mots intersect mx).size / maxOf(mots.size, mx.size))
+                }
+            }
+        } ?: 0
+        val annee = Regex("(?:19|20)\\d{2}").find(demande)?.value
+        return brut + (if (annee != null && item.optString("year") == annee) 5 else 0) +
+            when (item.optString("type")) { "movie", "show" -> 3; "episode", "track" -> -5; else -> 0 }
+    }
+
+    data class Recherche(val meilleur: JSONObject?, val proches: List<JSONObject>)
+
+    /**
+     * Média le plus proche du titre demandé : recherche Plex avec plusieurs variantes du titre (article, accents, ponctuation,
+     * année), puis recherche par bibliothèque. [strict] : seulement une vraie correspondance (pour une phrase ambiguë).
+     */
+    fun trouver(app: JarvisApp, titre: String, strict: Boolean = false, types: Set<String> = TYPES_MEDIA): Recherche {
+        val t = titre.trim()
+        if (t.isBlank()) return Recherche(null, emptyList())
+        if (t.matches(Regex("\\d+"))) return Recherche(runCatching { metadata(app, t) }.getOrNull(), emptyList())
+        val vus = linkedMapOf<String, JSONObject>()
+        var premierPlex: JSONObject? = null
+        fun ajouter(l: List<JSONObject>) = l.filter { it.optString("type") in types }.forEach { vus.putIfAbsent(it.optString("ratingKey").ifBlank { it.optString("key") }, it) }
+        fun classement() = vus.values.map { it to score(it, t) }.sortedByDescending { it.second }
+        val seuil = if (strict) 70 else 45
+        val vars = variantes(t)
+        for ((i, v) in vars.withIndex()) {
+            val r = if (i == 0) rechercher(app, v) else runCatching { rechercher(app, v) }.getOrDefault(emptyList())
+            if (i == 0) premierPlex = r.firstOrNull { it.optString("type") in types && it.optString("type") in setOf("movie", "show") }
+            ajouter(r)
+            classement().firstOrNull()?.takeIf { it.second >= 80 }?.let { return Recherche(it.first, emptyList()) }
+        }
+        classement().firstOrNull()?.takeIf { it.second >= seuil }?.let { return Recherche(it.first, emptyList()) }
+        for (v in vars.drop(1).take(3).ifEmpty { vars }) ajouter(parBibliotheques(app, v))
+        val c = classement()
+        c.firstOrNull()?.takeIf { it.second >= seuil }?.let { return Recherche(it.first, emptyList()) }
+        // Titre demandé explicitement : la recherche floue de Plex (fautes de dictée) a le dernier mot.
+        if (!strict && premierPlex != null) return Recherche(premierPlex, emptyList())
+        return Recherche(null, c.filter { it.second >= 20 }.take(4).map { it.first })
+    }
 
     /** Média désigné par identifiant (ratingKey) ou par titre (le plus proche). */
     fun media(app: JarvisApp, titreOuId: String): JSONObject {
         val t = titreOuId.trim()
+        if (t.isBlank()) throw IllegalStateException("Précise le titre du film ou de la série.")
         if (t.matches(Regex("\\d+"))) return metadata(app, t)
-        val items = rechercher(app, t).filter { it.optString("type") in setOf("movie", "show", "episode", "season", "artist", "album", "track", "collection") }
-        return items.firstOrNull { it.optString("title").equals(t, true) } ?: items.firstOrNull()
-            ?: throw IllegalStateException("Aucun média Plex trouvé pour « $t ».")
+        val r = trouver(app, t)
+        return r.meilleur ?: throw IllegalStateException(introuvable(app, t, r.proches))
+    }
+
+    /** Message clair quand un titre n'est pas trouvé : titres proches, ou bibliothèques du serveur joint. */
+    fun introuvable(app: JarvisApp, t: String, proches: List<JSONObject>): String {
+        if (proches.isNotEmpty()) return "Je ne trouve pas « $t » dans Plex. Le plus proche : ${proches.joinToString(", ") { "« ${titre(it)} »" }}."
+        val nom = runCatching { serveur(app).optString("friendlyName") }.getOrDefault("")
+        val biblio = runCatching { sections(app) }.getOrDefault(emptyList())
+        return if (biblio.isEmpty()) "Je ne trouve pas « $t » : le serveur Plex joint${if (nom.isNotBlank()) " (« $nom »)" else ""} n'a aucune bibliothèque visible — ce n'est sans doute pas le bon serveur, ou le jeton n'y donne pas accès (${runCatching { chemin(app) }.getOrDefault("adresse inconnue")})."
+            else "Je ne trouve pas « $t » dans Plex${if (nom.isNotBlank()) " (serveur « $nom »)" else ""}. Bibliothèques : ${biblio.joinToString(", ") { it.optString("title") }}."
     }
 
     fun machineId(app: JarvisApp) = serveur(app).optString("machineIdentifier").ifBlank { throw IllegalStateException("Identifiant du serveur Plex introuvable.") }
@@ -254,9 +379,15 @@ object Plex {
             else -> emptyList()
         }.sortedByDescending { it.enLigne }
         if (genre.size == 1 || (genre.isNotEmpty() && genre.count { it.enLigne } == 1)) return genre.first()
-        if (n.isBlank() && tous.count { it.enLigne } == 1) return tous.first { it.enLigne }
+        if (n.isBlank()) {
+            // Aucun lecteur précisé : le seul en ligne, sinon celui qui lit déjà, sinon la seule télé en ligne.
+            tous.filter { it.enLigne }.singleOrNull()?.let { return it }
+            lecteurEnLecture(app)?.let { p -> return tous.firstOrNull { it.id == p.id } ?: p }
+            tous.filter { it.enLigne && Regex("tv|tvos|webos|tizen|roku|shield|bravia|fire|android tv|smart", RegexOption.IGNORE_CASE).containsMatchIn(norm(it)) }.singleOrNull()?.let { return it }
+        }
         throw IllegalStateException(
             (if (genre.size > 1) "Plusieurs lecteurs correspondent à « $nom » : ${genre.joinToString { it.libelle }}. Précise lequel (ou donne-lui un nom avec plex_appareils action=nommer)."
+            else if (n.isBlank()) "Sur quel lecteur Plex ? (ex. « lance … sur la télé du salon »)."
             else "Lecteur Plex « $nom » introuvable.") +
                 (if (tous.isNotEmpty()) " Lecteurs connus : ${tous.joinToString { it.libelle + if (it.enLigne) "" else " (hors ligne)" }}." else " Aucun lecteur visible.") +
                 " Sur la télé / l'autre téléphone, l'appli Plex doit être ouverte, connectée au même compte, avec « Annoncer comme lecteur » (Réglages Plex › Avancé) activé.")
@@ -380,17 +511,58 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
                 else -> null
             }
             if (cmd != null && (plex || ECRAN.containsMatchIn(n))) return "plex_controle" to JSONObject().put("commande", cmd).put("appareil", if (ECRAN.containsMatchIn(n) || appareil.isNotBlank()) appareil else "")
-            // Lancement : le titre est pris dans le texte d'origine (accents, majuscules) pour la recherche Plex.
-            // Sans le mot film / série / Plex, seulement « … sur la télé » : le titre sera vérifié dans la bibliothèque.
+            // Lancement : le verbe ouvre la phrase (« je regarde un film ce soir, mets le mode cinéma » n'est pas une commande Plex).
+            // Le titre est pris dans le texte d'origine (accents, majuscules) pour la recherche Plex.
             val ecran = ECRAN.containsMatchIn(n)
             if (!plex && !ecran) return null
             if (Regex("\\b(si|est ce que|existe|disponible|dispo|dans plex|dans ma bibliotheque|ai je|j ai|combien|quels?|quelles?|liste|cherche|trouve|recherche)\\b").containsMatchIn(n)) return null
-            val o = texte.trim().replace(Regex("[?!.]+$"), "")
-            val m = Regex("(?i)(?:^|\\s)(?:lance[rz]?|mets?|mettre|joue[rz]?|regarde[rz]?|d[ée]marre[rz]?|passe[rz]?)(?:[- ]moi)?\\s+" +
-                "(?:(?:le|un) film\\s+|la s[ée]rie\\s+|l.[ée]pisode\\s+|le prochain [ée]pisode de\\s+|la suite de\\s+|sur plex\\s+)?(.+?)(?:\\s+sur\\s+(?:plex\\s+sur\\s+)?(.+))?$").find(o) ?: return null
-            val titre = m.groupValues[1].trim().removePrefix("le film ").removePrefix("la série ").trim()
-            if (titre.length < 2 || Regex("(?i)^(un film|le film|la s[ée]rie|plex|quelque chose)$").matches(titre)) return null
-            return "plex_lancer" to JSONObject().put("titre", titre).put("appareil", m.groupValues[2].trim()).apply { if (!plex) put("verifier", "oui") }
+            if (!VERBE.containsMatchIn(n)) return null
+            val o = texte.trim().replace(Regex("[?!.]+$"), "").replace(Regex("(?i)[,\\s]+(?:s['’ ]il te pla[iî]t|stp|merci|jarvis|please)\\s*$"), "")
+            val m = Regex("(?i)(?:^|\\s)(?:lance[rz]?|mets?|mettre|joue[rz]?|regarde[rz]?|d[ée]marre[rz]?|passe[rz]?)(?:[- ](?:moi|nous))?\\s+" +
+                "((?:le|un) film\\s+|la s[ée]rie\\s+|le dessin anim[ée]\\s+|le documentaire\\s+|sur plex\\s+)?(.+?)(?:\\s+sur\\s+(?:plex\\s+sur\\s+)?(.+))?$").find(o) ?: return null
+            val c = cible(m.groupValues[2].trim())
+            val titre = c.titre
+            if (titre.length < 2 || Regex("(?i)^(un film|le film|la s[ée]rie|une s[ée]rie|plex|quelque chose|sur|en|au|à|a|dans)(\\s|$)").containsMatchIn(titre)) return null
+            val explicite = m.groupValues[1].isNotBlank() || c.saison != null || c.episode != null || Regex("\\bplex\\b").containsMatchIn(n)
+            if (!explicite && PAS_TITRE.containsMatchIn(fr.dd.jarvis.societe.core.normaliser(titre))) return null
+            val lecteur = m.groupValues[3].trim().let { if (fr.dd.jarvis.societe.core.normaliser(it) == "plex") "" else it }
+            return "plex_lancer" to JSONObject().put("titre", titre).put("appareil", lecteur).apply {
+                c.saison?.let { put("saison", it.toString()) }
+                c.episode?.let { put("episode", it) }
+                if (!explicite) put("verifier", "oui")
+            }
+        }
+
+        private val VERBE = Regex("^(?:(?:je (?:veux|voudrais|souhaite|aimerais)|j aimerais|on (?:va|peut|pourrait)|on|tu peux|peux tu|pourrais tu|veux tu|voudrais tu)\\s+)?" +
+            "(?:(?:me|nous)\\s+)?(?:lance[rz]?|mets?|mettre|joue[rz]?|regarde[rz]?|demarre[rz]?|passe[rz]?)\\b")
+        /** Mots qui montrent qu'une phrase « mets … » vise autre chose qu'un titre (rappel, mode, lumière, heure…). */
+        private val PAS_TITRE = Regex("\\b(rappels?|rappelle|alarmes?|reveils?|minuteurs?|timer|mode|lumieres?|lampes?|chauffage|poeles?|volume|musique|meteo|rendez vous|rdv|liste|notes?|messages?|sms|mails?|appels?|demain|ce soir|tout a l heure|apres midi|ce matin|heures?|minutes?|\\d{1,2} ?h(?: ?\\d{2})?)\\b")
+
+        private const val NB = "(\\d+|une?|premier|premiere|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|onze|douze|treize|quatorze|quinze|seize|vingt)"
+        private val NOMBRES = mapOf("un" to 1, "une" to 1, "premier" to 1, "premiere" to 1, "deux" to 2, "trois" to 3, "quatre" to 4, "cinq" to 5, "six" to 6, "sept" to 7,
+            "huit" to 8, "neuf" to 9, "dix" to 10, "onze" to 11, "douze" to 12, "treize" to 13, "quatorze" to 14, "quinze" to 15, "seize" to 16, "vingt" to 20)
+        private fun nb(s: String): Int? = s.trim().toIntOrNull() ?: NOMBRES[fr.dd.jarvis.societe.core.normaliser(s)]
+
+        /** Titre demandé et épisode visé : « Lupin saison 2 épisode 3 », « l'épisode 3 de la saison 2 de Lupin », « le dernier épisode de X »… */
+        internal data class Cible(val titre: String, val saison: Int?, val episode: String?)
+
+        internal fun cible(brut: String): Cible {
+            val t = brut.trim().replace('’', '\'')
+            val DE = "\\s+(?:de\\s+(?:la\\s+s[ée]rie\\s+)?|d'\\s*)"
+            val EP = "(?:l'\\s*)?[ée]pisodes?"
+            fun nettoie(x: String) = x.trim().removePrefix("la série ").removePrefix("la serie ").removePrefix("le film ").trim().trim(',').trim()
+            fun r(p: String) = Regex("(?i)$p").find(t)?.groupValues
+            r("^$EP\\s+$NB\\s+(?:de\\s+la\\s+)?saison\\s+$NB$DE(.+)$")?.let { return Cible(nettoie(it[3]), nb(it[2]), nb(it[1])?.toString()) }
+            r("^(?:la\\s+)?saison\\s+$NB(?:\\s*,?\\s*$EP\\s+$NB)?$DE(.+)$")?.let { return Cible(nettoie(it[3]), nb(it[1]), it[2].takeIf { e -> e.isNotBlank() }?.let { e -> nb(e)?.toString() }) }
+            r("^(?:le\\s+)?dernier\\s+[ée]pisode(?:\\s+de\\s+la\\s+saison\\s+$NB)?$DE(.+)$")?.let { return Cible(nettoie(it[2]), it[1].takeIf { x -> x.isNotBlank() }?.let { x -> nb(x) }, "dernier") }
+            r("^(?:le\\s+)?premier\\s+[ée]pisode$DE(.+)$")?.let { return Cible(nettoie(it[1]), 1, "1") }
+            r("^(?:un\\s+[ée]pisode|le\\s+prochain\\s+[ée]pisode|l'\\s*[ée]pisode\\s+suivant|la\\s+suite|un\\s+nouvel\\s+[ée]pisode)$DE(.+)$")?.let { return Cible(nettoie(it[1]), null, "") }
+            r("^$EP\\s+$NB$DE(.+)$")?.let { return Cible(nettoie(it[2]), null, nb(it[1])?.toString()) }
+            r("^(.+?)\\s*,?\\s+saison\\s+$NB(?:\\s*,?\\s*$EP\\s+$NB)?$")?.let { return Cible(nettoie(it[1]), nb(it[2]), it[3].takeIf { e -> e.isNotBlank() }?.let { e -> nb(e)?.toString() }) }
+            r("^(.+?)\\s+s(\\d{1,2})\\s*e(\\d{1,3})$")?.let { return Cible(nettoie(it[1]), it[2].toInt(), it[3].toInt().toString()) }
+            r("^(.+?)\\s*,?\\s+$EP\\s+$NB$")?.let { return Cible(nettoie(it[1]), null, nb(it[2])?.toString()) }
+            r("^(.+?)\\s*,?\\s+(?:le\\s+)?dernier\\s+[ée]pisode$")?.let { return Cible(nettoie(it[1]), null, "dernier") }
+            return Cible(nettoie(t), null, null)
         }
     }
 
@@ -407,7 +579,7 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
             mapOf("action" to prop("lister (défaut) | nommer"), "appareil" to prop("nommer : lecteur actuel (nom, produit…)."), "nom" to prop("nommer : nom à lui donner."))),
         tool("plex_lancer", "Plex : lance n'importe quel film, série (épisode précis, ou le prochain non vu) ou musique de la bibliothèque sur N'IMPORTE QUEL lecteur — télé, téléphone (« ce téléphone » = celui-ci), téléphone d'un proche, ordinateur… — à la maison comme à distance ; reprend là où la lecture s'était arrêtée. Demande confirmation.",
             mapOf("titre" to prop("Titre du film, de la série ou de la musique (ou identifiant)."), "appareil" to prop("Lecteur : son nom, un nom donné (« télé du salon »), un genre (télé, téléphone, ordinateur) ou « ce téléphone »."),
-                "saison" to prop("Série : numéro de saison (optionnel)."), "episode" to prop("Série : numéro d'épisode (optionnel ; sans saison ni épisode = prochain épisode non vu)."),
+                "saison" to prop("Série : numéro de saison (optionnel)."), "episode" to prop("Série : numéro d'épisode, ou « dernier » pour le plus récent (optionnel ; sans saison ni épisode = prochain épisode non vu)."),
                 "depuis_le_debut" to prop("« oui » pour ne pas reprendre la lecture en cours.")), listOf("titre", "appareil")),
         tool("plex_bibliotheques", "Plex : bibliothèques du serveur — lister (avec nombre d'éléments) | scanner (rechercher les nouveaux fichiers, une bibliothèque ou toutes) | vider_corbeille | analyser.",
             mapOf("action" to prop("lister | scanner | vider_corbeille | analyser"), "bibliotheque" to prop("Nom de la bibliothèque (Films, Séries…) ; vide = toutes.")), listOf("action")),
@@ -449,16 +621,18 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
         return "- **${Plex.titre(m)}** · ${m.optString("type")}" + (m.optLong("duration").takeIf { it > 0 }?.let { " · ${Plex.duree(it)}" }.orEmpty()) + vu + " · ID ${m.optString("ratingKey")}"
     }
 
-    /** Épisode d'une série : précis (saison / épisode) ou le prochain non vu. */
-    private fun episode(serie: JSONObject, saison: Int?, ep: Int?): JSONObject {
+    /** Épisode d'une série : précis (saison / épisode), le dernier sorti, ou le prochain non vu. */
+    private fun episode(serie: JSONObject, saison: Int?, ep: Int?, dernier: Boolean = false): JSONObject {
         val tous = Plex.liste(Plex.mc(app, "/library/metadata/${serie.optString("ratingKey")}/allLeaves"))
         if (tous.isEmpty()) throw IllegalStateException("Aucun épisode pour « ${serie.optString("title")} ».")
         return when {
+            dernier -> tous.filter { saison == null || it.optInt("parentIndex") == saison }.maxWithOrNull(compareBy({ it.optInt("parentIndex") }, { it.optInt("index") }))
             saison != null && ep != null -> tous.firstOrNull { it.optInt("parentIndex") == saison && it.optInt("index") == ep }
             saison != null -> tous.firstOrNull { it.optInt("parentIndex") == saison && it.optInt("viewCount") == 0 } ?: tous.firstOrNull { it.optInt("parentIndex") == saison }
-            ep != null -> tous.firstOrNull { it.optInt("index") == ep && it.optInt("viewCount") == 0 }
+            ep != null -> tous.firstOrNull { it.optInt("index") == ep && it.optInt("viewCount") == 0 } ?: tous.firstOrNull { it.optInt("index") == ep }
             else -> tous.firstOrNull { it.optLong("viewOffset") > 0 } ?: tous.firstOrNull { it.optInt("viewCount") == 0 } ?: tous.first()
-        } ?: throw IllegalStateException("Épisode introuvable (saison ${saison ?: "?"}, épisode ${ep ?: "?"}).")
+        } ?: throw IllegalStateException("Épisode introuvable pour « ${serie.optString("title")} » (saison ${saison ?: "?"}, épisode ${ep ?: "?"}) : " +
+            "${tous.map { it.optInt("parentIndex") }.distinct().size} saison(s), ${tous.size} épisodes dans Plex.")
     }
 
     suspend fun execute(name: String, a: JSONObject): ToolResult = withContextIo {
@@ -492,7 +666,8 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
                     var media = Plex.media(app, a.optString("titre"))
                     if (media.optString("type") in setOf("show", "season")) {
                         val serie = if (media.optString("type") == "season") Plex.metadata(app, media.optString("parentRatingKey")) else media
-                        media = episode(serie, a.optString("saison").toIntOrNull() ?: (if (media.optString("type") == "season") media.optInt("index") else null), a.optString("episode").toIntOrNull())
+                        media = episode(serie, a.optString("saison").toIntOrNull() ?: (if (media.optString("type") == "season") media.optInt("index") else null), a.optString("episode").toIntOrNull(),
+                            dernier = a.optString("episode").trim().lowercase().startsWith("dernier"))
                     } else if (media.optString("type") == "movie" || media.optString("type") == "episode") media = Plex.metadata(app, media.optString("ratingKey"))
                     val l = Plex.lecteur(app, a.optString("appareil").trim())
                     val offset = if (a.optString("depuis_le_debut").lowercase() in setOf("oui", "true", "1")) 0L else media.optLong("viewOffset")

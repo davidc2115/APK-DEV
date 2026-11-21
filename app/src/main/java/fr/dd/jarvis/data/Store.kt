@@ -680,6 +680,16 @@ class Store(context: Context) {
     /** Analyse des SMS et mails reçus (colis, factures, devis, rendez-vous) et notification des rendez-vous / factures. */
     val courrierAnalyse = BPref("courrierAnalyse", true)
     val courrierNotif = BPref("courrierNotif", true)
+    /** Anniversaires (contacts + ceux dits à JARVIS) : notification le jour même et la veille. */
+    val anniversairesOn = BPref("anniversairesOn", true)
+    /** Mode rendez-vous : Ne pas déranger pendant les rendez-vous de l'agenda (clients ou tous), retour du son à la fin. */
+    val silenceRdvOn = BPref("silenceRdvOn", false)
+    val silenceRdvTous = BPref("silenceRdvTous", false)
+    /** Réponse automatique par SMS aux contacts dont l'appel est manqué pendant un rendez-vous ({fin} = heure de fin). */
+    val silenceRdvSms = BPref("silenceRdvSms", false)
+    val silenceRdvMessage = SPref("silenceRdvMessage", "Je suis en rendez-vous, je te rappelle dès que possible (vers {fin}).")
+    /** État du mode rendez-vous en cours (JSON : événement, fin, appels manqués, SMS envoyés). */
+    val silenceRdvEtat = SPref("silenceRdvEtat", "")
     val briefingSoirHour = IPref("briefingSoirHour", 20)
     val briefingSoirMinute = IPref("briefingSoirMinute", 0)
     val lastBriefingSoir = SPref("lastBriefingSoir", "")

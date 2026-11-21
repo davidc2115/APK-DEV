@@ -49,6 +49,8 @@ class VeilleWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         runCatching { Depart.meteo(app) }
         runCatching { fr.dd.jarvis.device.Routines.surveillerLieu(app) }
         runCatching { fr.dd.jarvis.device.RappelsLieu.verifier(app) }
+        runCatching { fr.dd.jarvis.device.SilenceRdv.planifier(app) }
+        runCatching { fr.dd.jarvis.device.Anniversaires.verifier(app) }
         runCatching { fr.dd.jarvis.device.Routines.horaires(app) }
         runCatching { fr.dd.jarvis.securite.AntiVol.verifierSim(app) }
         runCatching { Journal.siLHeure(app) }

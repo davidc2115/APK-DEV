@@ -158,6 +158,9 @@ class JarvisNotificationListener : NotificationListenerService() {
             add(Item(sbn.packageName, label, titre, texte, sbn.postTime))
             sauver(applicationContext)
             val mail = estMail(sbn.packageName)
+            // Mode rendez-vous : appel manqué noté (et SMS « je te rappelle » aux contacts si l'option est active).
+            if (!appel && fr.dd.jarvis.device.SilenceRdv.estAppelManque(sbn.packageName, n.category, titre, texte))
+                (applicationContext as? fr.dd.jarvis.JarvisApp)?.let { a -> val t = titre; fond.execute { runCatching { fr.dd.jarvis.device.SilenceRdv.appelManque(a, t, texte) } } }
             // SMS et mails : colis, factures, devis, rendez-vous repérés (en arrière-plan, sans IA).
             if ((message || mail) && !appel) runCatching { fr.dd.jarvis.device.Courrier.recu(applicationContext as fr.dd.jarvis.JarvisApp, label, titre, texte, sbn.postTime) }
             // Jarvis ne republie plus de notification pour les SMS, mails et appels : celles d'Android suffisent.

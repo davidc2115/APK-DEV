@@ -413,6 +413,10 @@ class ToolBox(
         put(tool("rappel_lieu", "Rappel À L'ARRIVÉE (ou au départ) d'un lieu : notification quand l'utilisateur arrive (ou part) — maison, travail, « ici », client de la Société ou adresse. Pour un rappel à une heure, utilise rappel_creer.",
             mapOf("texte" to prop("Ce qu'il faut rappeler."), "lieu" to prop("maison | travail | ici | nom d'un client | adresse"),
                 "depart" to prop("oui = au départ du lieu (défaut : à l'arrivée)"), "chaque_fois" to prop("oui = à chaque passage (défaut : une fois)")), listOf("texte", "lieu")))
+        put(tool("anniversaires", "Anniversaires (contacts Android + ceux dits à JARVIS) : lister (prochains, sur N jours) | de (date d'une personne) | ajouter (nom, date JJ/MM ou JJ/MM/AAAA) | supprimer (nom). Ils sont annoncés au point du matin, la veille au soir et par notification.",
+            mapOf("action" to prop("lister (défaut) | de | ajouter | supprimer"), "nom" to prop("Personne."), "date" to prop("ajouter : JJ/MM ou JJ/MM/AAAA."), "jours" to prop("lister : nombre de jours (défaut 60).")))) 
+        put(tool("mode_rendez_vous", "Mode rendez-vous : Ne pas déranger automatique pendant les rendez-vous de l'agenda (clients, ou tous), son rétabli à la fin, liste des appels manqués ; option SMS automatique « je te rappelle » aux contacts qui appellent. Actions : etat | activer (tous=oui pour tous les rendez-vous) | desactiver | sms_on | sms_off | message (texte, {fin} = heure de fin).",
+            mapOf("action" to prop("etat | activer | desactiver | sms_on | sms_off | message"), "tous" to prop("activer : oui = tous les rendez-vous, non = seulement ceux des clients."), "texte" to prop("message : texte du SMS automatique."))))
         put(tool("courrier", "Ce que JARVIS a repéré dans les SMS et mails reçus : colis (transporteur, numéro, état, code de retrait, lien de suivi), factures et devis reçus (émetteur, montant, échéance), rendez-vous détectés. Actions : colis | a_traiter (défaut) | traiter (id) | supprimer (id) | rdv_agenda (id facultatif : ajoute le rendez-vous détecté à l'agenda) | liste (tout, avec les id).",
             mapOf("action" to prop("colis | a_traiter | liste | traiter | supprimer | rdv_agenda"), "id" to prop("Identifiant de l'élément (action liste)."))))
         put(tool("stationnement", "Place de stationnement de la voiture : noter la position actuelle (avec une précision : niveau, place…), dire où est garée la voiture (adresse, heure, distance, lien), ou l'oublier. Retenue aussi automatiquement à la fin d'Android Auto.",
@@ -1184,6 +1188,33 @@ class ToolBox(
                     "\n### ${if (d.creation[x.id] == true) "✅" else "⬜"} ${x.titre}\n" + x.detail.joinToString("\n") { "- $it" } + if (x.lien.isNotBlank()) "\n[${x.lien.removePrefix("https://")}](${x.lien})" else ""
                 } + "\n\n(Onglet Société › Création pour cocher les étapes et vérifier le SIRET.)", direct = true)
             }
+        }
+        "anniversaires" -> {
+            val A = fr.dd.jarvis.device.Anniversaires
+            val nom = a.optString("nom").trim()
+            val i: fr.dd.jarvis.device.Anniversaires.Intention = when (a.optString("action").trim().lowercase()) {
+                "de" -> if (nom.isBlank()) return ToolResult("Indique « nom ».") else fr.dd.jarvis.device.Anniversaires.Intention.DeQui(nom)
+                "supprimer" -> if (nom.isBlank()) return ToolResult("Indique « nom ».") else fr.dd.jarvis.device.Anniversaires.Intention.Supprimer(nom)
+                "ajouter" -> {
+                    val d = A.parser(a.optString("date")) ?: return ToolResult("Date invalide : JJ/MM ou JJ/MM/AAAA.")
+                    if (nom.isBlank()) return ToolResult("Indique « nom ».")
+                    fr.dd.jarvis.device.Anniversaires.Intention.Ajouter(nom, d.second, d.third, d.first)
+                }
+                else -> fr.dd.jarvis.device.Anniversaires.Intention.Lister(a.optString("jours").toIntOrNull()?.coerceIn(0, 366) ?: 60)
+            }
+            ToolResult(A.executer(app, i), direct = true)
+        }
+        "mode_rendez_vous" -> {
+            val S = fr.dd.jarvis.device.SilenceRdv
+            val i: fr.dd.jarvis.device.SilenceRdv.Intention = when (a.optString("action").trim().lowercase()) {
+                "activer" -> fr.dd.jarvis.device.SilenceRdv.Intention.Activer(a.optString("tous").trim().lowercase().let { if (it in setOf("oui", "true", "1")) true else if (it in setOf("non", "false", "0")) false else null })
+                "desactiver" -> fr.dd.jarvis.device.SilenceRdv.Intention.Desactiver
+                "sms_on" -> fr.dd.jarvis.device.SilenceRdv.Intention.Sms(true)
+                "sms_off" -> fr.dd.jarvis.device.SilenceRdv.Intention.Sms(false)
+                "message" -> a.optString("texte").trim().takeIf { it.length >= 5 }?.let { fr.dd.jarvis.device.SilenceRdv.Intention.Message(it) } ?: return ToolResult("Indique « texte ».")
+                else -> fr.dd.jarvis.device.SilenceRdv.Intention.Etat
+            }
+            ToolResult(S.executer(app, i), direct = true)
         }
         "rappel_lieu" -> ToolResult(fr.dd.jarvis.device.RappelsLieu.creer(app, fr.dd.jarvis.device.RappelsLieu.Demande(a.optString("texte").trim(), a.optString("lieu").trim(),
             a.optString("depart").trim().lowercase() in setOf("oui", "true", "1"), a.optString("chaque_fois").trim().lowercase() in setOf("oui", "true", "1"))))
@@ -2334,6 +2365,12 @@ class ToolBox(
         val colis = runCatching { fr.dd.jarvis.device.Courrier.resumeColis(app) }.getOrDefault("")
         val aTraiter = runCatching { fr.dd.jarvis.device.Courrier.resumeATraiter(app) }.getOrDefault("")
         val courses = runCatching { fr.dd.jarvis.device.Listes.charger(app)["Courses"]?.count { !it.coche } ?: 0 }.getOrDefault(0)
+        val anniv = runCatching { fr.dd.jarvis.device.Anniversaires.pourBriefing(app, soir, aujourdhui) }.getOrNull().orEmpty()
+        val modeRdv = if (store.silenceRdvOn.value) runCatching {
+            val j = if (soir) demain else aujourdhui
+            val l = fr.dd.jarvis.device.SilenceRdv.rdvs(app, j.atStartOfDay(zone).toInstant().toEpochMilli(), j.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli())
+            if (l.isEmpty()) "" else "${l.size} rendez-vous en silence automatique (Ne pas déranger pendant le rendez-vous)."
+        }.getOrDefault("") else ""
         val meteo = runCatching { kotlinx.coroutines.withTimeoutOrNull(6_000) { fr.dd.jarvis.ai.Meteo.get(app, "", if (soir) 2 else 1) } }.getOrNull().orEmpty().ifBlank { "Météo indisponible." }
         val texte = if (!soir) {
             val planning = agenda(aujourdhui, "Aucun événement aujourd'hui.")
@@ -2345,7 +2382,8 @@ class ToolBox(
             val user = "Utilisateur : ${store.userName.value.ifBlank { "l'utilisateur" }}\nMaintenant : ${Prompts.now()}\n\n" +
                 "=== AGENDA DU JOUR ===\n$planning\n\n=== MÉTÉO DU JOUR ===\n$meteo\n\n=== RAPPELS DU JOUR ===\n${rappelsDu(aujourdhui)}\n\n=== TÂCHES PERSONNELLES ===\n$taches\n\n" +
                 "=== MAILS NON LUS ===\n$mails\n\n=== FACTURES IMPAYÉES ===\n${impayes.ifBlank { "Aucune." }}\n\n=== COLIS ===\n${colis.ifBlank { "Aucun colis suivi." }}\n\n" +
-                "=== DOCUMENTS REÇUS À TRAITER ===\n${aTraiter.ifBlank { "Aucun." }}"
+                "=== DOCUMENTS REÇUS À TRAITER ===\n${aTraiter.ifBlank { "Aucun." }}\n\n=== ANNIVERSAIRES ===\n${anniv.ifBlank { "Aucun." }}" +
+                (if (modeRdv.isNotBlank()) "\n\n=== MODE RENDEZ-VOUS ===\n$modeRdv" else "")
             llm.agent(Prompts.briefing() + app.memo.pour("briefing"), user)
         } else {
             val bilan = agenda(aujourdhui, "Aucun événement aujourd'hui.")
@@ -2369,7 +2407,8 @@ class ToolBox(
                 "=== AGENDA D'AUJOURD'HUI (bilan) ===\n$bilan\n\n=== RAPPELS D'AUJOURD'HUI NON FAITS ===\n$nonFaits\n\n=== AGENDA DE DEMAIN ===\n$planningDemain\n\n" +
                 "=== DÉPART DEMAIN ===\n$depart\n\n=== MÉTÉO (aujourd'hui puis demain) ===\n$meteo\n\n=== RAPPELS DE DEMAIN ===\n${rappelsDu(demain)}\n\n" +
                 "=== TÂCHES ===\n$taches\n\n=== FACTURES IMPAYÉES ===\n${impayes.ifBlank { "Aucune." }}\n\n=== COLIS ===\n${colis.ifBlank { "Aucun colis suivi." }}\n\n" +
-                "=== DOCUMENTS REÇUS À TRAITER ===\n${aTraiter.ifBlank { "Aucun." }}\n\n=== LISTE DE COURSES ===\n${if (courses > 0) "$courses article(s) à acheter." else "Vide."}\n\n=== MAILS ===\n${nonLus.ifBlank { "—" }}"
+                "=== DOCUMENTS REÇUS À TRAITER ===\n${aTraiter.ifBlank { "Aucun." }}\n\n=== LISTE DE COURSES ===\n${if (courses > 0) "$courses article(s) à acheter." else "Vide."}\n\n=== MAILS ===\n${nonLus.ifBlank { "—" }}\n\n=== ANNIVERSAIRES DE DEMAIN ===\n${anniv.ifBlank { "Aucun." }}" +
+                (if (modeRdv.isNotBlank()) "\n\n=== MODE RENDEZ-VOUS DEMAIN ===\n$modeRdv" else "")
             llm.agent(Prompts.briefingSoir() + app.memo.pour("briefing"), user)
         }
         // Archive chaque point dans son dossier du coffre Obsidian (un fichier par jour).
