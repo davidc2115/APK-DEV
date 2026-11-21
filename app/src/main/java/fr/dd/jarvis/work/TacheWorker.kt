@@ -42,7 +42,7 @@ class TacheWorker(private val ctx: Context, params: WorkerParameters) : Coroutin
         val rep = try {
             // Confirmations « normales » acceptées (la demande vient de l'utilisateur) ; les confirmations forcées (SMS, appels, suppressions) sont refusées.
             Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }
-                .reply(listOf(ChatMsg(true, demande))) { etape ->
+                .reply(listOf(ChatMsg(true, demande)), apprendre = false) { etape ->
                     // Progression visible dans la notification (au plus une mise à jour par seconde).
                     val t = System.currentTimeMillis()
                     if (t - derniere > 1000) { derniere = t; SuiviTaches.enCours(ctx, id, titre, etape.take(200)) }

@@ -1,6 +1,7 @@
 package fr.dd.jarvis.ai
 
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -30,9 +31,48 @@ class Brain(
     /** Consigne enregistrée pendant cette demande (confirmée à la fin de la réponse). */
     @Volatile private var consigneRetenue: ConsignesExplicites.Consigne? = null
 
-    private fun consigneExigeUneSuite(texte: String): Boolean = runCatching { Restitution.exigeUneSuite(app.memo.all(), texte) }.getOrDefault(false)
+    /** La réponse directe vient d'une LECTURE (état, liste, valeurs) : on peut la refaire sans rien exécuter deux fois. */
+    @Volatile private var sortieLecture = false
+    /** Refaire la demande par le cerveau (sans réflexe ni résultat brut), pour appliquer une consigne. */
+    @Volatile private var forcerCerveau = false
+    /** Consigne apprise en arrière-plan pendant cette demande / le modèle a lui-même appelé memoire_ajouter. */
+    @Volatile private var consigneApprise: ConsignesExplicites.Consigne? = null
+    @Volatile private var memoireAjouteeCeTour = false
+    private val fond = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
-    suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onTexte: ((String) -> Unit)? = null, onStatus: (String) -> Unit): String {
+    private fun consigneExigeUneSuite(texte: String): Boolean = forcerCerveau || runCatching { Restitution.exigeUneSuite(app.memo.all(), texte) }.getOrDefault(false)
+
+    private fun estLecture(outil: String?) = outil != null && (outil in LECTURES || outil in LECTURES_DIRECTES || outil == "ha_entites")
+
+    /**
+     * Consigne que les règles fixes n'ont pas reconnue (formulation libre, correction « je t'avais demandé un tableau ») :
+     * analyse IA en arrière-plan, la réponse n'attend pas. Résultat : la consigne enregistrée, ou null.
+     */
+    private fun lancerApprentissage(history: List<ChatMsg>): kotlinx.coroutines.Deferred<ConsignesExplicites.Consigne?>? {
+        val texte = history.lastOrNull()?.takeIf { it.fromUser }?.text ?: return null
+        if (ConsignesExplicites.detecter(texte) != null || !ConsignesIA.candidat(texte)) return null
+        val avant = history.dropLast(1)
+        val reponsePrecedente = avant.lastOrNull { !it.fromUser }?.text
+        val demandePrecedente = avant.lastOrNull { it.fromUser }?.text
+        return fond.async {
+            val e = runCatching { ConsignesIA.extraire(app, texte, demandePrecedente, reponsePrecedente) }.getOrNull() ?: return@async null
+            // Le modèle l'a déjà enregistrée lui-même pendant ce tour : pas de doublon.
+            if (memoireAjouteeCeTour) return@async null
+            val r = runCatching { app.memo.ajouterConsigne(e.rubrique, e.texte) }.getOrNull() ?: return@async null
+            fr.dd.jarvis.voice.JournalVoix.noter("brain", "consigne apprise (IA) [${e.rubrique}] : ${e.texte.take(80)} ($r)")
+            if (r == "déjà enregistrée" || r == "rien à enregistrer") null
+            else ConsignesExplicites.Consigne(e.rubrique, e.texte).also { consigneApprise = it; ConsignesExplicites.derniere = it.rubrique to it.texte }
+        }
+    }
+
+    private fun confirmation(c: ConsignesExplicites.Consigne): String =
+        (if (c.ponctuelle) "📌 Présentation retenue : je la reprendrai à chaque demande de ce type"
+        else "📌 Consigne retenue (${c.rubrique}) : « ${c.texte.take(180)} » — je l'appliquerai à chaque fois") + " (« oublie cette consigne » pour l'annuler)."
+
+    /** Faux pour un message que l'utilisateur n'a pas écrit lui-même (routine, automatisme) : ses mots ne sont pas des consignes. */
+    @Volatile private var captureConsignes = true
+
+    suspend fun reply(history: List<ChatMsg>, pourHermes: Boolean = false, onTexte: ((String) -> Unit)? = null, apprendre: Boolean = true, onStatus: (String) -> Unit): String {
         // L'avatar montre que JARVIS réfléchit tant que la réponse se prépare.
         val debutTotal = System.currentTimeMillis()
         fr.dd.jarvis.voice.Presence.debutReflexion()
@@ -42,18 +82,41 @@ class Brain(
         fr.dd.jarvis.voice.JournalVoix.noter("brain", "vérification reprise en ${System.currentTimeMillis() - debutReprise} ms")
         try {
             sortieDirecte = false
+            sortieLecture = false
+            forcerCerveau = false
             consigneRetenue = null
+            consigneApprise = null
+            memoireAjouteeCeTour = false
+            captureConsignes = apprendre && !pourHermes
+            val apprentissage = if (!captureConsignes) null else runCatching { lancerApprentissage(h) }.getOrNull()
             val brut = replyInterne(h, pourHermes, onTexte, onStatus)
             // Réponse rendue sans l'IA (réflexe, résultat d'outil direct) : tes consignes de forme s'y appliquent aussi.
-            val finale = if (pourHermes || !sortieDirecte) brut else {
+            var finale = brut
+            if (!pourHermes && sortieDirecte) {
                 val demande = h.lastOrNull { it.fromUser }?.text.orEmpty()
-                runCatching { Restitution.appliquer(app, demande, brut) }.getOrElse { e -> if (e is kotlinx.coroutines.CancellationException) throw e; brut }
+                val remise = runCatching { Restitution.appliquer(app, demande, brut) }
+                    .getOrElse { e -> if (e is kotlinx.coroutines.CancellationException) throw e; Restitution.Resultat(brut) }
+                finale = remise.texte
+                // Une consigne demande une information que ce résultat brut n'a pas : le cerveau refait la demande (une
+                // lecture seulement — une action n'est jamais exécutée deux fois) en appliquant la consigne.
+                if (remise.incomplet && sortieLecture) {
+                    onStatus("📌 J'applique tes consignes…")
+                    forcerCerveau = true
+                    finale = try { replyInterne(h, pourHermes, onTexte, onStatus) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { finale } finally { forcerCerveau = false }
+                }
             }
+            if (pourHermes) return finale
             // La consigne dite dans cette demande est confirmée : l'utilisateur sait qu'elle est retenue (et comment l'annuler).
-            val c = consigneRetenue?.takeIf { !pourHermes } ?: return finale
+            val c = consigneRetenue ?: apprentissage?.let { a -> kotlinx.coroutines.withTimeoutOrNull(400) { a.await() } }
             consigneRetenue = null
-            return finale.trimEnd() + "\n\n" + (if (c.ponctuelle) "📌 Présentation retenue : je la reprendrai à chaque demande de ce type"
-                else "📌 Consigne retenue (${c.rubrique}) : je l'appliquerai à chaque fois") + " (« oublie cette consigne » pour l'annuler)."
+            if (c != null) return finale.trimEnd() + "\n\n" + confirmation(c)
+            // Analyse encore en cours (réponse très rapide) : la confirmation arrivera juste après, en message séparé.
+            if (apprentissage != null && !apprentissage.isCompleted) fond.launch {
+                val tard = runCatching { apprentissage.await() }.getOrNull() ?: return@launch
+                kotlinx.coroutines.delay(1_500)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { app.chatAjouter(ChatMsg(false, confirmation(tard))) }
+            }
+            return finale
         } finally {
             fr.dd.jarvis.voice.JournalVoix.noter("brain", "temps total cerveau ${System.currentTimeMillis() - debutTotal} ms")
             fr.dd.jarvis.voice.Presence.finReflexion()
@@ -193,12 +256,12 @@ class Brain(
         // Suite qui renvoie à l'échange précédent (« ça », « du coup », « directement »…) : les réflexes qui ne lisent que la
         // dernière phrase la comprendraient de travers ; elle va aux cerveaux, qui ont l'historique et le fil.
         val suite = !pourHermes && FilConversation.renvoie(texteUser) && FilConversation.fil(history)?.let { FilConversation.estSuite(it) } == true
-        fun reflexe(r: String) = r.also { sortieDirecte = true; if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
+        fun reflexe(r: String, lecture: Boolean = false) = r.also { sortieDirecte = true; sortieLecture = lecture; if (!pourHermes) fr.dd.jarvis.hermes.Routeur.derniere = fr.dd.jarvis.hermes.Routeur.Cible.JARVIS }
         /** Réflexe de la maison (Home Assistant) : la suite de la conversation reste aussi à JARVIS. */
-        fun reflexeMaison(r: String) = reflexe(r).also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.noterMaison() }
+        fun reflexeMaison(r: String, lecture: Boolean = false) = reflexe(r, lecture).also { if (!pourHermes) fr.dd.jarvis.hermes.Routeur.noterMaison() }
         // Consigne durable dite explicitement : enregistrée tout de suite (sans dépendre du modèle), puis la phrase suit son
         // cours normal (la réponse la confirme ; une demande jointe est traitée).
-        if (!pourHermes) ConsignesExplicites.detecter(texteUser)?.let { c ->
+        if (!pourHermes && captureConsignes) ConsignesExplicites.detecter(texteUser)?.let { c ->
             runCatching { app.memo.ajouterConsigne(c.rubrique, c.texte) }.onSuccess { r ->
                 fr.dd.jarvis.voice.JournalVoix.noter("brain", "consigne enregistrée [${c.rubrique}] : ${c.texte.take(80)} ($r)")
                 if (r != "déjà enregistrée" && r != "rien à enregistrer") { consigneRetenue = c; ConsignesExplicites.derniere = c.rubrique to c.texte }
@@ -220,13 +283,13 @@ class Brain(
             // complète, tirée du catalogue des capacités (sans IA).
             Capacites.demande(texteUser)?.let { d ->
                 onStatus("🧰 Ce que je sais faire…")
-                return reflexe(Capacites.repondre(app, d, tools.schemaAll()))
+                return reflexe(Capacites.repondre(app, d, tools.schemaAll()), lecture = true)
             }
             // « Quels appareils contrôles-tu ? » : appareils liés à Jarvis, en local et à distance.
             if (Regex("\\b(quels?|quelles?|liste|montre|donne)\\b.{0,30}\\b(appareils?|equipements?|services?)\\b.{0,30}\\b(controles?|pilotes?|geres?|lies?|associes?|relies?)\\b|\\bappareils? (lies|associes|relies) (a|avec) (toi|jarvis)\\b")
                     .containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser)) && !Regex("\\b(box|freebox|wi ?fi|reseau)\\b.{0,20}\\b(connectes?)\\b").containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser))) {
                 onStatus("🔗 Appareils liés…")
-                return reflexe(AppareilsLies.texte(app))
+                return reflexe(AppareilsLies.texte(app), lecture = true)
             }
             // Plusieurs actions simples dans la même phrase (« passe Jarvis en mode économie et le téléphone aussi »,
             // « allume la torche et mets en vibreur ») : toutes exécutées ici, sans IA ni Hermès.
@@ -251,19 +314,19 @@ class Brain(
             // Mails : trier (règle : non lus par défaut ; « tous » pour cette fois), changer la règle, marquer lus / traités.
             MailCommandes.intention(texteUser)?.let { (outil, args) ->
                 onStatus("📧 Mails…")
-                return reflexe(tools.execute(outil, args).text)
+                return reflexe(tools.execute(outil, args).text, lecture = estLecture(outil))
             }
             // Mode sonore du téléphone (ne pas déranger, vibreur, sonnerie + vibreur) : immédiat, sans IA.
             fr.dd.jarvis.device.ModeSonore.intention(texteUser)?.let { mode -> return reflexe(fr.dd.jarvis.device.ModeSonore.appliquer(app, mode)) }
             // « Où est Angeline ? » : position donnée par Home Assistant (person.* / device_tracker.*), jamais par SSH.
             if (PersonneOu.personne(texteUser) != null) {
                 onStatus("📍 Position…")
-                runCatching { PersonneOu.repondre(app, texteUser) }.getOrNull()?.let { return reflexe(it) }
+                runCatching { PersonneOu.repondre(app, texteUser) }.getOrNull()?.let { return reflexe(it, lecture = true) }
             }
             // Annuler / supprimer des factures ou devis (une, plusieurs, toutes), gérer les fiches de paie : même chose.
             runCatching { fr.dd.jarvis.societe.SocieteTools.intentionGestion(app.societe.data, texteUser) }.getOrNull()?.let { (outil, args) ->
                 onStatus("🧾 Société…")
-                return reflexe(tools.execute(outil, args).text)
+                return reflexe(tools.execute(outil, args).text, lecture = estLecture(outil))
             }
             runCatching { fr.dd.jarvis.societe.SocieteTools.intentionDocument(app.societe.data, texteUser) }.getOrNull()?.let { args ->
                 args.optString("question").takeIf { it.isNotBlank() }?.let { return reflexe(it) }
@@ -285,7 +348,7 @@ class Brain(
                 if (ok) {
                     onStatus("🎬 Plex…")
                     args.remove("verifier")
-                    return reflexe(tools.execute(outil, args).text)
+                    return reflexe(tools.execute(outil, args).text, lecture = estLecture(outil))
                 }
             }
             // Sites web : créés, retrouvés, publiés et modifiés par l'outil dédié (jamais « à la main » par une IA).
@@ -330,12 +393,12 @@ class Brain(
             // « Les deux » / « tous » après « quel poêle ? » : la demande précédente, pour TOUS les poêles.
             if (!pourSociete) PoeleDirect.suiteTous(texteUser, history)?.let { d ->
                 onStatus("🔥 Poêles…")
-                runCatching { PoeleDirect.executerLecture(app, d) }.getOrNull()?.let { return reflexeMaison(it) }
+                runCatching { PoeleDirect.executerLecture(app, d) }.getOrNull()?.let { return reflexeMaison(it, lecture = true) }
             }
             // Température / état des poêles : les vraies valeurs (climate), pas la liste des entités « poêle ».
             if (!pourSociete && PoeleDirect.lecture(texteUser) != null) {
                 onStatus("🔥 Poêle…")
-                runCatching { PoeleDirect.executerLecture(app, texteUser) }.getOrNull()?.let { return reflexeMaison(it) }
+                runCatching { PoeleDirect.executerLecture(app, texteUser) }.getOrNull()?.let { return reflexeMaison(it, lecture = true) }
             }
             // « Lance la navigation vers mon (1er) rendez-vous / chez Dupont / de 14 h » : le bon rendez-vous de l'agenda,
             // puis le guidage vers son adresse — jamais seulement le planning.
@@ -366,7 +429,7 @@ class Brain(
             // Actions courantes reconnues sans IA (alarme, minuteur, appel, SMS, appli, météo, planning, rappel…).
             CommandesDirectes.intention(texteUser)?.let { i ->
                 onStatus(i.statut)
-                executerDirecte(i)?.let { return reflexe(it) }
+                executerDirecte(i)?.let { return reflexe(it, lecture = i.local == null && i.appli == null && estLecture(i.outil)) }
             }
             // Poêle : marche / arrêt de l'appareil lui-même (entité climate), jamais un de ses interrupteurs de mode.
             if (!pourSociete && PoeleDirect.demande(texteUser) != null) {
@@ -608,6 +671,7 @@ class Brain(
                 JSONObject().put("role", "assistant").put("content", JSONObject.NULL).put("tool_calls", calls)
             )
             val direct = StringBuilder()
+            var directLecture = true
             // Plusieurs LECTURES demandées d'un coup (état de la télé + du poêle, météo + agenda…) : lancées en même
             // temps au lieu de l'une après l'autre. Dès qu'un appel agit (ou demande une confirmation), tout reste séquentiel.
             val enAvance: Map<Int, ToolResult> = lecturesEnParallele(calls, retires, onStatus)
@@ -629,6 +693,9 @@ class Brain(
                     else if (name in retires) ToolResult(if (name.startsWith("ssh") || name == "serveur_diagnostic") "Pour Home Assistant, utilise l'API (ha_entites, ha_etat, ha_service, ha_config, ha_dashboard, ha_admin), pas le SSH." else "Outil indisponible ici.")
                     else if (name == "ha_service" && PoeleDirect.modeNonDemande(args, texteUser) != null) ToolResult(PoeleDirect.modeNonDemande(args, texteUser)!!)
                     else if (name == "mode_sonore" && PoeleDirect.visePasLeTelephone(texteUser)) ToolResult(PoeleDirect.REFUS_MODE_TELEPHONE)
+                    // Consigne de cette demande déjà enregistrée automatiquement (📌) : pas de doublon dans la mémoire.
+                    else if (name == "memoire_ajouter" && !pourHermes && (consigneRetenue != null || consigneApprise != null) && args.optString("remplacer").trim().lowercase() !in setOf("oui", "true", "1"))
+                        ToolResult("✅ Consigne déjà enregistrée automatiquement pour cette demande (📌) : rien à refaire, confirme-la simplement.")
                     else if (name == SelectionOutils.META) {
                         // Le modèle demande un outil absent de sa liste réduite : on l'ajoute pour les tours suivants.
                         val presents = (0 until schemaEnvoye.length()).map { schemaEnvoye.optJSONObject(it)?.optJSONObject("function")?.optString("name").orEmpty() }.toSet()
@@ -642,7 +709,7 @@ class Brain(
                             else "Outils ajoutés à ta liste (appelle maintenant celui qui convient) :\n" + ajout.joinToString("\n") { o ->
                                 val f = o.getJSONObject("function"); "- ${f.getString("name")} : ${f.optString("description").substringBefore(". ").take(160)}" })
                     }
-                    else tools.execute(name, args)
+                    else tools.execute(name, args).also { if (name == "memoire_ajouter") memoireAjouteeCeTour = true }
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     // Ne jamais convertir une annulation en simple résultat d'outil : cela avalerait
                     // l'annulation structurée et laisserait le service croire que la demande travaille encore.
@@ -660,16 +727,16 @@ class Brain(
                 val finDirecte = res.direct && when (name) {
                     // Liste brute des entités : seulement si l'utilisateur voulait une LISTE ; pour une valeur ou une action,
                     // le modèle lit les vraies valeurs puis répond ; vide, il réessaie.
-                    "ha_entites" -> !res.text.startsWith("Aucune") && !ACTION_DOMOTIQUE.containsMatchIn(texteUser) && listeHaDemandee(texteUser) && !demandeComposee(texteUser)
+                    "ha_entites" -> !forcerCerveau && !res.text.startsWith("Aucune") && !ACTION_DOMOTIQUE.containsMatchIn(texteUser) && listeHaDemandee(texteUser) && !demandeComposee(texteUser)
                     else -> !suiteAttendue(texteUser, name) && !consigneExigeUneSuite(texteUser)
                 }
                 val contenu = if (res.direct && !finDirecte && name !in LECTURES_DIRECTES && name != "ha_entites")
                     res.text.take(11800) + "\n\n[Action déjà faite : ne la refais pas. Fais la suite de la demande, puis réponds en une phrase.]"
                     else res.text.take(12000)
                 messages.put(JSONObject().put("role", "tool").put("tool_call_id", c.getString("id")).put("content", contenu))
-                if (finDirecte) direct.append(res.text).append("\n\n")
+                if (finDirecte) { direct.append(res.text).append("\n\n"); directLecture = directLecture && estLecture(name) }
             }
-            if (direct.isNotEmpty()) { sortieDirecte = true; return direct.toString().trim() }
+            if (direct.isNotEmpty()) { sortieDirecte = true; sortieLecture = directLecture; return direct.toString().trim() }
             onStatus("Réflexion…")
         }
         // Dernière passe sans nouvel outil : restitue les résultats réellement obtenus plutôt qu'un échec générique.

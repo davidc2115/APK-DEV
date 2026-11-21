@@ -125,33 +125,47 @@ object Restitution {
 
     private val TABLEAU_MD = Regex("(?m)^\\s*\\|.*\\|\\s*$\\n^\\s*\\|?\\s*:?-{2,}")
 
-    /** Réponse directe remise aux consignes de forme de l'utilisateur (ou telle quelle). */
-    suspend fun appliquer(app: JarvisApp, demande: String, reponse: String): String {
+    /** Réponse remise aux consignes ; [incomplet] : une consigne exige une information que cette réponse n'a pas. */
+    data class Resultat(val texte: String, val incomplet: Boolean = false)
+
+    /**
+     * Réponse directe remise aux consignes de forme de l'utilisateur (ou telle quelle). Si une consigne demande une
+     * information absente de la réponse (« avec la température extérieure »), [Resultat.incomplet] : le cerveau refait
+     * la demande en appliquant la consigne avec ses outils.
+     */
+    suspend fun appliquer(app: JarvisApp, demande: String, reponse: String): Resultat {
         val r = reponse.trim()
+        val telle = Resultat(reponse)
         // Déjà minimale (« Titre — Artiste », une adresse) : rien à faire, aucun appel.
-        if (r.isBlank() || (r.length <= 90 && '\n' !in r)) return reponse
-        if (r.contains("jarvis-img:") || r.length > 6000) return reponse
+        if (r.isBlank() || (r.length <= 90 && '\n' !in r)) return telle
+        if (r.contains("jarvis-img:") || r.length > 6000) return telle
         // Consignes de JARVIS et celles notées par Hermès (la conversation passe parfois par lui).
         val memoire = runCatching { app.memo.all() }.getOrDefault(emptyMap()) +
             ("hermes" to runCatching { app.memo.entreesHermesListe().joinToString("\n") }.getOrDefault(""))
         val regles = runCatching { consignes(memoire, demande, r) }.getOrDefault(emptyList())
-        if (regles.isEmpty()) return reponse
+        if (regles.isEmpty()) return telle
         val miseEnForme = regles.any { MISE_EN_FORME.containsMatchIn(normaliser(it)) }
         // Déjà en tableau et les consignes ne demandent qu'un tableau : rien à refaire (pas d'appel, pas d'attente).
-        if (TABLEAU_MD.containsMatchIn(r) && regles.all { Regex("\\btableaux?\\b").containsMatchIn(normaliser(it)) }) return reponse
+        if (TABLEAU_MD.containsMatchIn(r) && regles.all { Regex("\\btableaux?\\b").containsMatchIn(normaliser(it)) }) return telle
         val systeme = "Tu remets en forme une réponse de l'assistant JARVIS selon les CONSIGNES de l'utilisateur. Règles absolues : " +
             "applique à la lettre les consignes qui concernent cette réponse (ignore les autres) ; tu peux RETIRER, reformuler ou RÉORGANISER " +
             "(tableau Markdown avec une ligne d'en-tête et une ligne |---|, liste, ordre, colonnes demandées) — n'ajoute jamais d'information absente " +
             "de la réponse, ni commentaire ni formule de politesse ; garde exactement les faits (noms, titres, adresses, nombres, unités) ; si la réponse " +
-            "signale un échec ou une erreur, garde-le. Si aucune consigne ne s'applique, renvoie la réponse telle quelle. Réponds uniquement avec la réponse remise en forme, en français."
+            "signale un échec ou une erreur, garde-le. Si une consigne qui concerne cette réponse exige une information qui N'EST PAS dans la réponse " +
+            "(tu ne dois pas l'inventer), réponds uniquement le mot INCOMPLET. Si aucune consigne ne s'applique, renvoie la réponse telle quelle. " +
+            "Sinon, réponds uniquement avec la réponse remise en forme, en français."
         val utilisateur = "CONSIGNES :\n" + regles.joinToString("\n") { "- $it" } + "\n\nDEMANDE : $demande\n\nRÉPONSE À REMETTRE EN FORME :\n$r"
         val sortie = kotlinx.coroutines.withTimeoutOrNull(if (miseEnForme) 4_000L else 2_500L) {
             try { app.llm.groq.plain(systeme, utilisateur) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
         }?.trim().orEmpty()
+        if (Regex("^\\W*INCOMPLET\\W*$").matches(sortie)) {
+            fr.dd.jarvis.voice.JournalVoix.noter("brain", "réponse directe incomplète pour les consignes : le cerveau la refait")
+            return Resultat(reponse, incomplet = true)
+        }
         // Garde-fous : une remise en forme ne vide pas la réponse ; elle ne la rallonge que pour une mise en forme (tableau…).
-        if (sortie.isBlank() || sortie.length > (if (miseEnForme) r.length * 3 + 400 else r.length + 40)) return reponse
+        if (sortie.isBlank() || sortie.length > (if (miseEnForme) r.length * 3 + 400 else r.length + 40)) return telle
         fr.dd.jarvis.voice.JournalVoix.noter("brain", "réponse directe remise aux consignes : ${regles.size} consigne(s)")
-        return sortie
+        return Resultat(sortie)
     }
 }
 
