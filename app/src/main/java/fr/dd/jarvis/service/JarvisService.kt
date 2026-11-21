@@ -295,6 +295,14 @@ class JarvisService : Service() {
         // La suppression éventuelle de l'ancien modèle anglais (≈ 70 Mo) ne doit pas bloquer
         // l'ouverture du micro Android Auto sur le thread principal.
         scope.launch(Dispatchers.IO) { fr.dd.jarvis.voice.VoskModel.nettoyer(this@JarvisService) }
+        // Surveillance d'Hermès : s'il s'arrête (Android a tué Termux, passerelle plantée), il est relancé tout seul.
+        scope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.delay(90_000)
+            while (true) {
+                runCatching { fr.dd.jarvis.hermes.Hermes.surveiller(app) }
+                kotlinx.coroutines.delay(3 * 60_000L)
+            }
+        }
         vosk = when {
             app.store.picoKey.value.isNotBlank() -> fr.dd.jarvis.voice.PorcupineWake(this, app.store.picoKey.value) { main.post { onWakeWord() } }
             fr.dd.jarvis.voice.VoskModel.ready(this) -> fr.dd.jarvis.voice.VoskWake(this, app.store.ecouteEconome.value) { main.post { onWakeWord() } }

@@ -181,6 +181,13 @@ object HermesTermux {
             // La documentation Termux utilise startService pour RUN_COMMAND ; Termux gère lui-même le service.
             ctx.startService(i)
             null
+        } catch (e: IllegalStateException) {
+            // JARVIS en arrière-plan (écran éteint, relance automatique) : Android refuse startService vers une autre
+            // application. Le service RUN_COMMAND de Termux passe lui-même au premier plan : startForegroundService est
+            // alors accepté. Avant, ce refus était silencieux et Hermès ne redémarrait jamais tout seul.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) runCatching { ctx.startForegroundService(i); null }
+                .getOrElse { "Termux a refusé la commande (arrière-plan) : ${it.message ?: it.javaClass.simpleName}" }
+            else "Termux a refusé la commande : ${e.message ?: e.javaClass.simpleName}"
         } catch (e: Throwable) { "Termux a refusé la commande : ${e.message ?: e.javaClass.simpleName}" }
     }
 
@@ -420,6 +427,12 @@ if curl -s -m 2 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1; then
   exit 0
 fi
 p '🔄 Préparation du démarrage de la passerelle Hermès…'
+# Passerelle figée (processus encore là mais API muette) : arrêtée avant de relancer, sinon le port reste occupé.
+if pgrep -f 'hermes gateway run' >/dev/null 2>&1; then p '🧹 Ancienne passerelle figée arrêtée.'; arreter_passerelles_hermes; fi
+# Journal limité (les 3 000 dernières lignes) ; heure de démarrage notée pour le diagnostic.
+if [ -f "${'$'}{H}/logs/gateway.log" ] && [ "${'$'}(wc -c < "${'$'}{H}/logs/gateway.log")" -gt 4000000 ]; then tail -n 3000 "${'$'}{H}/logs/gateway.log" > "${'$'}{H}/logs/gateway.log.tmp" && mv "${'$'}{H}/logs/gateway.log.tmp" "${'$'}{H}/logs/gateway.log"; fi
+echo "=== Démarrage par Jarvis : ${'$'}(date '+%Y-%m-%d %H:%M:%S') ===" >> "${'$'}{H}/logs/gateway.log"
+date +%s > "${'$'}{H}/logs/gateway.start"
 HERMES_PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if [ "$(cat "${'$'}{H}/.jarvis-mode" 2>/dev/null)" = proot ] || proot-distro login debian --termux-home -- env -i HOME=/root PATH="${'$'}{HERMES_PATH}" sh -c 'command -v hermes >/dev/null 2>&1'; then
   # Passerelle lancée sous l'utilisateur Debian « jarvis » = UID réel de Termux (propriétaire des fichiers d'Hermès).
@@ -1046,39 +1059,92 @@ du -h /root/.hermes/backups/hermes-*.tar.gz | tail -n 1
     fun sauvegarder(app: JarvisApp): String =
         executerDebian(app, scriptSauvegarde, "Sauvegarde Hermès")
 
+    /** Ce que JARVIS sait côté Android (batterie de Termux, restriction des processus, shell, dernières relances). */
+    fun etatAndroid(app: JarvisApp): List<String> = buildList {
+        val pm = app.getSystemService(android.os.PowerManager::class.java)
+        val batterie = runCatching { pm.isIgnoringBatteryOptimizations(TERMUX) }.getOrNull()
+        add("Batterie de Termux : " + when (batterie) { true -> "sans restriction ✅"; false -> "OPTIMISÉE ⚠️ (Android peut l'arrêter)"; null -> "inconnue" })
+        val fantome = runCatching { android.provider.Settings.Global.getString(app.contentResolver, "settings_enable_monitor_phantom_procs") }.getOrNull()
+        add("Restriction des processus enfants (Android) : " + when (fantome) { "false" -> "désactivée ✅"; null -> if (Build.VERSION.SDK_INT >= 31) "ACTIVE ⚠️ (Android tue les processus de Termux)" else "sans objet"; else -> "ACTIVE ⚠️ (Android tue les processus de Termux)" })
+        add("Shell système (Shizuku / ADB) : " + if (fr.dd.jarvis.device.PhoneShell.ready(app)) "disponible" else "indisponible")
+        add("Relances automatiques : " + Hermes.etatRelances())
+    }
+
     /** Contrôle les fichiers essentiels sans afficher les clés API ni les jetons. */
     fun diagnostiquer(app: JarvisApp): String {
-        val script = """
+        PontMcp.demarrer(app)
+        message = "⏳ Diagnostic Hermès…"
+        return executer(app, prelude(app) + "\n" + scriptDiagnostic(etatAndroid(app)), libelle = "Diagnostic Hermès") ?: "🚀 Diagnostic lancé : les résultats s'affichent ci-dessous."
+    }
+
+    /** Script du diagnostic (côté Termux puis Debian) ; [etatAndroid] : lignes calculées par JARVIS. */
+    internal fun scriptDiagnostic(etatAndroid: List<String>): String {
+        val android = etatAndroid.joinToString("\n") { "p ${q(it)}" }
+        // Côté Debian : environnement propre (sans le PATH de Termux) et chaque commande limitée dans le temps — avant,
+        // « hermes --version » appelait le lanceur de Termux depuis Debian et le diagnostic restait bloqué.
+        val debian = """
 set +e
-echo "=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==="
-[ -x /root/.hermes/hermes-agent/.hermes/bin/hermes ] && echo "CLI Hermes : OK" || echo "CLI Hermes : ABSENT"
-if [ -x /root/.hermes/hermes-agent/venv/bin/python ]; then
-  echo "Environnement Python Hermès : venv/ OK"
-elif [ -x /root/.hermes/hermes-agent/.venv/bin/python ]; then
-  echo "Environnement Python Hermès : .venv/ OK"
-elif [ -x /root/.hermes/hermes-agent/.hermes/bin/python ]; then
-  echo "Environnement Python Hermès : .hermes/bin/ OK"
-else
-  echo "Environnement Python dédié : non trouvé"
-fi
-if command -v python3 >/dev/null 2>&1; then
-  echo "Python Debian : $(python3 --version 2>&1)"
-  echo "Interpréteur système : $(command -v python3)"
-else
-  echo "Python Debian : ABSENT"
-fi
-if command -v hermes >/dev/null 2>&1; then
-  echo "CLI Hermès : $(command -v hermes)"
-  hermes --version 2>&1 | head -n 1
-fi
+D=/root/.hermes/hermes-agent/.hermes/bin/hermes
+[ -x ${'$'}D ] && echo "CLI Hermès (Debian) : OK" || echo "CLI Hermès (Debian) : ABSENT"
+for c in /root/.local/bin/hermes ${'$'}D; do [ -e "${'$'}c" ] && echo "Lanceur : ${'$'}c → ${'$'}(readlink -f "${'$'}c" 2>/dev/null)"; done
+V=${'$'}(timeout 25 /root/.local/bin/hermes --version 2>/dev/null || timeout 25 ${'$'}D --version 2>&1); echo "Version : ${'$'}(printf '%s' "${'$'}V" | head -n 1 | cut -c1-100)"
+for v in venv .venv; do [ -x /root/.hermes/hermes-agent/${'$'}v/bin/python ] && echo "Python d'Hermès : ${'$'}v ($(/root/.hermes/hermes-agent/${'$'}v/bin/python --version 2>&1))"; done
+command -v python3 >/dev/null 2>&1 && echo "Python Debian : ${'$'}(python3 --version 2>&1)" || echo "Python Debian : ABSENT"
 [ -f /root/.hermes/config.yaml ] && echo "Configuration : présente" || echo "Configuration : ABSENTE"
 [ -f /root/.hermes/.env ] && echo "Fichier de clés : présent (contenu masqué)" || echo "Fichier de clés : ABSENT"
 grep -q 'jarvis:' /root/.hermes/config.yaml 2>/dev/null && echo "Entrée MCP Jarvis : présente" || echo "Entrée MCP Jarvis : absente"
 grep -q '127.0.0.1:38291/mcp' /root/.hermes/config.yaml 2>/dev/null && echo "URL du pont MCP : OK" || echo "URL du pont MCP : à vérifier"
-curl -fsS -m 3 http://127.0.0.1:${PORT_API}/health >/dev/null 2>&1 && echo "Passerelle API : EN LIGNE" || echo "Passerelle API : hors ligne"
-echo "=== FIN DU DIAGNOSTIC ==="
 """.trimIndent()
-        return executerDebian(app, script, "Diagnostic Hermès")
+        return """
+set +e
+p '=== DIAGNOSTIC HERMÈS (aucun secret affiché) ==='
+p '— Android —'
+$android
+p '— Termux —'
+curl -fsS -m 3 http://127.0.0.1:$PORT_API/health >/dev/null 2>&1 && p 'Passerelle API : EN LIGNE ✅' || p 'Passerelle API : hors ligne ❌'
+N=${'$'}(pgrep -f 'hermes gateway run' 2>/dev/null | wc -l); p "Processus de passerelle : ${'$'}N"
+if [ -f "${'$'}HOME/.hermes/logs/gateway.start" ]; then D=${'$'}(( ${'$'}(date +%s) - ${'$'}(cat "${'$'}HOME/.hermes/logs/gateway.start") )); p "Dernier démarrage : il y a ${'$'}(( D / 3600 )) h ${'$'}(( (D % 3600) / 60 )) min"; fi
+MEM=${'$'}(awk '/MemAvailable/ {printf "%d", ${'$'}2/1024}' /proc/meminfo 2>/dev/null); [ -n "${'$'}MEM" ] && p "Mémoire disponible : ${'$'}MEM Mo"
+p "Espace libre : ${'$'}(df -h "${'$'}HOME" 2>/dev/null | awk 'NR==2 {print ${'$'}4}')"
+p '— Debian —'
+timeout 120 proot-distro login debian --termux-home -- env -i HOME=/root LANG=C.UTF-8 PATH=/root/.local/bin:/root/.hermes/hermes-agent/.hermes/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash -c ${q(debian)} 2>&1 | while IFS= read -r l; do p "${'$'}l"; done
+p '— Dernières lignes du journal de la passerelle (secrets masqués) —'
+tail -n 30 "${'$'}HOME/.hermes/logs/gateway.log" 2>/dev/null | sed -E 's/(gsk_|sk-|AIza|hf_|Bearer )[A-Za-z0-9_.-]+/\1•••/g' | cut -c1-160 | while IFS= read -r l; do p "   ${'$'}l"; done
+p '— Arrêts repérés dans le journal —'
+grep -aiE 'killed|signal|traceback|error|erreur|exception|address already in use|out of memory' "${'$'}HOME/.hermes/logs/gateway.log" 2>/dev/null | tail -n 6 | sed -E 's/(gsk_|sk-|AIza|hf_|Bearer )[A-Za-z0-9_.-]+/\1•••/g' | cut -c1-160 | while IFS= read -r l; do p "   ${'$'}l"; done
+p '=== FIN DU DIAGNOSTIC ==='
+""".trimIndent()
+    }
+
+    /**
+     * Empêche Android (et HyperOS) d'arrêter Termux, donc Hermès : restriction des « processus enfants » désactivée,
+     * Termux exempté de l'optimisation de batterie et autorisé en arrière-plan. Par le shell système (Shizuku / ADB) si
+     * disponible, sinon la marche à suivre.
+     */
+    fun proteger(app: JarvisApp): String {
+        if (fr.dd.jarvis.device.PhoneShell.ready(app)) {
+            val cmds = listOf(
+                "settings put global settings_enable_monitor_phantom_procs false",
+                "/system/bin/device_config set_sync_disabled_for_tests persistent",
+                "/system/bin/device_config put activity_manager max_phantom_processes 2147483647",
+                "dumpsys deviceidle whitelist +$TERMUX",
+                "cmd appops set $TERMUX RUN_IN_BACKGROUND allow",
+                "cmd appops set $TERMUX RUN_ANY_IN_BACKGROUND allow",
+            )
+            val ko = cmds.filter { c -> runCatching { fr.dd.jarvis.device.PhoneShell.exec(app, c); false }.getOrDefault(true) }
+            app.store.hermesProtege.set(true)
+            return "🛡️ Termux protégé : Android ne limite plus ses processus et ne le met plus en veille" + (if (ko.isNotEmpty()) " (${ko.size} réglage(s) refusé(s) par le système)" else "") +
+                ". Sur HyperOS, vérifie aussi : Sécurité › Autorisations › Démarrage automatique › Termux activé, et verrouille Termux dans les applis récentes."
+        }
+        runCatching {
+            app.startActivity(android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:$TERMUX"))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+        return "🛡️ Pour qu'Android n'arrête plus Hermès :\n" +
+            "1. Batterie de Termux : « Aucune restriction » (page ouverte, ou Paramètres › Applis › Termux › Économiseur de batterie).\n" +
+            "2. HyperOS : Sécurité › Autorisations › Démarrage automatique › Termux activé ; verrouille Termux dans les applis récentes (cadenas).\n" +
+            "3. Options pour les développeurs › « Désactiver les restrictions des processus enfants » activé.\n" +
+            "Avec Shizuku actif, JARVIS fait les points 1 et 3 tout seul : touche de nouveau « Protéger »."
     }
 
     /** Restaure la dernière archive après vérification, puis relance la passerelle. */

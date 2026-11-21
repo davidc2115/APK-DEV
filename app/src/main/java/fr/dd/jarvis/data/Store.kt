@@ -192,6 +192,8 @@ class Store(context: Context) {
     val sshFp = SPref("sshFp", "")
     /** Jeton Plex Media Server : toujours conservé dans le stockage chiffré du Keystore. */
     val plexToken = SecretPref("plexToken")
+    /** Termux protégé contre l'arrêt par Android (processus enfants, batterie) par le shell système. */
+    val hermesProtege = BPref("hermesProtege", false)
     /** Identifiants des sites officiels (URSSAF, impôts, net-entreprises…) : JSON chiffré, jamais envoyé à une IA. */
     val sitesIdentifiants = SecretPref("sitesIdentifiants")
     /** Déclarations en ligne : JARVIS clique lui-même sur le bouton final (envoi / paiement) sans demander. */

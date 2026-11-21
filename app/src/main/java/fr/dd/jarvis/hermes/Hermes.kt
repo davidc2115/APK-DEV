@@ -43,7 +43,22 @@ object Hermes {
     @Volatile private var verifieA = 0L
     @Volatile private var relanceA = 0L
 
-    fun marquerEnLigne(v: Boolean) { enLigneCache = v; verifieA = System.currentTimeMillis() }
+    fun marquerEnLigne(v: Boolean) {
+        if (v) { echecsRelance = 0; vuEnLigneA = System.currentTimeMillis() }
+        enLigneCache = v; verifieA = System.currentTimeMillis()
+    }
+
+    @Volatile private var echecsRelance = 0
+    @Volatile private var vuEnLigneA = 0L
+    @Volatile private var derniereErreurRelance = ""
+    @Volatile private var alerteA = 0L
+
+    /** Résumé des relances automatiques (pour le diagnostic). */
+    fun etatRelances(): String = when {
+        relanceA == 0L -> "aucune depuis l'ouverture de JARVIS"
+        else -> "dernière il y a ${(System.currentTimeMillis() - relanceA) / 60_000} min, $echecsRelance échec(s) de suite" +
+            (if (derniereErreurRelance.isNotBlank()) " — $derniereErreurRelance" else "")
+    }
 
     /** Dernier état connu, sans réseau (pour décider vite d'exposer l'outil de délégation). */
     fun enLigneConnu() = enLigneCache
@@ -56,12 +71,44 @@ object Hermes {
         marquerEnLigne(ok); ok
     }
 
-    /** Hermès est hors ligne alors qu'il est installé : on relance sa passerelle (au plus une fois par minute). */
+    /**
+     * Hermès est hors ligne alors qu'il est installé : on relance sa passerelle — au plus une fois par minute, puis toutes
+     * les 5 minutes après 3 échecs de suite. Si Android l'a arrêté alors qu'il tournait, Termux est protégé (shell système)
+     * pour que ça ne se reproduise pas ; après des échecs répétés, une notification propose le diagnostic.
+     */
     fun relancerSiBesoin(app: JarvisApp) {
-        if (app.store.hermesMode.value == "off") return
-        if (System.currentTimeMillis() - relanceA < 60_000) return
-        relanceA = System.currentTimeMillis()
-        HermesTermux.demarrer(app)
+        if (app.store.hermesMode.value == "off" || !app.store.hermesInstalle.value) return
+        val maintenant = System.currentTimeMillis()
+        val pause = if (echecsRelance >= 3) 5 * 60_000L else 60_000L
+        if (maintenant - relanceA < pause) return
+        // La relance précédente n'a pas remis Hermès en ligne : un échec de plus.
+        if (relanceA != 0L && !enLigneCache) echecsRelance++
+        relanceA = maintenant
+        // Hermès tournait puis s'est arrêté : Android l'a probablement tué → protection de Termux (une fois).
+        if (vuEnLigneA > 0 && !app.store.hermesProtege.value && fr.dd.jarvis.device.PhoneShell.ready(app))
+            runCatching { HermesTermux.proteger(app) }
+        val erreur = HermesTermux.demarrer(app).takeIf { it.startsWith("Termux") || it.startsWith("Permission") || it.startsWith("❌") }
+        derniereErreurRelance = erreur.orEmpty()
+        if ((echecsRelance >= 3 || erreur != null) && maintenant - alerteA > 3 * 3_600_000L) {
+            alerteA = maintenant
+            runCatching {
+                val i = android.content.Intent(app, fr.dd.jarvis.MainActivity::class.java).putExtra("demande", "Fais le diagnostic d'Hermès")
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                androidx.core.app.NotificationManagerCompat.from(app).notify(7311, androidx.core.app.NotificationCompat.Builder(app, fr.dd.jarvis.JarvisApp.CHANNEL_AGENTS)
+                    .setSmallIcon(android.R.drawable.stat_notify_error).setContentTitle("Hermès ne redémarre pas")
+                    .setContentText(erreur ?: "JARVIS a tenté de le relancer $echecsRelance fois.")
+                    .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText((erreur ?: "JARVIS a tenté de le relancer $echecsRelance fois sans succès.") +
+                        " Ouvre Termux une fois (Android l'a peut-être arrêté), puis Réglages › Hermès › Diagnostic."))
+                    .setContentIntent(android.app.PendingIntent.getActivity(app, 7311, i, android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT))
+                    .setAutoCancel(true).build())
+            }
+        }
+    }
+
+    /** Surveillance : Hermès installé mais hors ligne → relance (appelée régulièrement par le service et la veille). */
+    suspend fun surveiller(app: JarvisApp) {
+        if (app.store.hermesMode.value == "off" || !app.store.hermesInstalle.value) return
+        if (!enLigne(force = true)) relancerSiBesoin(app)
     }
 
     // Sections thématiques du prompt : envoyées seulement quand la demande (ou les derniers messages) en parle — moins de

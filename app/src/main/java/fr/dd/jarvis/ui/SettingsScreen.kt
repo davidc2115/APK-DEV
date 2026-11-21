@@ -461,6 +461,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     HudButton("Sauvegarder") { hMsg = h.sauvegarder(app) }
                     HudButton("Diagnostic") { hMsg = h.diagnostiquer(app) }
+                    HudButton(if (store.hermesProtege.value) "🛡️ Protégé" else "🛡️ Protéger") { hMsg = h.proteger(app) }
                     HudButton("Restaurer") {
                         if (recoveryConfirm != "restore") {
                             recoveryConfirm = "restore"

@@ -467,6 +467,8 @@ class ToolBox(
         put(tool("hermes", "Gère Hermès, l'agent IA installé dans Termux qui sert de cerveau principal : état, installation, configuration (clés, modèle), démarrage, arrêt, mode de répartition.",
             mapOf("action" to prop("etat | installer | configurer | demarrer | arreter | mode"),
                 "mode" to prop("Pour action=mode : auto (Hermès reçoit toutes les demandes et choisit lui-même de répondre ou de déléguer aux agents Gemini/Groq/Cloudflare/autres) | demande (Hermès seulement quand on le nomme) | off (Jarvis utilise son moteur interne).")), listOf("action")))
+        put(tool("hermes_etat", "État et dépannage d'Hermès (l'agent qui tourne dans Termux) : diagnostic (résultats dans Réglages › Hermès), demarrer, arreter, proteger (empêche Android d'arrêter Termux).",
+            mapOf("action" to prop("diagnostic (défaut) | demarrer | arreter | proteger"))))
         put(tool("hermes_deleguer", "Confie à Hermès (agent autonome : recherche web, analyse, rédaction, code, tâches en plusieurs étapes, automatismes, serveur/SSH, ses notes, skills, plugins et sa mémoire long terme) une tâche que tes outils ne couvrent pas, ou une information que tu n'as pas (identifiants, réglages, historique). À utiliser plutôt que de répondre « je ne peux pas » ou de redemander une information à l'utilisateur. Décris la tâche complète et le résultat attendu.",
             mapOf("tache" to prop("La tâche détaillée, avec tout le contexte utile.")), listOf("tache")))
         put(tool("ma_position", "Donne la position GPS actuelle du téléphone (fix frais, format Google Maps) et l'ADRESSE PRÉCISE correspondante (numéro, rue, code postal, ville). Pour enregistrer cette position sur une fiche client, utilise client_ecrire avec site_gps = « ma position » (et site_adresse = « ma position » pour l'adresse)."))
@@ -1340,6 +1342,14 @@ class ToolBox(
         "export_kml" -> ToolResult(app.societe.exporterKml(), direct = true)
         "ma_position" -> ToolResult(fr.dd.jarvis.device.Locator.describe(app))
         "hermes" -> ToolResult(hermesGerer(a.optString("action"), a.optString("mode")))
+        "hermes_etat" -> ToolResult(when (a.optString("action").trim().lowercase()) {
+            "demarrer", "relancer", "redemarrer" -> fr.dd.jarvis.hermes.HermesTermux.demarrer(app)
+            "arreter" -> fr.dd.jarvis.hermes.HermesTermux.arreter(app)
+            "proteger" -> fr.dd.jarvis.hermes.HermesTermux.proteger(app)
+            else -> (if (fr.dd.jarvis.hermes.Hermes.enLigne(force = true)) "✅ Hermès est en ligne. " else "❌ Hermès est hors ligne. ") +
+                fr.dd.jarvis.hermes.HermesTermux.etatAndroid(app).joinToString(" · ") + "\n" + fr.dd.jarvis.hermes.HermesTermux.diagnostiquer(app) +
+                " (détail complet dans Réglages › Hermès)."
+        }, direct = true)
         "hermes_deleguer" -> fr.dd.jarvis.hermes.Hermes.deleguer(app, a.optString("tache"), this, app.store.userName.value)
             ?.let { ToolResult(it, direct = true) }
             ?: ToolResult("Hermès est indisponible pour l'instant (non installé ou arrêté). Réponds toi-même au mieux.")

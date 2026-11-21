@@ -153,6 +153,7 @@ object Capacites {
             i("Cette liste, par domaine ou en détail", "que sais-tu faire avec les mails ?|liste tous tes outils", "", Voie.REFLEXE),
         )),
         Categorie("hermes", "🪽", "Hermès (moteur approfondi)", r("hermes|internet|web|recherche|automatis\\w*|surveill\\w*|redaction|code"), listOf(
+            i("Hermès : état, diagnostic, redémarrage, protection contre l'arrêt par Android", "Hermès ne répond plus, fais le diagnostic|redémarre Hermès|empêche Android d'arrêter Hermès", "hermes_etat"),
             i("Recherches sur internet, explications, conseils, rédaction, code", "cherche sur internet le prix des onduleurs|explique-moi le TURPE", "hermes_deleguer", Voie.HERMES),
             i("Automatismes et surveillances (tous les matins, dès que je reçois…)", "tous les lundis, envoie-moi les factures impayées|préviens-moi quand Plex s'arrête", "hermes_deleguer", Voie.HERMES),
             i("Gestion d'Hermès : état, démarrage, skills, plugins et connecteurs MCP", "état d'Hermès|installe le skill météo", "hermes,gerer_extension_hermes"),
