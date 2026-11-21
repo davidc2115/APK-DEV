@@ -71,6 +71,8 @@
             <data android:mimeType="video/*" />
         </intent>
         <package android:name="moe.shizuku.privileged.api" />
+        <!-- Appli Plex : ouverture directe d'un film (lien plex://). -->
+        <package android:name="com.plexapp.android" />
         <package android:name="com.termux" />
         <package android:name="com.google.android.projection.gearhead" />
         <package android:name="com.waze" />

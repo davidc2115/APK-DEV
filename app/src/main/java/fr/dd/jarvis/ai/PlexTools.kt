@@ -258,6 +258,15 @@ object Plex {
         for (v in vars.drop(1).take(3).ifEmpty { vars }) ajouter(parBibliotheques(app, v))
         val c = classement()
         c.firstOrNull()?.takeIf { it.second >= seuil }?.let { return Recherche(it.first, emptyList()) }
+        // Mots parasites en fin de titre (« les 101 dalmatiens depuis au assistant ») : on retire les derniers mots un à un.
+        val mots = t.split(Regex("\\s+"))
+        for (n in (mots.size - 1) downTo maxOf(1, mots.size - 5)) {
+            val p = mots.take(n).joinToString(" ")
+            if (comparable(p).length < 3) break
+            val r = runCatching { rechercher(app, p) }.getOrDefault(emptyList()).filter { it.optString("type") in types }
+            r.map { it to score(it, p) }.filter { it.second >= 80 }.maxByOrNull { it.second }?.let { return Recherche(it.first, emptyList()) }
+            ajouter(r)
+        }
         // Titre demandé explicitement : la recherche floue de Plex (fautes de dictée) a le dernier mot.
         if (!strict && premierPlex != null) return Recherche(premierPlex, emptyList())
         return Recherche(null, c.filter { it.second >= 20 }.take(4).map { it.first })
@@ -393,9 +402,51 @@ object Plex {
                 " Sur la télé / l'autre téléphone, l'appli Plex doit être ouverte, connectée au même compte, avec « Annoncer comme lecteur » (Réglages Plex › Avancé) activé.")
     }
 
+    /** Adresse IP locale du serveur Plex joint en ce moment (null s'il est joint à distance). */
+    fun ipLan(app: JarvisApp): String? = runCatching { java.net.URI(base(app)).host }.getOrNull()?.takeIf { Serveur.ipPrivee(it) }
+
+    /**
+     * Pourquoi un lecteur de la maison serait vu « à distance » par Plex (et l'abonnement demandé) : adresse locale
+     * annoncée par le serveur différente de son adresse réelle (Plex en Docker « bridge »), réseau de la maison absent des
+     * « réseaux locaux » du serveur. Liste vide = rien de suspect.
+     */
+    fun problemesReseauLocal(app: JarvisApp): List<String> {
+        val lan = ipLan(app) ?: return listOf("Le téléphone ne joint pas le serveur Plex sur le réseau de la maison (connexion distante) : vérifie qu'il est sur le même Wi-Fi.")
+        val reseau = lan.substringBeforeLast('.') + "."
+        val out = mutableListOf<String>()
+        val machine = runCatching { machineId(app) }.getOrNull()
+        val srv = ressources(app).firstOrNull { it.optString("clientIdentifier") == machine }
+        val locales = srv?.optJSONArray("connections")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty().filter { it.optBoolean("local") }.map { it.optString("address") }
+        if (locales.isNotEmpty() && locales.none { it == lan })
+            out += "Plex annonce l'adresse locale ${locales.joinToString()} au lieu de $lan : les applis ne le trouvent pas sur le réseau de la maison et passent par internet (typique d'un Plex en Docker en mode « bridge »)."
+        val prefs = runCatching { liste(mc(app, "/:/prefs"), "Setting").associate { it.optString("id") to it.optString("value") } }.getOrDefault(emptyMap())
+        if (prefs.isNotEmpty()) {
+            if (!prefs["customConnections"].orEmpty().contains(lan)) out += "L'adresse locale du serveur (http://$lan:$PORT) n'est pas déclarée dans « URL personnalisées d'accès au serveur »."
+            if (!prefs["LanNetworksBandwidth"].orEmpty().contains(reseau)) out += "Le réseau de la maison (${reseau}0) n'est pas déclaré dans « Réseaux LAN » du serveur."
+        }
+        return out
+    }
+
+    /** Déclare l'adresse locale du serveur et le réseau de la maison dans les réglages réseau de Plex (ajout, rien n'est retiré). */
+    fun reparerReseauLocal(app: JarvisApp): String {
+        val lan = ipLan(app) ?: throw IllegalStateException("Le téléphone doit être sur le Wi-Fi de la maison pour réparer la lecture locale.")
+        val reseau = lan.substringBeforeLast('.') + ".0/255.255.255.0"
+        val prefs = liste(mc(app, "/:/prefs"), "Setting").associate { it.optString("id") to it.optString("value") }
+        val url = "http://$lan:$PORT"
+        val q = linkedMapOf<String, String>()
+        prefs["customConnections"].orEmpty().let { v -> if (!v.contains(lan)) q["customConnections"] = listOf(v, url).filter { it.isNotBlank() }.joinToString(",") }
+        prefs["LanNetworksBandwidth"].orEmpty().let { v -> if (!v.contains(lan.substringBeforeLast('.') + ".")) q["LanNetworksBandwidth"] = listOf(v, reseau).filter { it.isNotBlank() }.joinToString(",") }
+        if (q.isEmpty()) return "✅ L'adresse locale ($url) et le réseau de la maison sont déjà déclarés dans Plex."
+        request(app, "/:/prefs", q, methode = "PUT")
+        return "✅ Plex : " + q.keys.joinToString(" et ") { if (it == "customConnections") "adresse locale $url déclarée" else "réseau de la maison ${reseau.substringBefore('/')} déclaré comme réseau local" } +
+            ". Ferme puis rouvre l'appli Plex sur la télé et relance le film."
+    }
+
     /** Adresse du serveur que le lecteur doit utiliser : réseau de la maison, sinon connexion distante de plex.tv (ou relais). */
     private fun connexionPour(app: JarvisApp, l: Lecteur): Triple<String, Int, String> {
-        val lan = ipsLocales(app).firstOrNull() ?: Serveur.ipLocaleServeur(app)?.also { app.store.serveurIpLocale.set(it) }
+        // Adresse du serveur que JARVIS joint vraiment (celui qui a les bibliothèques), pas le premier appareil du Wi-Fi
+        // qui répond sur 32400 : une mauvaise adresse fait passer la télé par la connexion distante (abonnement demandé).
+        val lan = ipLan(app) ?: ipsLocales(app).firstOrNull() ?: Serveur.ipLocaleServeur(app)?.also { app.store.serveurIpLocale.set(it) }
         if (l.maison != false && lan != null) return Triple(lan, PORT, "http")
         val machine = machineId(app)
         val srv = ressources(app).firstOrNull { it.optString("clientIdentifier") == machine }
@@ -421,12 +472,21 @@ object Plex {
         val ratingKey = media.optString("ratingKey").ifBlank { throw IllegalStateException("Plex n'a pas fourni l'identifiant de ce média.") }
         val machine = machineId(app)
         if (l.id == CE_TELEPHONE) {
-            val lien = "https://app.plex.tv/desktop/#!/server/$machine/details?key=" + java.net.URLEncoder.encode("/library/metadata/$ratingKey", "UTF-8")
-            val i = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(lien)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             val plexApp = "com.plexapp.android"
-            if (runCatching { app.packageManager.getPackageInfo(plexApp, 0) }.isSuccess) i.setPackage(plexApp)
-            runCatching { app.startActivity(i) }.recoverCatching { app.startActivity(i.setPackage(null)) }.getOrThrow()
-            return "📱 « ${titre(media)} » ouvert dans Plex sur ce téléphone : touche ▶ Lecture."
+            val installee = runCatching { app.packageManager.getPackageInfo(plexApp, 0) }.isSuccess
+            val nt = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+            if (installee) {
+                // Lien de l'appli Plex (lecture directe) : l'adresse app.plex.tv n'est pas gérée par l'appli et ouvrait le site.
+                val suite = if (media.optString("type") in setOf("show", "season")) "/children" else ""
+                val i = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("plex://server://$machine/com.plexapp.plugins.library/library/metadata/$ratingKey$suite"))
+                    .setPackage(plexApp).putExtra("android.intent.extra.START_PLAYBACK", true).addFlags(nt)
+                if (runCatching { app.startActivity(i) }.isSuccess) return "📱 « ${titre(media)} » lancé dans l'appli Plex de ce téléphone."
+                app.packageManager.getLaunchIntentForPackage(plexApp)?.let { runCatching { app.startActivity(it.addFlags(nt)) } }
+                return "📱 Appli Plex ouverte : cherche « ${titre(media)} » (elle n'a pas accepté l'ouverture directe du film)."
+            }
+            val lien = "https://app.plex.tv/desktop/#!/server/$machine/details?key=" + java.net.URLEncoder.encode("/library/metadata/$ratingKey", "UTF-8")
+            app.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(lien)).addFlags(nt))
+            return "📱 L'appli Plex n'est pas installée : « ${titre(media)} » est ouvert sur le site Plex."
         }
         val (adresse, port, proto) = connexionPour(app, l)
         val jeton = runCatching { mc(app, "/security/token", mapOf("type" to "delegation", "scope" to "all")).optString("token") }.getOrNull().orEmpty().ifBlank { token(app) }
@@ -441,8 +501,10 @@ object Plex {
             throw IllegalStateException("${l.libelle} n'a pas reçu la commande (${e.message?.take(120)}). L'appli Plex doit y être ouverte, connectée au même compte, avec « Annoncer comme lecteur » activé" +
                 (if (!l.enLigne) " — ce lecteur est actuellement hors ligne." else "."))
         }
+        val alerte = if (l.maison != false) runCatching { problemesReseauLocal(app) }.getOrDefault(emptyList()) else emptyList()
         return "▶️ « ${titre(media)} » lancé sur ${l.libelle}" + (if (offsetMs > 0) " (reprise à ${duree(offsetMs)})" else "") +
-            (if (proto == "https") " — flux par la connexion distante du serveur." else ".")
+            (if (proto == "https") " — flux par la connexion distante du serveur." else ".") +
+            (if (alerte.isNotEmpty()) "\n⚠️ Si la télé demande un abonnement (« lecture à distance ») : " + alerte.joinToString(" ") + " Dis « répare la lecture locale de Plex »." else "")
     }
 
     fun lancer(app: JarvisApp, media: JSONObject, appareil: JSONObject, offsetMs: Long = 0): String {
@@ -495,6 +557,10 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
          */
         fun intention(texte: String): Pair<String, JSONObject>? {
             val brut = fr.dd.jarvis.societe.core.normaliser(texte).trim()
+            // « Répare la lecture locale de Plex », « pourquoi Plex me demande un abonnement sur la télé ? ».
+            if (Regex("\\bplex\\b").containsMatchIn(brut) && Regex("\\b(abonnement|plex pass|remote watch|a distance|acces distant|lecture locale|pass)\\b").containsMatchIn(brut))
+                return "plex_serveur" to JSONObject().put("action",
+                    if (Regex("\\b(repare|reparer|corrige|corriger|regle|regler|resous|resoudre|arrange|arranger)\\b").containsMatchIn(brut)) "reparer_local" else "reseau_local")
             if (Regex("^(?:jarvis )?(qu est ce qui|qu est ce qu il y a|qu y a t il|quoi|quels?|quelles?|qui|combien|y a t il|liste|montre|est ce qu il y a|est ce que (?!tu |vous ))\\b").containsMatchIn(brut)) return null
             val n = brut.replace(POLI, "").trim()
             if (n.isBlank() || n.split(' ').size > 16 || PAS_PLEX.containsMatchIn(n)) return null
@@ -547,7 +613,11 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
         internal data class Cible(val titre: String, val saison: Int?, val episode: String?)
 
         internal fun cible(brut: String): Cible {
+            // « … depuis Plex », « … via l'appli », « … avec Google Assistant » : pas dans le titre.
             val t = brut.trim().replace('’', '\'')
+                .replace(Regex("(?i)\\s+(?:depuis|via)\\s+.*$"), "")
+                .replace(Regex("(?i)\\s+(?:avec|dans|par|sur|à partir de|a partir de)\\s+(?:l'|le |la |mon |ma )?(?:plex|appli(?:cation)?|assistant|google|jarvis|au assistant|l assistant)\\b.*$"), "")
+                .trim()
             val DE = "\\s+(?:de\\s+(?:la\\s+s[ée]rie\\s+)?|d'\\s*)"
             val EP = "(?:l'\\s*)?[ée]pisodes?"
             fun nettoie(x: String) = x.trim().removePrefix("la série ").removePrefix("la serie ").removePrefix("le film ").trim().trim(',').trim()
@@ -601,7 +671,7 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
         tool("plex_playlists", "Plex : listes de lecture — lister | voir | creer (titre + éléments) | ajouter | retirer | supprimer.",
             mapOf("action" to prop("lister | voir | creer | ajouter | retirer | supprimer"), "playlist" to prop("Nom de la liste de lecture."),
                 "elements" to prop("Titres ou identifiants séparés par « ; ».")), listOf("action")),
-        tool("plex_serveur", "Plex Media Server (INSTANCE, par son API ; pour démarrer / arrêter / mettre à jour le SERVICE sur le serveur Debian, utilise serveur_service) : etat (version, mise à jour disponible, activités en cours, transcodages, bibliothèques) | maintenance (optimiser la base, nettoyer les anciens fichiers, vider les corbeilles) | reglages (lire, filtre optionnel) | modifier_reglage (cle + valeur) | verifier_mise_a_jour.",
+        tool("plex_serveur", "Plex Media Server (INSTANCE, par son API ; pour démarrer / arrêter / mettre à jour le SERVICE sur le serveur Debian, utilise serveur_service) : etat (version, mise à jour disponible, activités en cours, transcodages, bibliothèques) | maintenance (optimiser la base, nettoyer les anciens fichiers, vider les corbeilles) | reglages (lire, filtre optionnel) | modifier_reglage (cle + valeur) | verifier_mise_a_jour | reseau_local (pourquoi la télé de la maison est vue « à distance » et l'abonnement demandé) | reparer_local (déclare l'adresse locale et le réseau de la maison).",
             mapOf("action" to prop("etat | maintenance | reglages | modifier_reglage | verifier_mise_a_jour"), "filtre" to prop("reglages : mot à chercher dans les réglages."),
                 "cle" to prop("modifier_reglage : identifiant du réglage."), "valeur" to prop("modifier_reglage : nouvelle valeur.")), listOf("action")),
         tool("plex_supprimer", "Plex : SUPPRIME définitivement un média (fichier compris) — confirmation obligatoire ; nécessite « Autoriser la suppression des médias » dans les réglages du serveur.",
@@ -914,7 +984,17 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
                 ToolResult(maj?.let { "⬆️ Mise à jour Plex disponible : ${it.optString("version")}. Sur Debian elle s'installe par le paquet : dis « mets à jour Plex » (serveur_service mettre_a_jour)." }
                     ?: "✅ Plex est à jour.", direct = true)
             }
-            else -> ToolResult("Action inconnue (etat, maintenance, reglages, modifier_reglage, verifier_mise_a_jour).")
+            "reseau_local" -> {
+                val l = Plex.problemesReseauLocal(app)
+                ToolResult(if (l.isEmpty()) "✅ Réseau local de Plex correct : serveur joint à ${Plex.ipLan(app)}, adresse et réseau déclarés. Si la télé demande quand même un abonnement : pas de VPN sur la télé ni sur le serveur, même Wi-Fi / même box, et redémarre l'appli Plex de la télé."
+                    else "# 📡 Lecture locale Plex\n" + l.joinToString("\n") { "- $it" } + "\n\nDis « répare la lecture locale de Plex » pour déclarer l'adresse et le réseau de la maison dans Plex." +
+                        (if (l.any { it.contains("Docker") }) "\nPlex en Docker : le plus sûr est aussi de le lancer en réseau « host » (network_mode: host)." else ""), direct = true)
+            }
+            "reparer_local" -> {
+                if (!confirm("Plex : déclarer l'adresse locale du serveur et le réseau de la maison dans ses réglages réseau (pour que la télé ne soit plus vue « à distance ») ?", true)) return ToolResult("Annulé.")
+                ToolResult(Plex.reparerReseauLocal(app), direct = true)
+            }
+            else -> ToolResult("Action inconnue (etat, maintenance, reglages, modifier_reglage, verifier_mise_a_jour, reseau_local, reparer_local).")
         }
     }
 

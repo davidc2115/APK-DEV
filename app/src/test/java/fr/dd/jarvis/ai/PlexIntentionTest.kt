@@ -54,4 +54,14 @@ class PlexIntentionTest {
         assertTrue(Plex.variantes("Le Roi Lion (1994)").contains("Roi Lion"))
         assertTrue(Plex.variantes("Amélie").contains("Amelie"))
     }
+
+    @Test fun motsParasitesEtReparation() {
+        assertEquals("les 101 dalmatiens", PlexTools.intention("lance les 101 dalmatiens depuis Plex sur la télé")!!.second.getString("titre"))
+        assertEquals("Les 101 Dalmatiens", PlexTools.cible("Les 101 Dalmatiens depuis au assistant").titre)
+        assertEquals("Avatar", PlexTools.cible("Avatar avec l'appli").titre)
+        // Un titre avec « dans » reste entier.
+        assertEquals("Perdus dans l'espace", PlexTools.cible("Perdus dans l'espace").titre)
+        assertEquals("reparer_local", PlexTools.intention("répare la lecture locale de Plex")!!.second.getString("action"))
+        assertEquals("reseau_local", PlexTools.intention("pourquoi Plex me demande un abonnement sur la télé")!!.second.getString("action"))
+    }
 }
