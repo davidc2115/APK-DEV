@@ -19,6 +19,7 @@ object RoutageAudit {
         fr.dd.jarvis.device.RappelsLieu.intention(t)?.let { return "RappelLieu$comb" }
         fr.dd.jarvis.device.Courrier.intention(t)?.let { return "Courrier:${it.javaClass.simpleName}$comb" }
         fr.dd.jarvis.device.Anniversaires.intention(t)?.let { return "Anniv:${it::class.simpleName}$comb" }
+        fr.dd.jarvis.device.RdvTermines.intention(t, java.time.LocalDate.of(2026, 11, 20))?.let { return "RdvFini:${it::class.simpleName}$comb" }
         fr.dd.jarvis.device.SilenceRdv.intention(t)?.let { return "ModeRdv:${it::class.simpleName}$comb" }
         fr.dd.jarvis.device.Listes.intention(t)?.let { return "Liste:${it::class.simpleName}$comb" }
         fr.dd.jarvis.device.Stationnement.intention(t)?.let { return "Parking:${it.javaClass.simpleName}$comb" }

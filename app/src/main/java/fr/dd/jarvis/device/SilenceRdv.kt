@@ -50,7 +50,9 @@ object SilenceRdv {
         val clients = runCatching { app.societe.data.clients.map { it.nom } }.getOrDefault(emptyList())
         val jour = Instant.ofEpochMilli(depuis).atZone(ZoneId.systemDefault()).toLocalDate()
         val tous = app.store.silenceRdvTous.value
+        val termines = RdvTermines.lire(app.store)
         return runCatching { app.calendar.events(jour, 3) }.getOrDefault(emptyList())
+            .filter { RdvTermines.marque(termines, it) == null }
             .filter { it.end > depuis && it.begin < jusqua && eligible(it.title, it.location, it.description, it.allDay, it.begin, it.end, clients, tous) }
             .sortedBy { it.begin }
     }

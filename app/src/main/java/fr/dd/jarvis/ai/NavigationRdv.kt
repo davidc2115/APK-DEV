@@ -148,7 +148,11 @@ object NavigationRdv {
         // Fenêtre qui couvre le jour demandé (jusqu'à un an), sinon les 7 prochains jours.
         val debut = minOf(aujourdhui, d.jour ?: aujourdhui)
         val jours = maxOf(7L, java.time.temporal.ChronoUnit.DAYS.between(debut, d.jour ?: aujourdhui) + 1).coerceAtMost(370L).toInt()
-        val evenements = app.calendar.events(debut, jours)
+        // Rendez-vous marqués terminés : ignorés pour « mon (prochain) rendez-vous » (pas quand on le nomme).
+        val termines = fr.dd.jarvis.device.RdvTermines.lire(app.store)
+        val evenements = app.calendar.events(debut, jours).let { l ->
+            if (d.mots.isEmpty() && d.heure == null && d.rang == null) l.filter { fr.dd.jarvis.device.RdvTermines.marque(termines, it) == null }.ifEmpty { l } else l
+        }
         return when (val c = choisir(evenements, d, maintenant)) {
             is Choix.Echec -> null to "📅 ${c.message}"
             is Choix.Trouve -> {

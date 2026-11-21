@@ -32,6 +32,9 @@ class AuditFonctionnelTest {
             "Nox" to "Immediat:phone_action/torch_off",
             "mets le son à 50" to "Immediat:phone_action/volume",
             "mets le téléphone en silencieux" to "ModeSonore:npd",
+            "le rendez-vous est terminé" to "RdvFini:Terminer",
+            "le rendez-vous avec Dupont est terminé, mets-le en gris" to "RdvFini:Terminer",
+            "quand un rendez-vous est terminé, mets-le en vert" to "RdvFini:Reglage",
             "mets le téléphone en vibreur" to "ModeSonore:vibreur",
             "active le mode nuit" to "ModeJarvis:Mode nuit/true",
             "où est Marie" to "PersonneOu:marie",
@@ -63,6 +66,9 @@ class AuditFonctionnelTest {
             "active le mode rendez-vous" to "ModeRdv:Activer",
             "mets-moi en silencieux pendant mes rendez-vous" to "ModeRdv:Activer",
             "mets le téléphone en silencieux" to "ModeSonore:npd",
+            "le rendez-vous est terminé" to "RdvFini:Terminer",
+            "le rendez-vous avec Dupont est terminé, mets-le en gris" to "RdvFini:Terminer",
+            "quand un rendez-vous est terminé, mets-le en vert" to "RdvFini:Reglage",
         )
         val erreurs = attendus.filter { (p, a) -> r(p) != a }.map { (p, a) -> "« $p » → ${r(p)} (attendu $a)" }
         assertTrue(erreurs.joinToString("\n"), erreurs.isEmpty())

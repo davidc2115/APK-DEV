@@ -216,6 +216,42 @@ class CalendarRepo(private val ctx: Context, private val store: Store) {
         return dr * dr + dg * dg + db * db
     }
 
+    /** Rendez-vous récurrent (une couleur posée sur l'événement colorerait toutes ses occurrences). */
+    fun estRecurrent(eventId: Long): Boolean = hasPermission() && runCatching {
+        ctx.contentResolver.query(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId),
+            arrayOf(CalendarContract.Events.RRULE, CalendarContract.Events.RDATE), null, null, null)?.use { c ->
+            c.moveToFirst() && (!c.getString(0).isNullOrBlank() || !c.getString(1).isNullOrBlank())
+        } ?: false
+    }.getOrDefault(false)
+
+    /**
+     * Couleur d'UNE occurrence d'un rendez-vous récurrent : exception créée sur cette occurrence seulement (synchronisée
+     * avec Google Agenda). Renvoie l'identifiant de l'exception, ou null si l'agenda refuse.
+     */
+    fun couleurOccurrence(e: EventInfo, color: Int?): Long? {
+        if (!hasPermission()) return null
+        val (acc, type, _) = meta(e.calId) ?: return null
+        val v = ContentValues().apply { put(CalendarContract.Events.ORIGINAL_INSTANCE_TIME, e.begin) }
+        if (color == null) { v.putNull(CalendarContract.Events.EVENT_COLOR_KEY); v.putNull(CalendarContract.Events.EVENT_COLOR) }
+        else cleCouleur(acc, type, color)?.let { v.put(CalendarContract.Events.EVENT_COLOR_KEY, it) } ?: v.put(CalendarContract.Events.EVENT_COLOR, color)
+        val uri = runCatching { ctx.contentResolver.insert(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_EXCEPTION_URI, e.id), v) }.getOrNull() ?: return null
+        return runCatching { ContentUris.parseId(uri) }.getOrNull()?.takeIf { it > 0 }
+    }
+
+    /** Clé de la couleur de la palette Google (du compte) la plus proche de [color], ou null. */
+    private fun cleCouleur(acc: String, type: String, color: Int): String? {
+        var key: String? = null; var best = Int.MAX_VALUE
+        runCatching {
+            ctx.contentResolver.query(CalendarContract.Colors.CONTENT_URI,
+                arrayOf(CalendarContract.Colors.COLOR_KEY, CalendarContract.Colors.COLOR),
+                "${CalendarContract.Colors.ACCOUNT_NAME}=? AND ${CalendarContract.Colors.ACCOUNT_TYPE}=? AND ${CalendarContract.Colors.COLOR_TYPE}=?",
+                arrayOf(acc, type, CalendarContract.Colors.TYPE_EVENT.toString()), null)?.use { c ->
+                while (c.moveToNext()) { val d = dist(c.getInt(1), color); if (d < best) { best = d; key = c.getString(0) } }
+            }
+        }
+        return key
+    }
+
     /** Couleur d'événement : clé de la palette Google la plus proche (synchronisée), sinon couleur libre. null = couleur de l'agenda. */
     fun setEventColor(eventId: Long, color: Int?): String {
         if (!hasPermission()) return "Permission agenda manquante."

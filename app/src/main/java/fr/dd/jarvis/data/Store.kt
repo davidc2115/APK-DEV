@@ -688,6 +688,12 @@ class Store(context: Context) {
     /** Réponse automatique par SMS aux contacts dont l'appel est manqué pendant un rendez-vous ({fin} = heure de fin). */
     val silenceRdvSms = BPref("silenceRdvSms", false)
     val silenceRdvMessage = SPref("silenceRdvMessage", "Je suis en rendez-vous, je te rappelle dès que possible (vers {fin}).")
+    /** Rendez-vous marqués terminés (JSON « id|début » → couleur, couleur d'avant…) : gardés dans JARVIS, jamais écrits dans l'événement. */
+    val rdvTermines = SPref("rdvTermines", "{}")
+    /** Couleur d'un rendez-vous terminé quand aucune n'est dite. */
+    val rdvTermineCouleur = SPref("rdvTermineCouleur", "vert")
+    /** La couleur d'un rendez-vous terminé est aussi posée dans Google Agenda (sinon : seulement dans JARVIS). */
+    val rdvTermineGoogle = BPref("rdvTermineGoogle", true)
     /** État du mode rendez-vous en cours (JSON : événement, fin, appels manqués, SMS envoyés). */
     val silenceRdvEtat = SPref("silenceRdvEtat", "")
     val briefingSoirHour = IPref("briefingSoirHour", 20)

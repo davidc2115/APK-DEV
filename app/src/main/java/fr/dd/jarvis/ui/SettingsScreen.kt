@@ -1559,6 +1559,19 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
             }
         },
+        VoletReglages("agents", "rdv-termines", "Rendez-vous terminés", "rendez vous termine fini fait couleur agenda google planning") {
+            HudPanel(Modifier.fillMaxWidth(), title = "✅ Rendez-vous terminés") {
+                Text("« Le rendez-vous est terminé » (ou « … mets-le en gris ») : le rendez-vous prend cette couleur et JARVIS le considère comme fait. Rien n'est écrit dans le titre ni dans la description : l'état « terminé » reste dans JARVIS.", color = HudDim, fontSize = 12.sp)
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    listOf("vert", "vert fonce", "gris", "bleu", "turquoise", "violet", "lavande", "jaune", "orange", "rouge", "rose").forEach { c ->
+                        HudChip(c.replace("vert fonce", "vert foncé"), store.rdvTermineCouleur.value == c) { store.rdvTermineCouleur.set(c) }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.rdvTermineGoogle.set(!store.rdvTermineGoogle.value) }) {
+                    Text((if (store.rdvTermineGoogle.value) "✅ " else "⬜ ") + "Couleur aussi dans Google Agenda (sinon : dans JARVIS seulement)", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+                }
+            }
+        },
         VoletReglages("agents", "rendez-vous", "Mode rendez-vous", "silencieux ne pas deranger rendez vous client reunion sms automatique je te rappelle appel manque") {
             HudPanel(Modifier.fillMaxWidth(), title = "🔕 Mode rendez-vous") {
                 Text("Pendant un rendez-vous de l'agenda, le téléphone passe en Ne pas déranger (les contacts favoris et les alarmes passent toujours) et le son revient à la fin, avec la liste des appels manqués.", color = HudDim, fontSize = 12.sp)

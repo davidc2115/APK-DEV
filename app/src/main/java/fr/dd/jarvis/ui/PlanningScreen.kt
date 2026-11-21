@@ -122,6 +122,8 @@ fun PlanningScreen(app: JarvisApp) {
     var creating by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<EventInfo?>(null) }
 
+    val termines = remember(store.rdvTermines.value) { fr.dd.jarvis.device.RdvTermines.lire(store.rdvTermines.value) }
+    val scope = rememberCoroutineScope()
     LaunchedEffect(day, range, refresh, store.hiddenCals.size) {
         withContext(Dispatchers.IO) {
             cals = repo.calendars()
@@ -304,7 +306,8 @@ fun PlanningScreen(app: JarvisApp) {
             }
             list.forEach { e ->
                 item(key = "e${e.id}-${e.begin}") {
-                    val color = Color(repo.eventColor(e, calMap))
+                    val fini = fr.dd.jarvis.device.RdvTermines.marque(termines, e) != null
+                    val color = Color(fr.dd.jarvis.device.RdvTermines.couleurLocale(termines, e) ?: repo.eventColor(e, calMap))
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.width(54.dp).padding(top = 9.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(if (e.allDay) "JOUR" else Instant.ofEpochMilli(e.begin).atZone(ZoneId.systemDefault()).format(hourFmt), color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
@@ -318,7 +321,7 @@ fun PlanningScreen(app: JarvisApp) {
                             onClick = { selected = e }
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Text(e.title, color = HudText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text((if (fini) "✅ " else "") + e.title, color = if (fini) HudDim else HudText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                 if (e.location.isNotBlank()) Text("⌖  ${e.location}", color = HudDim, fontSize = 11.sp)
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Text(timeLabel(e), color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
@@ -447,6 +450,11 @@ fun PlanningScreen(app: JarvisApp) {
                     // Notes : HTML de Google Agenda mis en forme (gras, retours à la ligne), téléphones et liens cliquables.
                     if (descriptionVisible.isNotBlank()) TexteCliquable(descriptionVisible.take(3000), HudText, taille = 13.sp)
                     HudButton("✎ Modifier le rendez-vous") { editing = e; selected = null }
+                    if (fr.dd.jarvis.device.RdvTermines.marque(termines, e) == null) HudButton("✅ Rendez-vous terminé (en ${store.rdvTermineCouleur.value})") {
+                        scope.launch { withContext(Dispatchers.IO) { fr.dd.jarvis.device.RdvTermines.marquer(app, e, null) }; refresh++; selected = null }
+                    } else HudButton("↩️ Plus terminé") {
+                        scope.launch { withContext(Dispatchers.IO) { fr.dd.jarvis.device.RdvTermines.reprendre(app, e) }; refresh++; selected = null }
+                    }
                     Text("Couleur du rendez-vous", color = HudDim, fontSize = 12.sp)
                     ColorPalette(store.eventColor[e.id] ?: e.eventColor) {
                         repo.setEventColor(e.id, it)

@@ -29,6 +29,10 @@ object Annulation {
         derniere = Action("rappel_lieu", JSONObject().put("id", id).put("texte", texte), "")
     }
 
+    fun noterRdvTermine(cles: List<String>) {
+        derniere = Action("rdv_termine", JSONObject().put("cles", org.json.JSONArray(cles)), "")
+    }
+
     fun noterListe(liste: String, elements: List<String>) {
         derniere = Action("liste_ajouter", JSONObject().put("liste", liste).put("elements", org.json.JSONArray(elements)), "")
     }
@@ -59,6 +63,7 @@ object Annulation {
         "create_event" -> "le rendez-vous « ${a.args.optString("title").take(60)} »"
         "liste_ajouter" -> "l'ajout à la liste ${a.args.optString("liste")}"
         "rappel_lieu" -> "le rappel à l'arrivée « ${a.args.optString("texte").take(60)} »"
+        "rdv_termine" -> "le rendez-vous marqué terminé"
         else -> "la dernière action"
     }
 
@@ -83,6 +88,11 @@ object Annulation {
             val n = fr.dd.jarvis.device.Listes.retirerAjout(app, a.args.optString("liste"), el)
             return if (n > 0) "↩️ Annulé : ${el.joinToString(", ") { it.lowercase() }} retiré${if (n > 1) "s" else ""} de ta liste ${a.args.optString("liste")}."
                 else "↩️ Ces articles n'étaient plus sur ta liste ${a.args.optString("liste")}."
+        }
+        if (a.outil == "rdv_termine") {
+            val cles = a.args.optJSONArray("cles")?.let { j -> (0 until j.length()).map { j.optString(it) } }.orEmpty()
+            val n = fr.dd.jarvis.device.RdvTermines.annuler(app, cles)
+            return if (n > 0) "↩️ Annulé : ${if (n > 1) "$n rendez-vous ne sont plus marqués terminés" else "le rendez-vous n'est plus marqué terminé"} (couleur d'avant rétablie)." else "Ce rendez-vous n'était plus marqué terminé."
         }
         if (a.outil == "rappel_lieu") return if (fr.dd.jarvis.device.RappelsLieu.supprimer(app, a.args.optInt("id"))) "↩️ Annulé : ${libelle(a)}." else "Ce rappel n'existe plus."
         val (outil, args) = inverse(a) ?: return "Je ne sais pas défaire ${libelle(a)} automatiquement."

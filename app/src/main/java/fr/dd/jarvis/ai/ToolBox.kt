@@ -415,6 +415,9 @@ class ToolBox(
                 "depart" to prop("oui = au départ du lieu (défaut : à l'arrivée)"), "chaque_fois" to prop("oui = à chaque passage (défaut : une fois)")), listOf("texte", "lieu")))
         put(tool("anniversaires", "Anniversaires (contacts Android + ceux dits à JARVIS) : lister (prochains, sur N jours) | de (date d'une personne) | ajouter (nom, date JJ/MM ou JJ/MM/AAAA) | supprimer (nom). Ils sont annoncés au point du matin, la veille au soir et par notification.",
             mapOf("action" to prop("lister (défaut) | de | ajouter | supprimer"), "nom" to prop("Personne."), "date" to prop("ajouter : JJ/MM ou JJ/MM/AAAA."), "jours" to prop("lister : nombre de jours (défaut 60).")))) 
+        put(tool("rdv_termine", "Marque un rendez-vous de l'agenda comme TERMINÉ : il prend la couleur demandée (sinon celle des rendez-vous terminés) et JARVIS le considère comme fait. N'écris JAMAIS « terminé » dans le titre ou la description (pas d'update_event pour ça). Sans précision : le rendez-vous en cours, sinon le dernier commencé aujourd'hui.",
+            mapOf("phrase" to prop("La demande de l'utilisateur telle quelle (ex. « le rendez-vous avec Dupont est terminé, mets-le en gris »)."),
+                "action" to prop("terminer (défaut) | reprendre (n'est plus terminé) | lister | reglage"), "couleur" to prop("Couleur (vert, gris, bleu…), optionnel."))))
         put(tool("mode_rendez_vous", "Mode rendez-vous : Ne pas déranger automatique pendant les rendez-vous de l'agenda (clients, ou tous), son rétabli à la fin, liste des appels manqués ; option SMS automatique « je te rappelle » aux contacts qui appellent. Actions : etat | activer (tous=oui pour tous les rendez-vous) | desactiver | sms_on | sms_off | message (texte, {fin} = heure de fin).",
             mapOf("action" to prop("etat | activer | desactiver | sms_on | sms_off | message"), "tous" to prop("activer : oui = tous les rendez-vous, non = seulement ceux des clients."), "texte" to prop("message : texte du SMS automatique."))))
         put(tool("courrier", "Ce que JARVIS a repéré dans les SMS et mails reçus : colis (transporteur, numéro, état, code de retrait, lien de suivi), factures et devis reçus (émetteur, montant, échéance), rendez-vous détectés. Actions : colis | a_traiter (défaut) | traiter (id) | supprimer (id) | rdv_agenda (id facultatif : ajoute le rendez-vous détecté à l'agenda) | liste (tout, avec les id).",
@@ -1204,6 +1207,22 @@ class ToolBox(
             }
             ToolResult(A.executer(app, i), direct = true)
         }
+        "rdv_termine" -> {
+            val R = fr.dd.jarvis.device.RdvTermines
+            val phrase = a.optString("phrase").trim()
+            val coul = a.optString("couleur").trim().lowercase().ifBlank { null }
+            val action = a.optString("action").trim().lowercase()
+            val lue = R.intention(phrase.ifBlank { "le rendez-vous est terminé" })
+            val i: fr.dd.jarvis.device.RdvTermines.Intention = when {
+                action == "lister" -> fr.dd.jarvis.device.RdvTermines.Intention.Lister(null)
+                action == "reglage" -> fr.dd.jarvis.device.RdvTermines.Intention.Reglage(coul, null)
+                action == "reprendre" -> fr.dd.jarvis.device.RdvTermines.Intention.Reprendre((lue as? fr.dd.jarvis.device.RdvTermines.Intention.Reprendre)?.cible ?: R.cible(phrase, LocalDate.now()))
+                lue is fr.dd.jarvis.device.RdvTermines.Intention.Terminer -> lue.copy(couleur = coul ?: lue.couleur)
+                lue != null -> lue
+                else -> fr.dd.jarvis.device.RdvTermines.Intention.Terminer(R.cible(phrase, LocalDate.now()), coul)
+            }
+            ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { R.executer(app, i) }, direct = true)
+        }
         "mode_rendez_vous" -> {
             val S = fr.dd.jarvis.device.SilenceRdv
             val i: fr.dd.jarvis.device.SilenceRdv.Intention = when (a.optString("action").trim().lowercase()) {
@@ -1466,12 +1485,13 @@ class ToolBox(
         val filterId = calendarFilter?.takeIf { it.isNotBlank() }?.let { cal.findCalendar(it, false)?.id }
         val events = cal.events(from, days, onlyVisible = filterId == null).filter { filterId == null || it.calId == filterId }
         if (events.isEmpty()) return ""
+        val termines = fr.dd.jarvis.device.RdvTermines.lire(app.store)
         return events.joinToString("\n") { e ->
             val s = java.time.Instant.ofEpochMilli(e.begin).atZone(if (e.allDay) java.time.ZoneOffset.UTC else zone)
             val en = java.time.Instant.ofEpochMilli(e.end).atZone(if (e.allDay) java.time.ZoneOffset.UTC else zone)
             val when_ = if (e.allDay) "${s.format(dayFmt)} journée entière" else "${s.format(dayFmt)} ${s.format(timeFmt)}→${en.format(timeFmt)}"
             val calName = cals[e.calId]?.let { cal.displayName(it) } ?: "Agenda"
-            "• #${e.id} | $when_ | agenda : $calName | ${e.title}" +
+            "• #${e.id} | $when_ | agenda : $calName | ${e.title}" + (if (fr.dd.jarvis.device.RdvTermines.marque(termines, e) != null) " | ✅ TERMINÉ (marqué par l'utilisateur)" else "") +
                 (if (e.location.isNotBlank()) " | lieu : ${e.location}" else "") +
                 (if (e.description.isNotBlank()) " | notes : ${fr.dd.jarvis.device.HtmlText.text(e.description).take(400)}" else "")
         }
