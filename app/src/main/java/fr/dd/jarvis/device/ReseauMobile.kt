@@ -137,7 +137,10 @@ object ReseauMobile {
     }
 
     private val PAS_MOBILE = Regex("\\b(wi ?fi|freebox|box|fibre|adsl|ethernet|serveur|sociaux|social|discord|tiktok|instagram|facebook|youtube|linkedin|" +
-        "home assistant|maison|tele|tv|television|enceinte|plex|bot|domotique|neuronal|neurones|entreprise|professionnel|contacts? pro)\\b")
+        "home assistant|tele|tv|television|enceinte|plex|bot|domotique|neuronal|neurones|entreprise|professionnel|contacts? pro)\\b")
+    /** « La maison » n'exclut que si rien ne désigne le réseau du téléphone (« le réseau chez moi » / « la réception à la maison » restent mobiles). */
+    private val MAISON_SEULE = Regex("\\bmaison\\b")
+    private val INDICE_MOBILE = Regex("\\b(signal|capte|captes|reception|4g|5g|antenne|barres?|appels?|sms|mms|mobile|telephone|portable|operateur|free|orange|sfr|bouygues|apn|dbm)\\b")
     private val SUJET = Regex("\\b(reseau|reseaux|signal|reception|capte|captes|barres?|4g|5g|3g|couverture|antenne|debit mobile|donnees mobiles|connexion mobile|operateur|apn)\\b")
 
     /**
@@ -146,7 +149,10 @@ object ReseauMobile {
      */
     fun intention(texte: String): String? {
         val n = normaliser(texte).replace(Regex("[?!.,;:]+"), " ").replace(Regex("\\s+"), " ").trim()
+        // « Active les appels Wi-Fi » (le Wi-Fi est exclu plus bas : traité avant).
+        if (Regex("\\b(active|activer|mets|mettre|allume|autorise|autoriser)\\b.{0,15}\\b(appels? (via |par |en )?(le )?wi ?fi|wifi calling|vowifi)\\b").containsMatchIn(n)) return "appels_wifi"
         if (n.isBlank() || n.split(' ').size > 18 || PAS_MOBILE.containsMatchIn(n)) return null
+        if (MAISON_SEULE.containsMatchIn(n) && !INDICE_MOBILE.containsMatchIn(n) && !Regex("\\b(ameliore|ameliorer|optimise|optimiser|booste|booster)\\b").containsMatchIn(n)) return null
         // Réception des SMS / MMS, qualité des appels : diagnostics dédiés.
         // Envoyer / répondre à un message n'est pas un problème de réception (« envoie un SMS à Martin : je serai en retard »).
         val envoi = Regex("\\b(envoie|envoyer|envoi|ecris|ecrire|reponds|repondre|transfere|transferer|dis lui|dire|previens|prevenir|lis|lire)\\b").containsMatchIn(n)
@@ -187,6 +193,20 @@ object ReseauMobile {
         if (Regex("\\b(ameliore|ameliorer|optimise|optimiser|repare|reparer|corrige|corriger|regle|regler|booste|booster|arrange|arranger|resous|resoudre)\\b").containsMatchIn(n)) return "optimiser"
         if (Regex("\\b(comment|quel|quelle|quels|quelles|est ce|j ai|ai je|etat|qualite|niveau|teste|tester|verifie|verifier|diagnostic|diagnostique|combien|capte|captes|bien|mal|faible|pourquoi)\\b").containsMatchIn(n)) return "diagnostic"
         return null
+    }
+
+    /**
+     * Suite d'un échange sur le réseau mobile (« améliore-le », « vas-y, règle ça », « tu peux l'optimiser ? ») : à
+     * traiter comme « améliore mon réseau » — sinon le modèle se contente d'expliquer.
+     */
+    fun suiteAmelioration(texte: String, reponsePrecedente: String): Boolean {
+        val n = normaliser(texte).replace(Regex("[?!.,;:]+"), " ").replace(Regex("\\s+"), " ").trim()
+        if (n.isBlank() || n.split(' ').size > 12) return false
+        val reseau = Regex("(Réseau mobile|dBm|APN|signal|réception|appels Wi-Fi|4G|5G)", RegexOption.IGNORE_CASE).findAll(reponsePrecedente).count() >= 2
+        if (!reseau) return false
+        return Regex("\\b(ameliore|ameliorer|optimise|optimiser|regle|regler|corrige|corriger|repare|reparer|booste|booster|arrange|arranger|" +
+            "vas y|fais le|fais la|fais ca|go|lance|applique|appliquer|fais le necessaire|occupe t en|mieux)\\b").containsMatchIn(n) &&
+            !Regex("\\b(musique|alarme|reveil|mail|sms a|message a|planning|lumiere|tele|poele|chauffage|note|facture|devis)\\b").containsMatchIn(n)
     }
 
     // ------------------------------------------------------------------ lecture du téléphone
@@ -449,21 +469,50 @@ object ReseauMobile {
     }
 
     /** Diagnostic + corrections sûres appliquées après accord (mode avion, données, antenne) + conseils pour le reste. */
+    /**
+     * « Améliore mon réseau » : JARVIS AGIT. Il établit un plan d'après la situation réelle (mode avion, données, signal,
+     * 5G qui décroche, Wi-Fi disponible), le propose en UNE confirmation, l'exécute, puis compare avant / après et dit
+     * honnêtement ce qu'aucun réglage ne peut changer (la puissance de l'antenne) et ce qui le peut (appels Wi-Fi,
+     * femtocell, emplacement). Plus jamais un simple exposé.
+     */
     suspend fun optimiser(app: JarvisApp, confirm: suspend (String, Boolean) -> Boolean): String {
         val e = etat(app)
-        val faits = ArrayList<String>()
+        val q = qualite(e.signal)
         val shell = PhoneShell.ready(app)
-        if (e.modeAvion && shell && confirm("Le mode avion est activé (ni appels ni SMS). Je le désactive ?", true))
-            faits += if (kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { modeAvion(app, false) }) "✅ Mode avion désactivé." else "❌ Le mode avion n'a pas pu être désactivé."
-        if (e.donnees == false && !e.wifi && shell && confirm("Les données mobiles sont coupées et tu n'es pas en Wi-Fi. Je les active ?", true))
-            faits += kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.perform("data_on", "") }
-        val q = qualite(etat(app).signal)
-        if (!e.modeAvion && (q == Qualite.FAIBLE || q == Qualite.TRES_FAIBLE || q == Qualite.AUCUNE) && shell)
-            faits += reenregistrer(app, confirm)
-        val bilan = diagnostic(app)
-        return (if (faits.isNotEmpty()) "🛠️ Fait :\n" + faits.joinToString("\n") { "- $it" } + "\n\n" else "") + bilan +
-            (if (!shell) "\n\nℹ️ Avec Shizuku ou l'ADB intégré, je peux aussi relancer le réseau et couper / rétablir le mode avion moi-même."
-             else "\n\n🚀 Pour aller plus loin : « optimise l'APN à fond » (réglages mesurés, le plus rapide gardé) et « teste les DNS ».")
+        val faible = !e.modeAvion && (q == Qualite.FAIBLE || q == Qualite.TRES_FAIBLE || q == Qualite.AUCUNE)
+        val cinqG = e.signal?.techno == "5G" || e.signal?.nsa == true ||
+            runCatching { ReseauReglages.masqueActuel(app)?.first?.let { it and ReseauReglages.BIT_NR != 0L } }.getOrNull() == true
+        val oui: suspend (String, Boolean) -> Boolean = { _, _ -> true }
+        // Le plan : (ce que je fais, l'action).
+        val plan = ArrayList<Pair<String, suspend () -> String>>()
+        if (e.modeAvion && shell) plan += "désactiver le mode avion" to { if (kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { modeAvion(app, false) }) "✅ Mode avion désactivé." else "❌ Le mode avion n'a pas pu être désactivé." }
+        if (e.donnees == false && !e.wifi && shell) plan += "réactiver les données mobiles" to { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.perform("data_on", "") } }
+        if (faible && cinqG && shell) plan += "passer en 4G (avec un signal aussi faible, la 5G décroche et fait chuter appels et données)" to { ReseauReglages.choisirType(app, "4g", oui) }
+        if (faible && e.wifi) plan += "activer les appels Wi-Fi en « Wi-Fi de préférence » (appels et SMS passent par ta box quand l'antenne est faible)" to { ReseauReglages.activerAppelsWifi(app) }
+        if (faible && shell && !e.enAppel) plan += "relancer la recherche d'antenne (5 s de mode avion : le téléphone se raccroche à la meilleure antenne)" to { reenregistrer(app, oui) }
+        val l = ArrayList<String>()
+        if (plan.isEmpty()) {
+            l += if (faible) "📶 Signal ${q.libelle} (${e.signal?.dbm?.let { "$it dBm" } ?: "aucun"}) et rien que je puisse régler moi-même ici" +
+                (if (!shell) " sans Shizuku / l'ADB intégré" else "") + "." else "✅ Ton réseau mobile n'a rien à corriger : ${ligneSignal(e)}."
+        } else {
+            if (!confirm("Pour améliorer ton réseau, je vais :\n" + plan.mapIndexed { i, p -> "${i + 1}. ${p.first}" }.joinToString("\n") +
+                    "\nLa connexion peut se couper quelques secondes. On y va ?", true)) return "Amélioration du réseau annulée."
+            l += "🛠️ Fait :"
+            for ((quoi, action) in plan) l += "- " + runCatching { action() }.getOrElse { "❌ $quoi : ${it.message}" }.lineSequence().first()
+            val apres = etat(app)
+            l += "\nAvant : ${ligneSignal(e)}\nAprès : ${ligneSignal(apres)}"
+        }
+        // Ce qu'aucun réglage ne change, et ce qui le peut.
+        if (faible && e.signal?.dbm != null) {
+            l += "\n📡 ${e.signal.dbm} dBm, c'est la puissance de l'antenne qui arrive jusqu'au téléphone : aucun réglage (APN compris) ne l'augmente — " +
+                "l'APN ne joue que sur l'accès à internet une fois connecté."
+            l += "💡 Ce qui améliore vraiment la réception chez toi :"
+            if (!e.wifi) l += "- te connecter au Wi-Fi, puis les appels Wi-Fi prennent le relais (« active les appels Wi-Fi ») ;"
+            l += "- un boîtier femtocell de l'opérateur (une mini-antenne branchée sur ta box ; Free en propose à ses abonnés Freebox — à demander dans ton espace abonné) ;"
+            l += "- poser le téléphone près d'une fenêtre ou à l'étage ; les amplificateurs de signal vendus en ligne sont interdits sans l'accord de l'opérateur."
+        } else if (!faible && !e.wifi && shell) l += "\n🚀 Pour gagner en débit : « optimise l'APN » (je cherche moi-même le réglage le plus rapide)."
+        if (!shell) l += "\nℹ️ Avec Shizuku ou l'ADB intégré, je peux aussi relancer l'antenne, passer en 4G et couper le mode avion moi-même."
+        return l.joinToString("\n")
     }
 
     /** Ouvre l'écran de réglage voulu (apn, reseau, operateur, appels, appels_wifi, sms, mode_avion, sim). */

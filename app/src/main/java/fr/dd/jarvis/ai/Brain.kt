@@ -330,7 +330,9 @@ class Brain(
                 }
             }
             // Réseau mobile (signal, 4G / 5G, APN, SMS qui n'arrivent pas, appels qui coupent) : diagnostic et réglages.
-            fr.dd.jarvis.device.ReseauMobile.intention(texteUser)?.let { action ->
+            (fr.dd.jarvis.device.ReseauMobile.intention(texteUser) ?: "optimiser".takeIf {
+                fr.dd.jarvis.device.ReseauMobile.suiteAmelioration(texteUser, history.dropLast(1).lastOrNull { !it.fromUser }?.text.orEmpty())
+            })?.let { action ->
                 onStatus("📶 Réseau mobile…")
                 return reflexe(tools.execute("reseau_mobile", JSONObject().put("action", action.substringBefore(':')).put("cible", action.substringAfter(':', ""))).text)
             }

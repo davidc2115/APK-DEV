@@ -61,3 +61,18 @@ class ApnExplorateurTest {
         assertEquals(c, ApnExplorateur.configDepuisJson(org.json.JSONObject().put("apn", "free").put("protocole", "IP").put("mtu", 1420).put("type", "default,supl")))
     }
 }
+
+class AmeliorationReseauTest {
+    @Test fun phrases() {
+        for (p in listOf("améliore le réseau à la maison", "peux-tu améliorer le réseau chez moi", "améliore la réception à la maison", "améliore mon réseau", "optimise ma réception"))
+            assertEquals(p, "optimiser", ReseauMobile.intention(p))
+        assertEquals("appels_wifi", ReseauMobile.intention("active les appels Wi-Fi"))
+        org.junit.Assert.assertNull(ReseauMobile.intention("le réseau de la maison est lent"))
+        org.junit.Assert.assertNull(ReseauMobile.intention("améliore le wifi de la maison"))
+        val diag = "📱 Réseau mobile — Free\n📶 4G · signal très faible 🔴 (-111 dBm)\n💡 À faire : active les appels Wi-Fi"
+        for (p in listOf("améliore-le", "vas-y", "tu peux l'optimiser ?", "règle ça"))
+            assertTrue(p, ReseauMobile.suiteAmelioration(p, diag))
+        assertFalse(ReseauMobile.suiteAmelioration("améliore-le", "🎵 Daft Punk — One More Time"))
+        assertFalse(ReseauMobile.suiteAmelioration("mets la musique", diag))
+    }
+}

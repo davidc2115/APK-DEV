@@ -110,6 +110,89 @@ object ReseauReglages {
         }
     }
 
+    // ------------------------------------------------------------------ appels Wi-Fi
+
+    private val LIBELLE_WFC = Regex("(?i)(appels? (via |par |en |sur )?(le )?wi.?fi|wi.?fi calling|vowifi|appel wi.?fi|wlan call)")
+    private val PREFERENCE = Regex("(?i)(pr[ée]f[ée]rence|mode d.appel|calling preference|mode de connexion)")
+    private val WIFI_PREFERE = Regex("(?i)(wi.?fi (de )?pr[ée]f[ée]r|pr[ée]f[ée]rer le wi.?fi|wi.?fi preferred|privil[ée]gier le wi.?fi)")
+
+    private fun noeuds(racine: android.view.accessibility.AccessibilityNodeInfo?): List<android.view.accessibility.AccessibilityNodeInfo> {
+        val out = ArrayList<android.view.accessibility.AccessibilityNodeInfo>()
+        fun p(n: android.view.accessibility.AccessibilityNodeInfo?, d: Int) {
+            if (n == null || d > 30 || out.size > 600) return
+            out += n
+            for (i in 0 until n.childCount) p(n.getChild(i), d + 1)
+        }
+        p(racine, 0)
+        return out
+    }
+
+    private fun texte(n: android.view.accessibility.AccessibilityNodeInfo) = (n.text?.toString().orEmpty() + " " + n.contentDescription?.toString().orEmpty()).trim()
+
+    /** L'interrupteur lié à l'étiquette [n] : lui-même, ou un élément « cochable » de sa ligne (jusqu'à 3 niveaux au-dessus). */
+    private fun interrupteur(n: android.view.accessibility.AccessibilityNodeInfo): android.view.accessibility.AccessibilityNodeInfo? {
+        if (n.isCheckable) return n
+        var p: android.view.accessibility.AccessibilityNodeInfo? = n.parent
+        repeat(3) { val c = p ?: return null; noeuds(c).firstOrNull { it.isCheckable }?.let { return it }; p = c.parent }
+        return null
+    }
+
+    private fun cliquer(n: android.view.accessibility.AccessibilityNodeInfo): Boolean {
+        var c: android.view.accessibility.AccessibilityNodeInfo? = n
+        repeat(4) { val x = c ?: return false; if (x.isClickable) return x.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK); c = x.parent }
+        return false
+    }
+
+    /**
+     * Active les appels Wi-Fi (et le mode « Wi-Fi de préférence » quand l'écran le propose) : par l'écran de réglage,
+     * piloté par l'accessibilité de JARVIS, avec vérification de l'interrupteur ; sinon (Android ≤ 13 + Shizuku) par le
+     * réglage de la SIM ; sinon l'écran est ouvert. Une ligne de compte rendu.
+     */
+    suspend fun activerAppelsWifi(app: JarvisApp): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (app.enVoiture) return@withContext "🚗 En voiture, je n'ouvre pas les réglages : les appels Wi-Fi s'activeront une fois arrêté."
+        val acc = fr.dd.jarvis.service.JarvisAccessibilityService.instance
+        if (acc == null) {
+            // Sans accessibilité : réglage de la SIM (Android 13 et avant ; à partir d'Android 14 il n'est plus relu ainsi).
+            val sub = runCatching { SubscriptionManager.getDefaultVoiceSubscriptionId() }.getOrDefault(-1)
+            if (Build.VERSION.SDK_INT < 34 && sub >= 0 && PhoneShell.ready(app)) {
+                executer(app, "content update --uri content://telephony/siminfo --bind wfc_ims_enabled:i:1 --bind wfc_ims_mode:i:2 --where ${ApnConfig.q("_id=$sub")}")
+                val lu = executer(app, "content query --uri content://telephony/siminfo --projection wfc_ims_enabled:wfc_ims_mode --where ${ApnConfig.q("_id=$sub")}")
+                if (lu.contains("wfc_ims_enabled=1")) return@withContext "✅ Appels Wi-Fi activés (Wi-Fi de préférence)."
+            }
+            return@withContext "📞 Appels Wi-Fi : active-les dans l'écran ouvert (le service d'accessibilité de JARVIS me permettrait de le faire moi-même). " + ReseauMobile.ouvrirReglage(app, "appels_wifi")
+        }
+        val ouvert = ReseauMobile.ouvrirReglage(app, "appels_wifi")
+        if (!ouvert.startsWith("⚙️")) return@withContext "📞 Appels Wi-Fi : $ouvert"
+        Thread.sleep(1_800)
+        var retours = 1
+        fun chercher() = noeuds(acc.rootInActiveWindow).firstOrNull { LIBELLE_WFC.containsMatchIn(texte(it)) }
+        var etiquette = chercher()
+        var inter = etiquette?.let { interrupteur(it) }
+        // Écran du réseau mobile (repli) : la ligne « Appels Wi-Fi » mène à sa page.
+        if (etiquette != null && inter == null) { cliquer(etiquette); Thread.sleep(1_500); retours++; etiquette = chercher(); inter = etiquette?.let { interrupteur(it) } }
+        val resultat = when {
+            inter == null -> "📞 Je n'ai pas trouvé l'interrupteur des appels Wi-Fi sur cet écran : active-les à la main (Réglages › Cartes SIM et réseaux mobiles › ta SIM › Appels Wi-Fi). Ton opérateur doit les proposer."
+            inter.isChecked -> "✅ Appels Wi-Fi déjà activés."
+            else -> {
+                if (!inter.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) cliquer(inter)
+                Thread.sleep(900)
+                val verifie = chercher()?.let { interrupteur(it) }?.apply { refresh() }?.isChecked == true
+                if (verifie) "✅ Appels Wi-Fi activés." else "⚠️ J'ai appuyé sur l'interrupteur des appels Wi-Fi mais je ne peux pas confirmer qu'il est activé : vérifie l'écran."
+            }
+        }
+        // Préférence « Wi-Fi de préférence », si l'écran la propose.
+        var pref = ""
+        if (resultat.startsWith("✅")) noeuds(acc.rootInActiveWindow).firstOrNull { PREFERENCE.containsMatchIn(texte(it)) }?.let { ligne ->
+            if (WIFI_PREFERE.containsMatchIn(noeuds(ligne.parent ?: ligne).joinToString(" ") { texte(it) })) pref = " Mode « Wi-Fi de préférence » déjà choisi."
+            else if (cliquer(ligne)) {
+                Thread.sleep(1_000)
+                noeuds(acc.rootInActiveWindow).firstOrNull { WIFI_PREFERE.containsMatchIn(texte(it)) }?.let { if (cliquer(it)) pref = " Mode « Wi-Fi de préférence » choisi." }
+            }
+        }
+        repeat(retours) { acc.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK); Thread.sleep(300) }
+        resultat + pref
+    }
+
     // ------------------------------------------------------------------ cartes SIM
 
     data class Sim(val emplacement: Int, val nom: String, val operateur: String, val donnees: Boolean, val appels: Boolean, val sms: Boolean, val subId: Int)
