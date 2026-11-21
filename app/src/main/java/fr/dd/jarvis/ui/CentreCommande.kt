@@ -71,6 +71,7 @@ fun CentreCommande(app: JarvisApp, vm: ChatViewModel, onOnglet: (Int) -> Unit, o
     val hermes by rafraichi(app, 30_000, Tuile("🪽", "Hermès", "…", etat = EtatTuile.CHARGEMENT)) { tuileHermes(app) }
     val mails by rafraichi(app, 300_000, Tuile("✉️", "Mails", "…", etat = EtatTuile.CHARGEMENT)) { tuileMails(app) }
     val tel by rafraichi(app, 60_000, Tuile("📱", "Téléphone", "…", etat = EtatTuile.CHARGEMENT)) { tuileTelephone(app) }
+    val reseau by rafraichi(app, 60_000, Tuile("📡", "Réseau mobile", "…", etat = EtatTuile.CHARGEMENT)) { tuileReseau(app) }
 
     val tuiles = listOf(
         TuileAction(agenda, onglet = 2),
@@ -81,6 +82,7 @@ fun CentreCommande(app: JarvisApp, vm: ChatViewModel, onOnglet: (Int) -> Unit, o
         TuileAction(hermes, demande = "Quels sont mes automatismes en place ?", action = if (fr.dd.jarvis.hermes.Hermes.degrade()) ({ fr.dd.jarvis.hermes.Hermes.reprendre() }) else null),
         TuileAction(mails, onglet = 3),
         TuileAction(tel, demande = "Fais le point sur la santé du téléphone."),
+        TuileAction(reseau, demande = "Comment est mon réseau mobile ?"),
     )
     val dernier = vm.messages.lastOrNull { !it.fromUser }?.text.orEmpty()
     var rafraichirMode by remember { mutableStateOf(0) }
@@ -320,6 +322,25 @@ private suspend fun tuileMails(app: JarvisApp): Tuile {
     if (l.isEmpty()) return Tuile("✉️", "Mails", "Aucun non lu", "", EtatTuile.INACTIF)
     return Tuile("✉️", "Mails", "${l.size}${if (l.size >= 30) "+" else ""} non lu${if (l.size > 1) "s" else ""}",
         l.take(2).joinToString("\n") { "${it.from.substringBefore('<').trim().take(22)} : ${it.subject.take(40)}" })
+}
+
+/** Réseau mobile en direct : techno, qualité du signal, opérateur, données ; en alerte si faible ou absent. */
+private fun tuileReseau(app: JarvisApp): Tuile {
+    val rm = fr.dd.jarvis.device.ReseauMobile
+    val e = rm.etat(app)
+    val q = rm.qualite(e.signal)
+    val valeur = when {
+        e.modeAvion -> "✈️ Mode avion"
+        e.signal == null || q == fr.dd.jarvis.device.ReseauMobile.Qualite.AUCUNE -> "📵 Aucun réseau"
+        else -> "${if (e.signal.nsa) "5G" else e.signal.techno.ifBlank { "Réseau" }} · ${q.libelle} ${q.pastille}"
+    }
+    val detail = listOf(
+        e.operateur.ifBlank { e.marqueSim },
+        e.signal?.dbm?.let { "$it dBm" + (e.signal.niveau?.let { n -> " · $n/4" }.orEmpty()) }.orEmpty(),
+        when (e.donnees) { true -> "🌐 données ✓"; false -> "🌐 données coupées"; null -> "" } + (if (e.wifi) " · Wi-Fi" else ""),
+    ).filter { it.isNotBlank() }.joinToString("\n")
+    return Tuile("📡", "Réseau mobile", valeur, detail,
+        if (e.modeAvion || q.ordinal >= fr.dd.jarvis.device.ReseauMobile.Qualite.FAIBLE.ordinal) EtatTuile.ALERTE else EtatTuile.OK)
 }
 
 private fun tuileTelephone(app: JarvisApp): Tuile {

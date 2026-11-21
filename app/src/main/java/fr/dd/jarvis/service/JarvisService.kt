@@ -234,6 +234,8 @@ class JarvisService : Service() {
         getSystemService(NotificationManager::class.java).cancel(NOTIF_REPRISE)
         running = true
         actuel = this
+        // Historique de la réception mobile et alerte de perte prolongée du réseau (écoute passive, sans mesure active).
+        runCatching { fr.dd.jarvis.device.ReseauHistorique.demarrer(application as fr.dd.jarvis.JarvisApp) }
         // Verrou de veille seulement PENDANT une conversation (voir garderEveille) : en attente du mot « Jarvis », le
         // micro actif suffit à Android ; le verrou permanent empêchait le téléphone de dormir même micro coupé.
         wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:wake").apply { setReferenceCounted(false) }
@@ -815,6 +817,7 @@ class JarvisService : Service() {
     override fun onDestroy() {
         running = false
         if (actuel === this) actuel = null
+        runCatching { fr.dd.jarvis.device.ReseauHistorique.arreter(application as fr.dd.jarvis.JarvisApp) }
         main.removeCallbacks(surveillance)
         main.removeCallbacks(relance)
         scope.cancel()

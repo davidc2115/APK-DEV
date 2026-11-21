@@ -332,7 +332,7 @@ class Brain(
             // Réseau mobile (signal, 4G / 5G, APN, SMS qui n'arrivent pas, appels qui coupent) : diagnostic et réglages.
             fr.dd.jarvis.device.ReseauMobile.intention(texteUser)?.let { action ->
                 onStatus("📶 Réseau mobile…")
-                return reflexe(tools.execute("reseau_mobile", JSONObject().put("action", action)).text)
+                return reflexe(tools.execute("reseau_mobile", JSONObject().put("action", action.substringBefore(':')).put("cible", action.substringAfter(':', ""))).text)
             }
             // Actions courantes reconnues sans IA (alarme, minuteur, appel, SMS, appli, météo, planning, rappel…).
             CommandesDirectes.intention(texteUser)?.let { i ->

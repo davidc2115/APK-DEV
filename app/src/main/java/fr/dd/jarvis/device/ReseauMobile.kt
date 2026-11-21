@@ -155,6 +155,18 @@ object ReseauMobile {
         if (Regex("\\btombe (directement |toujours |direct )?sur (la|ma) messagerie\\b").containsMatchIn(n)) return "appels"
         if (!envoi && Regex("\\b(appels?|m appelle|m appellent|appelle)\\b").containsMatchIn(n) && Regex("\\b(coupent|coupe|coupes|coupees|passent pas|passe pas|ne passent|ne passe|" +
                 "qualite|gresille|entends? mal|entend mal|m entend pas|m entendent pas|messagerie|manques?|probleme|hache|saccade)\\b").containsMatchIn(n)) return "appels"
+        // Choix 4G / 5G.
+        if (Regex("\\b(passe|passer|mets|mettre|force|forcer|bascule|basculer|reste|rester)\\b.{0,20}\\b(en|sur|la)\\b.{0,6}\\b4g\\b|\\b(desactive|desactiver|coupe|couper|enleve|enlever|retire|retirer|sans)\\b.{0,12}\\b5g\\b").containsMatchIn(n)) return "type_reseau:4g"
+        if (Regex("\\b(active|activer|remets|remettre|reactive|reactiver|rallume|passe|passer|mets|mettre|bascule|basculer|autorise|autoriser)\\b.{0,20}\\b5g\\b").containsMatchIn(n)) return "type_reseau:5g"
+        if (Regex("\\b(remets|remettre|retablis|retablir|restaure|restaurer)\\b.{0,25}\\breseau\\b.{0,20}\\b(comme avant|d avant|precedent)\\b").containsMatchIn(n)) return "type_reseau:avant"
+        // Test de débit (du réseau mobile).
+        // (« la vitesse du vent », « le débit de mon compte » ne sont pas des tests de connexion.)
+        if (!Regex("\\b(vent|riviere|compte|banque|bancaire|carte bancaire|virement|prelevement|eau|robinet|voiture|vehicule)\\b").containsMatchIn(n) &&
+            Regex("\\b(test|teste|tester|mesure|mesurer)\\b.{0,12}\\b(debit|vitesse|connexion|internet|latence|ping)\\b|\\bspeed ?test\\b|" +
+                "\\b(quel|quelle|combien)\\b.{0,15}\\bdebit\\b|\\b(debit|vitesse|latence|ping|bande passante)\\b.{0,12}\\b(internet|connexion|reseau|4g|5g|mobile|telephone|donnees)\\b").containsMatchIn(n)) return "debit"
+        // Historique de la réception.
+        if (Regex("\\b(ou|a quelle heure|quand)\\b.{0,20}\\b(capte|captes|capter|recois|reception|reseau)\\b.{0,15}\\b(mal|pas|moins|faible)\\b|\\bhistorique\\b.{0,20}\\b(reseau|reception|signal)\\b").containsMatchIn(n)) return "historique"
+        if (Regex("\\b(cartes? sim|double sim|deux sim|ma sim|mes sim|quelle sim)\\b").containsMatchIn(n) && !Regex("\\b(code|pin|puk)\\b").containsMatchIn(n)) return "sim"
         if (!SUJET.containsMatchIn(n)) return null
         if (Regex("\\bapn\\b").containsMatchIn(n)) return "apn"
         if (Regex("\\b(relance|relancer|reinitialise|reinitialiser|redemarre|redemarrer|reconnecte|reconnecter|rafraichis|rafraichir)\\b").containsMatchIn(n)) return "reenregistrer"
@@ -181,9 +193,35 @@ object ReseauMobile {
         else -> ""
     }
 
+    /** Signal lu dans un relevé Android (cellule servante ; 5G NSA = 4G + 5G), ou null s'il n'y a aucun réseau. */
+    fun depuis(ss: android.telephony.SignalStrength): Signal? {
+        if (Build.VERSION.SDK_INT < 29) return null
+        val l = ss.cellSignalStrengths
+        val nr = l.filterIsInstance<android.telephony.CellSignalStrengthNr>().firstOrNull { it.ssRsrp != Int.MAX_VALUE }
+        val lte = l.filterIsInstance<android.telephony.CellSignalStrengthLte>().firstOrNull { it.rsrp != Int.MAX_VALUE }
+        fun v(x: Int) = x.takeIf { it != Int.MAX_VALUE }
+        when {
+            nr != null && lte != null -> return Signal("4G", v(lte.rsrp), v(lte.rsrq), v(lte.rssnr), lte.level, nsa = true)
+            nr != null -> return Signal("5G", v(nr.ssRsrp), v(nr.ssRsrq), v(nr.ssSinr), nr.level)
+            lte != null -> return Signal("4G", v(lte.rsrp), v(lte.rsrq), v(lte.rssnr), lte.level)
+        }
+        return l.firstOrNull { it.dbm != Int.MAX_VALUE && it.dbm < 0 }?.let { c ->
+            val t = when (c) { is android.telephony.CellSignalStrengthWcdma, is android.telephony.CellSignalStrengthTdscdma -> "3G"; is android.telephony.CellSignalStrengthGsm -> "2G"; else -> "" }
+            Signal(t, c.dbm, niveau = c.level)
+        }
+    }
+
+    internal fun signalDe(app: JarvisApp, tm: TelephonyManager): Signal? = signal(app, tm)
+
+    /** « 4G · bon 🟢 (-88 dBm) ». */
+    fun resumeSignal(s: Signal): String = "${if (s.nsa) "5G NSA" else s.techno.ifBlank { "réseau" }} · ${qualite(s).libelle} ${qualite(s).pastille}" + (s.dbm?.let { " ($it dBm)" }.orEmpty())
+
+    fun ligneSignalActuelle(app: JarvisApp): String = ligneSignal(etat(app))
+
     /** Signal de la cellule servante, sans permission particulière (API 29+), sinon par les cellules (localisation). */
     private fun signal(ctx: Context, tm: TelephonyManager): Signal? {
         if (Build.VERSION.SDK_INT >= 29) runCatching {
+            tm.signalStrength?.let { ss -> depuis(ss)?.let { return it } }
             val l = tm.signalStrength?.cellSignalStrengths.orEmpty()
             val nr = l.filterIsInstance<android.telephony.CellSignalStrengthNr>().firstOrNull { it.ssRsrp != Int.MAX_VALUE }
             val lte = l.filterIsInstance<android.telephony.CellSignalStrengthLte>().firstOrNull { it.rsrp != Int.MAX_VALUE }
@@ -287,6 +325,10 @@ object ReseauMobile {
             " · connexion actuelle : " + (if (e.wifi) "Wi-Fi" else if (e.mobileActif) "réseau mobile" else "aucune") +
             (e.debitKbps?.let { " (débit estimé ${if (it >= 1000) "${it / 1000} Mbit/s" else "$it kbit/s"})" }.orEmpty())
         l += "🌍 Itinérance : ${if (e.itinerance) "oui" else "non"}"
+        runCatching { ReseauReglages.affichage(app) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { l += "🛰️ Affiché par l'opérateur : $it" }
+        runCatching { ReseauReglages.masqueActuel(app) }.getOrNull()?.let { (m, _) -> l += "⚙️ Réseaux autorisés : ${ReseauReglages.libelle(m)}" }
+        runCatching { ReseauReglages.sims(app) }.getOrNull()?.takeIf { it.size > 1 }?.let { l += ReseauReglages.texteSims(app) }
+        runCatching { ReseauHistorique.resume24h(app) }.getOrNull()?.let { l += it }
         val r = recommandations(e)
         return l.joinToString("\n") + "\n\n" + (if (r.isEmpty()) "✅ Rien d'anormal sur le réseau mobile." else "💡 À faire :\n" + r.joinToString("\n") { "- $it" })
     }
