@@ -17,7 +17,10 @@ data class SocieteData(
     val bulletins: List<BulletinRef> = emptyList(),
     val modeles: Map<String, String> = emptyMap(),        // présentations personnalisées (devis, facture, client, paie, planning, rapport)
     val modelesPrec: Map<String, String> = emptyMap(),    // version précédente (pour annuler)
-    val baremes: Baremes = Baremes()                      // barèmes officiels relevés automatiquement (URSSAF)
+    val baremes: Baremes = Baremes(),                     // barèmes officiels relevés automatiquement (URSSAF)
+    val frais: List<NoteFrais> = emptyList(),             // notes de frais (justificatif, montant, TVA, statut)
+    val creation: Map<String, Boolean> = emptyMap(),      // étapes de création de la société déjà faites (onglet Création)
+    val declarationsFaites: Map<String, String> = emptyMap() // échéance (id) → date où elle a été faite (onglet Déclarations)
 ) {
     fun modele(type: String): String = modeles[type] ?: Templates.defaut(type)
 

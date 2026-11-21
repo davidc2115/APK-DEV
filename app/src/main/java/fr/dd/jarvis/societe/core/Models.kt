@@ -46,7 +46,14 @@ data class Societe(
     val baremesAuto: Boolean = true,       // barèmes officiels (URSSAF) appliqués automatiquement à chaque mise à jour
     val kmlCouleurParticulier: String = "#20A45A",
     val kmlCouleurProfessionnel: String = "#2878D0",
-    val kmlCouleurSiege: String = "#FF9800"
+    val kmlCouleurSiege: String = "#FF9800",
+    // Déclarations (onglet Société › Déclarations) : statut et options qui décident quoi déclarer, où et quand.
+    val activite: String = "services_artisan",   // micro : services_artisan | services_commercial | ventes | bnc | bnc_cipav
+    val versementLiberatoire: Boolean = false,    // micro : impôt payé avec les cotisations (1 % / 1,7 % / 2,2 %)
+    val periodicite: String = "mensuelle",        // micro : mensuelle | trimestrielle (déclaration du CA à l'URSSAF)
+    val regimeTva: String = "",                   // "" = selon la forme | franchise | reel_simplifie | reel_normal
+    val acre: Boolean = false,
+    val dateCreation: String = ""                 // yyyy-MM-dd : début d'activité (ACRE, 1re année CFE…)
 )
 
 enum class Mode { FORFAIT, PAR_KWC, HEURE, UNITE }
@@ -207,6 +214,25 @@ data class Provision(
     val pct: Double,
     val montant: Double,
     val categorie: String = "reserve_benefices"
+)
+
+/** Note de frais / dépense de la société, avec son justificatif (photo ou PDF). */
+@Serializable
+data class NoteFrais(
+    val id: String,
+    val date: String,                                // yyyy-MM-dd (date de la dépense)
+    val fournisseur: String = "",
+    val description: String = "",
+    val categorie: String = "autre",
+    val ttc: Double = 0.0,
+    val tva: Double = 0.0,                           // montant de TVA indiqué sur le justificatif (récupérable si la société y est soumise)
+    val tauxTva: Double = 20.0,
+    val paiement: String = "",                       // cb_pro | cb_perso (à rembourser) | especes | virement | prelevement
+    val justificatif: String = "",                   // chemin relatif dans le dossier privé (societe/frais/…)
+    val statut: String = "a_traiter",                // a_traiter | traite | rembourse
+    val creeLe: String = "",
+    val source: String = "manuel",                   // manuel | photo | message
+    val km: Double = 0.0                             // indemnités kilométriques : distance parcourue
 )
 
 @Serializable

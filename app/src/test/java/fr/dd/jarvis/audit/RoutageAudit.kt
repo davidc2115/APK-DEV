@@ -15,6 +15,9 @@ object RoutageAudit {
         Capacites.demande(t)?.let { return "Capacites$comb" }
         if (Annulation.demande(t)) return "Annuler$comb"
         Calculs.repondre(t, java.time.LocalDate.of(2026, 11, 20))?.let { return "Calcul$comb" }
+        fr.dd.jarvis.societe.Frais.intention(t)?.let { return "Frais:${it::class.simpleName}$comb" }
+        fr.dd.jarvis.device.RappelsLieu.intention(t)?.let { return "RappelLieu$comb" }
+        fr.dd.jarvis.device.Courrier.intention(t)?.let { return "Courrier:${it.javaClass.simpleName}$comb" }
         fr.dd.jarvis.device.Listes.intention(t)?.let { return "Liste:${it::class.simpleName}$comb" }
         fr.dd.jarvis.device.Stationnement.intention(t)?.let { return "Parking:${it.javaClass.simpleName}$comb" }
         MailCommandes.intention(t)?.let { return "Mail:${it.first}$comb" }

@@ -51,7 +51,8 @@ import fr.dd.jarvis.societe.core.*
 import java.time.LocalDate
 import androidx.compose.ui.platform.LocalView
 
-private val SUBS = listOf("Résumé", "Clients", "Interventions", "Devis", "Factures", "Équipe", "Fiches de paie", "Bulletins générés", "Réglages")
+private val SUBS = listOf("Résumé", "Clients", "Interventions", "Devis", "Factures", "Équipe", "Fiches de paie", "Bulletins générés",
+    "Frais", "Reçus", "Déclarations", "Création", "Réglages")
 
 @Composable
 fun SocieteScreen(app: JarvisApp) {
@@ -73,6 +74,10 @@ fun SocieteScreen(app: JarvisApp) {
             5 -> EquipeTab(app)
             6 -> FichesPaieTab(app) { sub = 7 }
             7 -> BulletinsTab(app)
+            8 -> FraisTab(app)
+            9 -> RecusTab(app)
+            10 -> DeclarationsTab(app)
+            11 -> CreationTab(app)
             else -> ReglagesTab(app)
         }
     }

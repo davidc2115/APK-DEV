@@ -52,6 +52,11 @@ class AuditFonctionnelTest {
             "où est ma voiture" to "Parking:OuEst",
             "je suis garé ici" to "Parking:Noter",
             "annule" to "Annuler",
+            "ajoute une note de frais de 45 € chez Total pour du carburant" to "Frais:Ajouter",
+            "mes notes de frais à traiter" to "Frais:Lister",
+            "rappelle-moi d'acheter du pain quand j'arrive à la maison" to "RappelLieu",
+            "où en sont mes colis" to "Courrier:Colis",
+            "fais le point du soir" to "CD:morning_briefing",
         )
         val erreurs = attendus.filter { (p, a) -> r(p) != a }.map { (p, a) -> "« $p » → ${r(p)} (attendu $a)" }
         assertTrue(erreurs.joinToString("\n"), erreurs.isEmpty())

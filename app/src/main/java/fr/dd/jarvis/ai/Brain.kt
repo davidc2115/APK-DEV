@@ -42,6 +42,10 @@ class Brain(
 
     private fun consigneExigeUneSuite(texte: String): Boolean = forcerCerveau || runCatching { Restitution.exigeUneSuite(app.memo.all(), texte) }.getOrDefault(false)
 
+    private val DECLARER = Regex("^(?:jarvis )?(?:(?:qu est ce que|que|qu) (?:je dois|dois je|j ai a|il faut) declarer(?: (?:ce mois ci|en ce moment|bientot|maintenant|a l urssaf|aux impots))?|" +
+        "(?:quelles sont |montre moi |donne moi )?mes (?:declarations|echeances (?:fiscales|sociales|urssaf|de declaration))|quelles declarations (?:je dois faire|dois je faire|a faire)|" +
+        "(?:combien|quel montant) (?:je dois |dois je )?declarer(?: a l urssaf| aux impots| ce mois ci)?|qu est ce que j ai a declarer|ce que je dois declarer)$")
+
     private fun estLecture(outil: String?) = outil != null && (outil in LECTURES || outil in LECTURES_DIRECTES || outil == "ha_entites")
 
     /**
@@ -321,6 +325,14 @@ class Brain(
                     }
                 } else return reflexe(fr.dd.jarvis.device.Courrier.texte(app, i), lecture = true)
             }
+            // Notes de frais (« ajoute une note de frais de 45 € chez Total », « mes notes de frais à traiter »).
+            fr.dd.jarvis.societe.Frais.intention(texteUser)?.let { i ->
+                onStatus("💶 Notes de frais…")
+                return reflexe(fr.dd.jarvis.societe.Frais.executer(app, i), lecture = i is fr.dd.jarvis.societe.Frais.Intention.Lister)
+            }
+            // « Qu'est-ce que je dois déclarer ? » : échéances, montants et marche à suivre selon le statut.
+            if (DECLARER.matches(fr.dd.jarvis.societe.core.normaliser(texteUser).replace(Regex("[?!.,;:]+"), " ").replace(Regex("\\s+"), " ").trim()))
+                return reflexe(fr.dd.jarvis.societe.Declarations.texte(app.societe.data, app.societe.data.declarationsFaites.keys), lecture = true)
             // Rappel à l'arrivée / au départ d'un lieu (« rappelle-moi de … quand j'arrive chez Dupont »).
             fr.dd.jarvis.device.RappelsLieu.intention(texteUser)?.let { d ->
                 onStatus("📍 Rappel à l'arrivée…")

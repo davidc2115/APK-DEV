@@ -402,6 +402,14 @@ class ToolBox(
         put(tool("liste", "Listes à cocher de l'utilisateur (courses par défaut, bricolage, cadeaux…), gardées dans le téléphone et dans Obsidian : ajouter des articles, en retirer, les cocher (pris), lire une liste, la vider, lister les listes, envoyer une liste par SMS.",
             mapOf("action" to prop("ajouter | retirer | cocher | lire (défaut) | vider | listes | envoyer"), "nom" to prop("Nom de la liste (défaut : Courses)."),
                 "elements" to prop("Articles séparés par des virgules (ajouter / retirer / cocher)."), "destinataire" to prop("Contact ou numéro (envoyer)."))))
+        put(tool("note_frais", "Notes de frais de la Société (dépense avec justificatif, montant TTC, TVA, date, fournisseur, catégorie) : ajouter, lister (statut a_traiter | traite | rembourse, mois aaaa-mm), marquer traitée / remboursée, supprimer (id). Les justificatifs se photographient dans l'onglet Société › Frais.",
+            mapOf("action" to prop("ajouter | lister (défaut) | traiter | rembourser | supprimer"), "ttc" to prop("Montant TTC (ajouter)"), "tva" to prop("Montant de TVA (facultatif)"),
+                "fournisseur" to prop("Fournisseur"), "description" to prop("Objet"), "categorie" to prop("carburant | peage | parking | repas | hebergement | transport | materiel | outillage | vehicule | telephone | logiciel | assurance | formation | banque | autre"),
+                "date" to prop("aaaa-mm-jj (défaut : aujourd'hui)"), "paiement" to prop("cb_pro | cb_perso | especes | virement | prelevement"), "statut" to prop("filtre (lister)"), "mois" to prop("aaaa-mm (lister)"), "id" to prop("identifiant (traiter / supprimer)"))))
+        put(tool("declarations", "Ce que la société doit déclarer selon son statut juridique (micro-entreprise, EI, EURL, SASU, SAS, SARL) : échéances (URSSAF, TVA, IS, liasse, CFE, DSN…), montants calculés d'après les factures encaissées / notes de frais / bulletins, et la marche à suivre exacte (site, rubrique, cases). Aussi les pièces à traiter (factures à encaisser, frais sans justificatif, bulletins manquants). Lis ce résultat avant de répondre à une question « que dois-je déclarer / comment déclarer ».",
+            mapOf("fait" to prop("identifiant d'une échéance à marquer comme faite (facultatif)"))))
+        put(tool("creation_societe", "Création de la société : étapes (statut, qualification d'électricien, assurances, statuts, annonce légale, guichet unique, SIRET, banque, ACRE, espaces en ligne, mentions), comparatif des statuts, vérification d'un SIRET dans l'annuaire officiel et remplissage de l'identité.",
+            mapOf("action" to prop("etapes (défaut) | comparatif | siret"), "siret" to prop("SIRET ou SIREN à vérifier (action siret)"), "remplir" to prop("oui = remplir l'identité de la société avec la fiche trouvée"))))
         put(tool("rappel_lieu", "Rappel À L'ARRIVÉE (ou au départ) d'un lieu : notification quand l'utilisateur arrive (ou part) — maison, travail, « ici », client de la Société ou adresse. Pour un rappel à une heure, utilise rappel_creer.",
             mapOf("texte" to prop("Ce qu'il faut rappeler."), "lieu" to prop("maison | travail | ici | nom d'un client | adresse"),
                 "depart" to prop("oui = au départ du lieu (défaut : à l'arrivée)"), "chaque_fois" to prop("oui = à chaque passage (défaut : une fois)")), listOf("texte", "lieu")))
@@ -1150,6 +1158,32 @@ class ToolBox(
                 ToolResult("Indique les articles (elements, séparés par des virgules).")
             else ToolResult(fr.dd.jarvis.device.Listes.executer(app, i) { d, m -> execute("envoyer_sms", JSONObject().put("destinataire", d).put("texte", m)).text }
                 ?: "Aucun de ces articles n'est sur tes listes.", direct = true)
+        }
+        "note_frais" -> ToolResult(fr.dd.jarvis.societe.Frais.outil(app, a), direct = a.optString("action").ifBlank { "lister" } == "lister")
+        "declarations" -> {
+            a.optString("fait").trim().takeIf { it.isNotBlank() }?.let { id -> app.societe.repo.update { d -> d.copy(declarationsFaites = d.declarationsFaites + (id to LocalDate.now().toString())) } }
+            ToolResult(fr.dd.jarvis.societe.Declarations.texte(app.societe.data, app.societe.data.declarationsFaites.keys), direct = true)
+        }
+        "creation_societe" -> when (a.optString("action").trim().lowercase()) {
+            "comparatif" -> ToolResult("# ⚖️ Quel statut choisir ?\n" + fr.dd.jarvis.societe.Creation.COMPARATIF.joinToString("\n") { (x, t) -> "- **${x.libelle}** — $t" }, direct = true)
+            "siret" -> {
+                val q = a.optString("siret").trim()
+                val f = fr.dd.jarvis.societe.Creation.rechercher(q)
+                if (f == null) ToolResult("Aucune entreprise trouvée pour « $q » dans l'annuaire officiel (un SIRET récent peut mettre quelques jours à apparaître).")
+                else {
+                    val remplir = a.optString("remplir").trim().lowercase() in setOf("oui", "true", "1")
+                    if (remplir) app.societe.repo.update { d -> d.copy(societe = fr.dd.jarvis.societe.Creation.appliquer(d.societe, f), creation = d.creation + ("siret" to true)) }
+                    ToolResult("🏢 **${f.nom}** — SIREN ${f.siren}, SIRET ${f.siret}\n${f.adresse}\nAPE ${f.ape} · créée le ${f.dateCreation} · ${f.etat}" + if (remplir) "\n✅ Identité de la société mise à jour." else "", direct = true)
+                }
+            }
+            else -> {
+                val d = app.societe.data
+                val st = fr.dd.jarvis.societe.Declarations.statut(d.societe)
+                val e = fr.dd.jarvis.societe.Creation.etapes(st)
+                ToolResult("# 🏗️ Créer ma société (${st.libelle}) — ${e.count { d.creation[it.id] == true }}/${e.size} étapes faites\n" + e.joinToString("\n") { x ->
+                    "\n### ${if (d.creation[x.id] == true) "✅" else "⬜"} ${x.titre}\n" + x.detail.joinToString("\n") { "- $it" } + if (x.lien.isNotBlank()) "\n[${x.lien.removePrefix("https://")}](${x.lien})" else ""
+                } + "\n\n(Onglet Société › Création pour cocher les étapes et vérifier le SIRET.)", direct = true)
+            }
         }
         "rappel_lieu" -> ToolResult(fr.dd.jarvis.device.RappelsLieu.creer(app, fr.dd.jarvis.device.RappelsLieu.Demande(a.optString("texte").trim(), a.optString("lieu").trim(),
             a.optString("depart").trim().lowercase() in setOf("oui", "true", "1"), a.optString("chaque_fois").trim().lowercase() in setOf("oui", "true", "1"))))

@@ -86,6 +86,8 @@ object Carnet {
     private val EXCLU = Regex(
         "^(?:un |une |le |la |l'|mon |ma )?(?:rendez[- ]vous|rdv|rappel|t[âa]che|[ée]v[ée]nement|alarme|r[ée]veil)\\b|" +
             "\\b(?:dans|sur|à|a) (?:l'|mon |ma |mes |le |la )?(?:agenda|calendrier|planning|t[âa]ches|liste de t[âa]ches|obsidian|fiche)|" +
+            // Notes de frais de la Société : gérées par l'onglet Société › Frais.
+            "\\bnotes? de frais\\b|" +
             // Listes à cocher (courses…) : gérées par les listes, pas par le carnet.
             "\\b(?:dans|sur|à|a|aux) (?:ma |la |mes |les |notre )?(?:liste\\b|courses\\b)",
         RegexOption.IGNORE_CASE
@@ -101,6 +103,8 @@ object Carnet {
         val t = texte.trim()
         if (t.isBlank() || t.length > 4000) return null
         if (SUPPRIMER_DERNIERE.matches(t)) return Intention.SupprimerDerniere
+        // Notes de frais (Société) : jamais dans le carnet.
+        if (Regex("\\bnotes? de frais\\b", RegexOption.IGNORE_CASE).containsMatchIn(t)) return null
         for (r in LIRE) r.find(t)?.let { m -> if (t.length <= 160) return Intention.Lire(sujetDemande(m.groupValues.getOrNull(1).orEmpty())) }
         val m = NOTER.find(t) ?: return null
         // « Ajoute le code du portail dans mes notes » : le contenu est AVANT « dans mes notes ».

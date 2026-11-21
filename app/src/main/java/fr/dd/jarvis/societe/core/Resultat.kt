@@ -109,15 +109,19 @@ object Resultat {
         val caHt = round2(tot.sumOf { it.ht })
         val tva = if (s.franchiseTva) 0.0 else round2(tot.sumOf { it.ttc - it.ht })
         val sal = salaires(d, annee, YearMonth.from(fin))
-        val charges = round2(s.chargesMensuelles.coerceAtLeast(0.0) * mois)
-        val avant = round2(caHt - sal.cout - charges)
         val is_ = soumisIs(s)
+        // Notes de frais de l'année (société à l'IS : charges réelles déductibles, HT si la TVA est récupérée).
+        val frais = if (!is_) 0.0 else round2(d.frais.filter { it.date.startsWith(annee.toString()) && it.date <= fin.toString() }
+            .sumOf { if (s.franchiseTva) it.ttc else it.ttc - it.tva })
+        val charges = round2(s.chargesMensuelles.coerceAtLeast(0.0) * mois + frais)
+        val avant = round2(caHt - sal.cout - charges)
         val impot = if (is_) impot(avant, s) else 0.0
         val net = round2(avant - impot)
         val rl = if (is_) reserveLegale(net, s) else 0.0
         val distribuable = if (is_) round2((net - rl).coerceAtLeast(0.0)) else 0.0
         val divBrut = round2(distribuable * s.distributionPct.coerceIn(0.0, 100.0) / 100.0)
         val notes = mutableListOf<String>()
+        if (frais > 0) notes += "Notes de frais de l'année comptées dans les charges : ${euro(frais)}."
         if (sal.moisEstimes > 0) notes += "${sal.moisEstimes} mois de salaire sans bulletin enregistré : estimés d'après la fiche de chaque employé (${euro(sal.estime)})."
         if (!s.estimerSalaires && d.employes.any { it.brutMensuel > 0 || it.netMensuelVise > 0 }) {
             val sans = d.employes.sumOf { e -> (1..mois).count { m -> d.bulletins.none { it.employeId == e.id && it.mois == "%d-%02d".format(annee, m) } } }
