@@ -408,6 +408,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
             else if (terrain == "sante") fr.dd.jarvis.ui.SanteEcran(app, onFermer = { terrain = "" }, onDemander = demander)
             else if (terrain == "rappels") fr.dd.jarvis.ui.RappelsEcran(app, onFermer = { terrain = "" }, onDemander = demander)
             else if (terrain == "musique") fr.dd.jarvis.ui.MusiqueEcran(app, onFermer = { terrain = "" })
+            else if (terrain.startsWith("declarer:")) fr.dd.jarvis.ui.DeclarationEnLigneEcran(app, terrain.removePrefix("declarer:"), onFermer = { terrain = "" })
             else when (tab) {
                 0 -> fr.dd.jarvis.ui.CentreCommande(app, vm, onOnglet = { tab = it }, onDemander = demander,
                     onRegarder = { terrain = "regarder" }, onCompteRendu = { terrain = "compte_rendu" }, onSante = { terrain = "sante" },

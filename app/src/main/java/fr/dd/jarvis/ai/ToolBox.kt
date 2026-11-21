@@ -416,6 +416,8 @@ class ToolBox(
         put(tool("rappel_lieu", "Rappel À L'ARRIVÉE (ou au départ) d'un lieu : notification quand l'utilisateur arrive (ou part) — maison, travail, « ici », client de la Société ou adresse. Pour un rappel à une heure, utilise rappel_creer.",
             mapOf("texte" to prop("Ce qu'il faut rappeler."), "lieu" to prop("maison | travail | ici | nom d'un client | adresse"),
                 "depart" to prop("oui = au départ du lieu (défaut : à l'arrivée)"), "chaque_fois" to prop("oui = à chaque passage (défaut : une fois)")), listOf("texte", "lieu")))
+        put(tool("declarer_en_ligne", "Fait une déclaration sur le site officiel (URSSAF, impôts, net-entreprises…) dans le navigateur de JARVIS : connexion avec les identifiants enregistrés (jamais vus par l'IA), remplissage des montants calculés, accord de l'utilisateur avant l'envoi. Sans échéance : la prochaine à faire.",
+            mapOf("echeance" to prop("Identifiant de l'échéance (ex. urssaf-2026-10) ou mot : urssaf, tva, cfe, dsn, impot."))))
         put(tool("anniversaires", "Anniversaires (contacts Android + ceux dits à JARVIS) : lister (prochains, sur N jours) | de (date d'une personne) | ajouter (nom, date JJ/MM ou JJ/MM/AAAA) | supprimer (nom). Ils sont annoncés au point du matin, la veille au soir et par notification.",
             mapOf("action" to prop("lister (défaut) | de | ajouter | supprimer"), "nom" to prop("Personne."), "date" to prop("ajouter : JJ/MM ou JJ/MM/AAAA."), "jours" to prop("lister : nombre de jours (défaut 60).")))) 
         put(tool("rdv_termine", "Marque un rendez-vous de l'agenda comme TERMINÉ : il prend la couleur demandée (sinon celle des rendez-vous terminés) et JARVIS le considère comme fait. N'écris JAMAIS « terminé » dans le titre ou la description (pas d'update_event pour ça). Sans précision : le rendez-vous en cours, sinon le dernier commencé aujourd'hui.",
@@ -1208,6 +1210,13 @@ class ToolBox(
                     "\n### ${if (d.creation[x.id] == true) "✅" else "⬜"} ${x.titre}\n" + x.detail.joinToString("\n") { "- $it" } + if (x.lien.isNotBlank()) "\n[${x.lien.removePrefix("https://")}](${x.lien})" else ""
                 } + "\n\n(Onglet Société › Création pour cocher les étapes et vérifier le SIRET.)", direct = true)
             }
+        }
+        "declarer_en_ligne" -> {
+            val q = a.optString("echeance").trim()
+            val data = app.societe.data
+            val l = fr.dd.jarvis.societe.Declarations.echeances(data).filter { fr.dd.jarvis.societe.DeclarationEnLigne.automatisable(it) && it.id !in data.declarationsFaites.keys }
+            val e = l.firstOrNull { it.id == q } ?: fr.dd.jarvis.societe.DeclarationEnLigne.intention("fais ma déclaration $q", data) ?: l.firstOrNull()
+            ToolResult(if (e == null) "Aucune déclaration en ligne à faire pour l'instant (onglet Société › Déclarations)." else fr.dd.jarvis.societe.DeclarationEnLigne.ouvrir(app, e), direct = true)
         }
         "anniversaires" -> {
             val A = fr.dd.jarvis.device.Anniversaires

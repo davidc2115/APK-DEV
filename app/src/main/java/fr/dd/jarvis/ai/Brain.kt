@@ -330,6 +330,11 @@ class Brain(
                 onStatus("💶 Notes de frais…")
                 return reflexe(fr.dd.jarvis.societe.Frais.executer(app, i), lecture = i is fr.dd.jarvis.societe.Frais.Intention.Lister)
             }
+            // « Fais ma déclaration URSSAF » : JARVIS la fait sur le site officiel (navigateur intégré, accord avant l'envoi).
+            runCatching { fr.dd.jarvis.societe.DeclarationEnLigne.intention(texteUser, app.societe.data) }.getOrNull()?.let { e ->
+                onStatus("🤖 Déclaration en ligne…")
+                return reflexe(fr.dd.jarvis.societe.DeclarationEnLigne.ouvrir(app, e))
+            }
             // « Qu'est-ce que je dois déclarer ? » : échéances, montants et marche à suivre selon le statut.
             if (DECLARER.matches(fr.dd.jarvis.societe.core.normaliser(texteUser).replace(Regex("[?!.,;:]+"), " ").replace(Regex("\\s+"), " ").trim()))
                 return reflexe(fr.dd.jarvis.societe.Declarations.texte(app.societe.data, app.societe.data.declarationsFaites.keys), lecture = true)

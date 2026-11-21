@@ -192,6 +192,10 @@ class Store(context: Context) {
     val sshFp = SPref("sshFp", "")
     /** Jeton Plex Media Server : toujours conservé dans le stockage chiffré du Keystore. */
     val plexToken = SecretPref("plexToken")
+    /** Identifiants des sites officiels (URSSAF, impôts, net-entreprises…) : JSON chiffré, jamais envoyé à une IA. */
+    val sitesIdentifiants = SecretPref("sitesIdentifiants")
+    /** Déclarations en ligne : JARVIS clique lui-même sur le bouton final (envoi / paiement) sans demander. */
+    val declarationValidationAuto = BPref("declarationValidationAuto", false)
     /** Noms donnés aux lecteurs Plex (« télé du salon » → identifiant du lecteur), en JSON. */
     val plexAlias = SPref("plexAlias", "{}")
     /** Actions autorisées une fois pour toutes (« Toujours autoriser »), par type d'outil (JSON). */

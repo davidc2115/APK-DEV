@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.device.Courrier
 import fr.dd.jarvis.societe.Creation
+import fr.dd.jarvis.societe.DeclarationEnLigne
 import fr.dd.jarvis.societe.Declarations
 import fr.dd.jarvis.societe.Frais
 import fr.dd.jarvis.societe.core.NoteFrais
@@ -194,6 +196,7 @@ internal fun RecusTab(app: JarvisApp) = CourrierListe(app, Courrier.SOCIETE)
 
 @Composable
 internal fun DeclarationsTab(app: JarvisApp) {
+    val ctx = LocalContext.current
     val s = app.societe.data.societe
     val st = Declarations.statut(s)
     var ouvert by remember { mutableStateOf<String?>(null) }
@@ -235,6 +238,7 @@ internal fun DeclarationsTab(app: JarvisApp) {
                 HudTextField(debut, { debut = it; if (it.isBlank() || runCatching { LocalDate.parse(it) }.isSuccess) maj { x -> x.copy(dateCreation = it) } }, Modifier.fillMaxWidth().padding(top = 6.dp), label = "Début d'activité (aaaa-mm-jj)")
             }
         }
+        item { IdentifiantsSites(app) }
         val pieces = Declarations.pieces(app.societe.data)
         if (pieces.isNotEmpty()) item {
             HudPanel(Modifier.fillMaxWidth(), title = "🗂️ Pièces à traiter avant de déclarer") { pieces.forEach { MarkdownText("- $it") } }
@@ -249,6 +253,9 @@ internal fun DeclarationsTab(app: JarvisApp) {
                 if (e.montant.isNotBlank()) Text(e.montant, color = LocalAccent.current, fontSize = 12.sp)
                 if (ouvert == e.id) {
                     MarkdownText(e.etapes.mapIndexed { i, t -> "${i + 1}. $t" }.joinToString("\n") + (if (e.note.isNotBlank()) "\n\n_${e.note}_" else "") + "\n\n[🌐 ${e.lien.removePrefix("https://")}](${e.lien})")
+                    if (!fait && DeclarationEnLigne.automatisable(e)) HudButton("🤖 Faire la déclaration avec JARVIS", Modifier.fillMaxWidth().padding(top = 6.dp), filled = true) {
+                        runCatching { ctx.startActivity(Intent(ctx, fr.dd.jarvis.MainActivity::class.java).putExtra("terrain", "declarer:${e.id}").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)) }
+                    }
                     Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (!fait) HudChip("✅ C'est fait") { app.societe.repo.update { d -> d.copy(declarationsFaites = d.declarationsFaites + (e.id to LocalDate.now().toString())) } }
                         else HudChip("↩️ Pas encore") { app.societe.repo.update { d -> d.copy(declarationsFaites = d.declarationsFaites - e.id) } }
@@ -257,6 +264,37 @@ internal fun DeclarationsTab(app: JarvisApp) {
             }
         }
         item { Text("Montants calculés d'après les données saisies dans JARVIS. Taux et seuils 2026 vérifiés sur service-public.fr, urssaf.fr et impots.gouv.fr ; ton expert-comptable ou ton service des impôts des entreprises fait foi.", color = HudDim, fontSize = 10.sp) }
+    }
+}
+
+/** Identifiants des sites officiels, chiffrés sur le téléphone (jamais envoyés à une IA). */
+@Composable
+private fun IdentifiantsSites(app: JarvisApp) {
+    var ouvert by remember { mutableStateOf(false) }
+    var version by remember { mutableIntStateOf(0) }
+    HudPanel(Modifier.fillMaxWidth(), title = "🔐 Déclarations en ligne par JARVIS", onClick = { ouvert = !ouvert }) {
+        Text("Avec tes identifiants, JARVIS ouvre le site officiel, se connecte, va à la bonne page et remplit les montants calculés ici. Avant d'envoyer ou de payer, il te montre le récapitulatif et attend ton accord. Si le site envoie un code par SMS ou mail, tu le tapes dans la page.",
+            color = HudDim, fontSize = 12.sp)
+        if (ouvert) {
+            Text("Les identifiants sont chiffrés sur ce téléphone et ne sont JAMAIS envoyés à une IA : ils sont tapés par le téléphone, seulement dans la page du site officiel correspondant.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+            DeclarationEnLigne.SITES.forEach { site ->
+                key(site.cle, version) {
+                    val actuel = remember(version) { DeclarationEnLigne.identifiants(app, site.cle) }
+                    var login by remember(version) { mutableStateOf(actuel?.login.orEmpty()) }
+                    var mdp by remember(version) { mutableStateOf(actuel?.mdp.orEmpty()) }
+                    Text((if (actuel != null) "✅ " else "⬜ ") + site.nom, color = HudText, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+                    HudTextField(login, { login = it }, Modifier.fillMaxWidth(), label = site.identifiant)
+                    HudTextField(mdp, { mdp = it }, Modifier.fillMaxWidth().padding(top = 4.dp), label = "Mot de passe", password = true)
+                    Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        HudChip("💾 Enregistrer") { runCatching { DeclarationEnLigne.enregistrer(app, site.cle, login, mdp) }; version++ }
+                        if (actuel != null) HudChip("🗑️ Effacer") { runCatching { DeclarationEnLigne.enregistrer(app, site.cle, "", "") }; version++ }
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp).clickable { app.store.declarationValidationAuto.set(!app.store.declarationValidationAuto.value) }) {
+                Text((if (app.store.declarationValidationAuto.value) "✅ " else "⬜ ") + "Envoyer sans me demander (déconseillé : JARVIS clique lui-même sur Valider / Payer)", color = HudText, fontSize = 12.sp)
+            }
+        } else Text("Touche pour enregistrer tes identifiants (URSSAF, impôts, net-entreprises…)", color = HudDim, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }
 
