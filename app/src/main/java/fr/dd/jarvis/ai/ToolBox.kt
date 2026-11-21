@@ -409,7 +409,10 @@ class ToolBox(
         put(tool("declarations", "Ce que la société doit déclarer selon son statut juridique (micro-entreprise, EI, EURL, SASU, SAS, SARL) : échéances (URSSAF, TVA, IS, liasse, CFE, DSN…), montants calculés d'après les factures encaissées / notes de frais / bulletins, et la marche à suivre exacte (site, rubrique, cases). Aussi les pièces à traiter (factures à encaisser, frais sans justificatif, bulletins manquants). Lis ce résultat avant de répondre à une question « que dois-je déclarer / comment déclarer ».",
             mapOf("fait" to prop("identifiant d'une échéance à marquer comme faite (facultatif)"))))
         put(tool("creation_societe", "Création de la société : étapes (statut, qualification d'électricien, assurances, statuts, annonce légale, guichet unique, SIRET, banque, ACRE, espaces en ligne, mentions), comparatif des statuts, vérification d'un SIRET dans l'annuaire officiel et remplissage de l'identité.",
-            mapOf("action" to prop("etapes (défaut) | comparatif | siret"), "siret" to prop("SIRET ou SIREN à vérifier (action siret)"), "remplir" to prop("oui = remplir l'identité de la société avec la fiche trouvée"))))
+            mapOf("action" to prop("etapes (défaut, résumé) | etape (détail complet d'une étape : pourquoi, comment, pièces, choix, coût, délai, pièges) | statut (fiche complète d'un statut) | comparatif | siret"),
+                "etape" to prop("action etape : identifiant ou mots de l'étape (assurances, annonce légale, guichet, banque, aides, cfe…)."),
+                "statut" to prop("action statut : micro, ei, eurl, sasu, sas ou sarl (défaut : celui choisi)."),
+                "siret" to prop("SIRET ou SIREN à vérifier (action siret)"), "remplir" to prop("oui = remplir l'identité de la société avec la fiche trouvée"))))
         put(tool("rappel_lieu", "Rappel À L'ARRIVÉE (ou au départ) d'un lieu : notification quand l'utilisateur arrive (ou part) — maison, travail, « ici », client de la Société ou adresse. Pour un rappel à une heure, utilise rappel_creer.",
             mapOf("texte" to prop("Ce qu'il faut rappeler."), "lieu" to prop("maison | travail | ici | nom d'un client | adresse"),
                 "depart" to prop("oui = au départ du lieu (défaut : à l'arrivée)"), "chaque_fois" to prop("oui = à chaque passage (défaut : une fois)")), listOf("texte", "lieu")))
@@ -1174,6 +1177,18 @@ class ToolBox(
         }
         "creation_societe" -> when (a.optString("action").trim().lowercase()) {
             "comparatif" -> ToolResult("# ⚖️ Quel statut choisir ?\n" + fr.dd.jarvis.societe.Creation.COMPARATIF.joinToString("\n") { (x, t) -> "- **${x.libelle}** — $t" }, direct = true)
+            "statut" -> {
+                val q = a.optString("statut").trim()
+                val st = if (q.isBlank()) fr.dd.jarvis.societe.Declarations.statut(app.societe.data.societe)
+                    else fr.dd.jarvis.societe.Declarations.statut(app.societe.data.societe.copy(forme = if (Regex("(?i)micro|auto").containsMatchIn(q)) "Micro-entreprise" else q))
+                ToolResult("# ⚖️ " + st.libelle + "\n" + fr.dd.jarvis.societe.Creation.fiche(st).markdown(st), direct = true)
+            }
+            "etape", "detail" -> {
+                val st = fr.dd.jarvis.societe.Declarations.statut(app.societe.data.societe)
+                val e = fr.dd.jarvis.societe.Creation.etape(st, a.optString("etape"))
+                    ?: return ToolResult("Étape inconnue. Étapes : " + fr.dd.jarvis.societe.Creation.etapes(st).joinToString(", ") { it.titre })
+                ToolResult("# ${e.phase.titre} — ${e.titre}\n" + e.markdown(), direct = true)
+            }
             "siret" -> {
                 val q = a.optString("siret").trim()
                 val f = fr.dd.jarvis.societe.Creation.rechercher(q)

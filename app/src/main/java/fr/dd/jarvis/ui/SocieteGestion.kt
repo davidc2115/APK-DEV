@@ -306,57 +306,98 @@ internal fun CreationTab(app: JarvisApp) {
     val st = Declarations.statut(s)
     val faites = app.societe.data.creation
     var ouvert by remember { mutableStateOf<String?>(null) }
+    var statutVu by remember { mutableStateOf<Declarations.Statut?>(null) }
     var siret by remember { mutableStateOf(s.siret) }
     var resultat by remember { mutableStateOf("") }
     var fiche by remember { mutableStateOf<Creation.Fiche?>(null) }
     val etapes = Creation.etapes(st)
+    val societe = st.societeIs
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             HudPanel(Modifier.fillMaxWidth(), title = "🏗️ Créer ma société") {
-                Text("${etapes.count { faites[it.id] == true }} / ${etapes.size} étapes faites — statut choisi : ${st.libelle} (à changer dans Déclarations ou ci-dessous).", color = HudText, fontSize = 12.sp)
+                Text("${etapes.count { faites[it.id] == true }} / ${etapes.size} étapes faites — statut choisi : ${st.libelle}.", color = HudText, fontSize = 12.sp)
+                Text("Choisis ton statut : la liste des étapes, les pièces à fournir et les coûts s'adaptent. Touche une étape pour tout le détail (pourquoi, comment faire, pièces, choix possibles, coût, délai, pièges), puis coche-la quand c'est fait.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 Row(Modifier.padding(top = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Declarations.Statut.values().forEach { x -> HudChip(x.libelle, st == x) { app.societe.repo.update { d -> d.copy(societe = d.societe.copy(forme = if (x == Declarations.Statut.MICRO) "Micro-entreprise" else x.libelle)) } } }
                 }
             }
         }
         item {
+            HudPanel(Modifier.fillMaxWidth(), title = "🗺️ Vue d'ensemble", onClick = { ouvert = if (ouvert == "ensemble") null else "ensemble" }) {
+                if (ouvert == "ensemble") MarkdownText(
+                    "La création se fait en ${if (societe) "4" else "3"} temps :\n" +
+                        Creation.Phase.values().filter { societe || it != Creation.Phase.CONSTITUER }.joinToString("\n") { "- **${it.titre}** — ${it.description}" } +
+                        "\n\n### ⏱️ Durée totale\n" + (if (societe) "Compte 3 à 6 semaines : 1 à 2 semaines pour les statuts, le capital et l'annonce, puis quelques jours à 3 semaines pour l'immatriculation." else "Compte 1 à 3 semaines : la déclaration se fait en une heure, le SIRET arrive en général sous 1 à 4 semaines.") +
+                        "\n\n### 💶 Budget de départ (hors assurances et matériel)\n" + when (st) {
+                            Declarations.Statut.MICRO, Declarations.Statut.EI -> "Formalités gratuites. Prévois surtout les assurances (décennale, RC pro), l'outillage, le véhicule et une réserve de trésorerie de quelques mois."
+                            Declarations.Statut.EURL -> "≈ 190 € de formalités en 2026 (annonce 124 € HT + immatriculation 33,83 € + artisanat 15 € + bénéficiaires effectifs 19,33 €), plus la rédaction des statuts si tu la confies, le capital et l'expert-comptable."
+                            Declarations.Statut.SASU -> "≈ 210 € de formalités en 2026 (annonce 142 € HT + immatriculation 33,83 € + artisanat 15 € + bénéficiaires effectifs 19,33 €), plus la rédaction des statuts si tu la confies, le capital et l'expert-comptable."
+                            Declarations.Statut.SAS -> "≈ 270 € de formalités en 2026 (annonce 199 € HT + immatriculation 33,83 € + artisanat 15 € + bénéficiaires effectifs 19,33 €), plus les statuts et le pacte d'associés, le capital et l'expert-comptable."
+                            Declarations.Statut.SARL -> "≈ 215 € de formalités en 2026 (annonce 148 € HT + immatriculation 33,83 € + artisanat 15 € + bénéficiaires effectifs 19,33 €), plus les statuts, le capital et l'expert-comptable."
+                        } +
+                        "\n\n### 🙋 Où se faire aider gratuitement\n- Chambre de métiers (CMA) de ton département : réunions d'information, rendez-vous conseil.\n- France Travail : maintien du chômage, ARCE, accompagnement à la création.\n- Simulateurs officiels : mon-entreprise.urssaf.fr."
+                ) else Text("Les grandes étapes, la durée et le budget — touche pour lire", color = HudDim, fontSize = 11.sp)
+            }
+        }
+        item {
             HudPanel(Modifier.fillMaxWidth(), title = "⚖️ Quel statut choisir ?", onClick = { ouvert = if (ouvert == "comparatif") null else "comparatif" }) {
-                if (ouvert == "comparatif") Creation.COMPARATIF.forEach { (x, t) -> MarkdownText("**${x.libelle}** — $t") }
-                else Text("Touche pour le comparatif", color = HudDim, fontSize = 11.sp)
+                if (ouvert == "comparatif") {
+                    MarkdownText(Creation.TABLEAU)
+                    Text("Touche un statut pour sa fiche complète :", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                    Row(Modifier.padding(top = 4.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Declarations.Statut.values().forEach { x -> HudChip(x.libelle, (statutVu ?: st) == x) { statutVu = x } }
+                    }
+                    val vu = statutVu ?: st
+                    MarkdownText(Creation.fiche(vu).markdown(vu), modifier = Modifier.padding(top = 6.dp))
+                    if (vu != st) Row(Modifier.padding(top = 6.dp)) {
+                        HudChip("✔️ Choisir ${vu.libelle}") { app.societe.repo.update { d -> d.copy(societe = d.societe.copy(forme = if (vu == Declarations.Statut.MICRO) "Micro-entreprise" else vu.libelle)) } }
+                    }
+                } else Text("Tableau comparatif et fiche détaillée de chaque statut — touche pour ouvrir", color = HudDim, fontSize = 11.sp)
             }
         }
-        items(etapes, key = { it.id }) { e ->
-            val fait = faites[e.id] == true
-            HudPanel(Modifier.fillMaxWidth(), title = (if (fait) "✅ " else "⬜ ") + e.titre, onClick = { ouvert = if (ouvert == e.id) null else e.id }) {
-                if (ouvert == e.id) {
-                    MarkdownText(e.detail.joinToString("\n") { "- $it" } + if (e.lien.isNotBlank()) "\n\n[🌐 ${e.lien.removePrefix("https://")}](${e.lien})" else "")
-                    if (e.id == "siret") {
-                        HudTextField(siret, { siret = it }, Modifier.fillMaxWidth().padding(top = 6.dp), label = "SIRET (14 chiffres) ou SIREN")
-                        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            HudButton("🔎 Vérifier le SIRET", filled = true) {
-                                val chiffres = siret.filter { it.isDigit() }
-                                if (chiffres.length == 14 && !Creation.siretValide(chiffres)) { resultat = "❌ Ce SIRET n'est pas valide (clé de contrôle) : vérifie les chiffres."; return@HudButton }
-                                resultat = "Recherche dans l'annuaire officiel…"
-                                scope.launch {
-                                    val f = runCatching { Creation.rechercher(siret) }.getOrNull()
-                                    fiche = f
-                                    resultat = if (f == null) "Aucune entreprise trouvée (le SIRET peut mettre quelques jours à apparaître après l'immatriculation)."
-                                        else "**${f.nom}** — SIREN ${f.siren}, SIRET ${f.siret}\n${f.adresse}\nAPE ${f.ape} · créée le ${f.dateCreation} · ${f.etat}"
+        Creation.Phase.values().forEach { phase ->
+            val duPhase = etapes.filter { it.phase == phase }
+            if (duPhase.isEmpty()) return@forEach
+            item(key = "phase-${phase.name}") {
+                Column(Modifier.padding(top = 6.dp)) {
+                    Text(phase.titre.uppercase(), color = LocalAccent.current, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(phase.description, color = HudDim, fontSize = 11.sp)
+                    Text("${duPhase.count { faites[it.id] == true }} / ${duPhase.size} faites", color = HudDim, fontSize = 10.sp)
+                }
+            }
+            items(duPhase, key = { it.id }) { e ->
+                val fait = faites[e.id] == true
+                HudPanel(Modifier.fillMaxWidth(), title = (if (fait) "✅ " else "⬜ ") + e.titre, onClick = { ouvert = if (ouvert == e.id) null else e.id }) {
+                    if (ouvert == e.id) {
+                        MarkdownText(e.markdown())
+                        if (e.id == "siret") {
+                            HudTextField(siret, { siret = it }, Modifier.fillMaxWidth().padding(top = 6.dp), label = "SIRET (14 chiffres) ou SIREN")
+                            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                HudButton("🔎 Vérifier le SIRET", filled = true) {
+                                    val chiffres = siret.filter { it.isDigit() }
+                                    if (chiffres.length == 14 && !Creation.siretValide(chiffres)) { resultat = "❌ Ce SIRET n'est pas valide (clé de contrôle) : vérifie les chiffres."; return@HudButton }
+                                    resultat = "Recherche dans l'annuaire officiel…"
+                                    scope.launch {
+                                        val f = runCatching { Creation.rechercher(siret) }.getOrNull()
+                                        fiche = f
+                                        resultat = if (f == null) "Aucune entreprise trouvée (le SIRET peut mettre quelques jours à apparaître après l'immatriculation)."
+                                            else "**${f.nom}** — SIREN ${f.siren}, SIRET ${f.siret}\n${f.adresse}\nAPE ${f.ape} · créée le ${f.dateCreation} · ${f.etat}"
+                                    }
                                 }
+                                fiche?.let { f -> HudButton("📥 Remplir l'identité") {
+                                    app.societe.repo.update { d -> d.copy(societe = Creation.appliquer(d.societe, f), creation = d.creation + ("siret" to true)) }
+                                    resultat += "\n\n✅ Identité de la société mise à jour (Société › Réglages pour vérifier)."
+                                } }
                             }
-                            fiche?.let { f -> HudButton("📥 Remplir l'identité") {
-                                app.societe.repo.update { d -> d.copy(societe = Creation.appliquer(d.societe, f), creation = d.creation + ("siret" to true)) }
-                                resultat += "\n\n✅ Identité de la société mise à jour (Société › Réglages pour vérifier)."
-                            } }
+                            if (resultat.isNotBlank()) MarkdownText(resultat)
                         }
-                        if (resultat.isNotBlank()) MarkdownText(resultat)
-                    }
-                    Row(Modifier.padding(top = 6.dp)) {
-                        HudChip(if (fait) "↩️ Pas encore fait" else "✅ C'est fait") { app.societe.repo.update { d -> d.copy(creation = d.creation + (e.id to !fait)) } }
-                    }
-                } else Text("Touche pour le détail", color = HudDim, fontSize = 10.sp)
+                        Row(Modifier.padding(top = 6.dp)) {
+                            HudChip(if (fait) "↩️ Pas encore fait" else "✅ C'est fait") { app.societe.repo.update { d -> d.copy(creation = d.creation + (e.id to !fait)) } }
+                        }
+                    } else Text(e.detail.firstOrNull()?.take(140)?.let { "$it…" } ?: "Touche pour le détail", color = HudDim, fontSize = 10.sp)
+                }
             }
         }
-        item { Text("Demande aussi à JARVIS : « quelles sont les étapes pour créer ma société ? », « qu'est-ce que je dois déclarer ? », « comment déclarer ma TVA ? ».", color = HudDim, fontSize = 11.sp) }
+        item { Text("Demande aussi à JARVIS : « explique-moi l'étape des assurances », « quelle est la différence entre EURL et SASU ? », « qu'est-ce que je dois déclarer ? ». Informations 2026 vérifiées sur service-public.fr, urssaf.fr et impots.gouv.fr ; la chambre de métiers ou un expert-comptable font foi pour ta situation.", color = HudDim, fontSize = 11.sp) }
     }
 }

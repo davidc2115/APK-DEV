@@ -79,5 +79,13 @@ class GestionSocieteTest {
         assertFalse(Creation.siretValide("123"))
         assertTrue(Creation.etapes(Declarations.Statut.MICRO).none { it.id == "statuts" })
         assertTrue(Creation.etapes(Declarations.Statut.SASU).any { it.id == "statuts" })
+        // Chaque étape et chaque statut ont leur explication détaillée.
+        Declarations.Statut.values().forEach { st ->
+            Creation.etapes(st).forEach { e -> assertTrue(e.id, e.pourquoi.isNotBlank() && e.markdown().length > 200) }
+            assertTrue(Creation.fiche(st).markdown(st).contains("Inconvénients"))
+        }
+        assertEquals("assurances", Creation.etape(Declarations.Statut.MICRO, "assurances")?.id)
+        assertEquals("annonce", Creation.etape(Declarations.Statut.SASU, "annonce légale")?.id)
+        assertTrue(Creation.etapes(Declarations.Statut.MICRO).none { it.phase == Creation.Phase.CONSTITUER })
     }
 }
