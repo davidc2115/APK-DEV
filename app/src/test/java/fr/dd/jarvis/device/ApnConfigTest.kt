@@ -50,7 +50,7 @@ class ApnConfigTest {
     @Test fun phrases() {
         assertEquals("apn_configurer", ReseauMobile.intention("configure l'APN"))
         assertEquals("apn_configurer", ReseauMobile.intention("règle l'APN"))
-        assertEquals("apn_configurer", ReseauMobile.intention("améliore mon APN"))
+        assertEquals("apn_optimiser", ReseauMobile.intention("améliore mon APN"))
         assertEquals("apn_restaurer", ReseauMobile.intention("remets l'APN d'origine"))
         assertEquals("apn", ReseauMobile.intention("montre-moi l'APN"))
         assertEquals("apn", ReseauMobile.intention("vérifie mon APN"))

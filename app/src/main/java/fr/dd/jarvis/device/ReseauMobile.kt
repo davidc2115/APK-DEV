@@ -155,6 +155,14 @@ object ReseauMobile {
         if (Regex("\\btombe (directement |toujours |direct )?sur (la|ma) messagerie\\b").containsMatchIn(n)) return "appels"
         if (!envoi && Regex("\\b(appels?|m appelle|m appellent|appelle)\\b").containsMatchIn(n) && Regex("\\b(coupent|coupe|coupes|coupees|passent pas|passe pas|ne passent|ne passe|" +
                 "qualite|gresille|entends? mal|entend mal|m entend pas|m entendent pas|messagerie|manques?|probleme|hache|saccade)\\b").containsMatchIn(n)) return "appels"
+        // DNS (du téléphone : la Freebox / le Wi-Fi sont exclus plus haut).
+        if (Regex("\\bdns\\b").containsMatchIn(n)) return when {
+            Regex("\\b(remets|remettre|restaure|restaurer|retablis|retablir|origine|annule|annuler|enleve|retire|desactive)\\b").containsMatchIn(n) -> "dns_restaurer"
+            Regex("\\b(active|activer|mets|mettre|passe|passer|utilise|utiliser|choisis|choisir|prends|configure|configurer)\\b").containsMatchIn(n) &&
+                Regex("\\b(cloudflare|google|quad9|quad 9|1 1 1 1|prive)\\b").containsMatchIn(n) -> "dns_appliquer:" + (Regex("\\b(cloudflare|google|quad9)\\b").find(n.replace("quad 9", "quad9"))?.value ?: "cloudflare")
+            else -> "dns"
+        }
+        if (Regex("\\bmtu\\b").containsMatchIn(n)) return "mtu"
         // Choix 4G / 5G.
         if (Regex("\\b(passe|passer|mets|mettre|force|forcer|bascule|basculer|reste|rester)\\b.{0,20}\\b(en|sur|la)\\b.{0,6}\\b4g\\b|\\b(desactive|desactiver|coupe|couper|enleve|enlever|retire|retirer|sans)\\b.{0,12}\\b5g\\b").containsMatchIn(n)) return "type_reseau:4g"
         if (Regex("\\b(active|activer|remets|remettre|reactive|reactiver|rallume|passe|passer|mets|mettre|bascule|basculer|autorise|autoriser)\\b.{0,20}\\b5g\\b").containsMatchIn(n)) return "type_reseau:5g"
@@ -170,7 +178,9 @@ object ReseauMobile {
         if (!SUJET.containsMatchIn(n)) return null
         if (Regex("\\bapn\\b").containsMatchIn(n)) return when {
             Regex("\\b(remets|remettre|restaure|restaurer|retablis|retablir|reviens|revenir|annule|annuler)\\b").containsMatchIn(n) -> "apn_restaurer"
-            Regex("\\b(configure|configurer|regle|regler|corrige|corriger|ameliore|ameliorer|optimise|optimiser|cree|creer|parametre|parametrer|change|changer|modifie|modifier|repare|reparer|mets a jour)\\b").containsMatchIn(n) -> "apn_configurer"
+            // Amélioration par la mesure (réglages comparés, le plus rapide gardé).
+            Regex("\\b(ameliore|ameliorer|optimise|optimiser|booste|booster|accelere|accelerer|meilleur|meilleure|teste|tester|test|compare|comparer|a fond|pleinement|completement|au maximum)\\b").containsMatchIn(n) -> "apn_optimiser"
+            Regex("\\b(configure|configurer|regle|regler|corrige|corriger|cree|creer|parametre|parametrer|change|changer|modifie|modifier|repare|reparer|mets a jour)\\b").containsMatchIn(n) -> "apn_configurer"
             else -> "apn"
         }
         if (Regex("\\b(relance|relancer|reinitialise|reinitialiser|redemarre|redemarrer|reconnecte|reconnecter|rafraichis|rafraichir)\\b").containsMatchIn(n)) return "reenregistrer"
@@ -452,7 +462,8 @@ object ReseauMobile {
             faits += reenregistrer(app, confirm)
         val bilan = diagnostic(app)
         return (if (faits.isNotEmpty()) "🛠️ Fait :\n" + faits.joinToString("\n") { "- $it" } + "\n\n" else "") + bilan +
-            (if (!shell) "\n\nℹ️ Avec Shizuku ou l'ADB intégré, je peux aussi relancer le réseau et couper / rétablir le mode avion moi-même." else "")
+            (if (!shell) "\n\nℹ️ Avec Shizuku ou l'ADB intégré, je peux aussi relancer le réseau et couper / rétablir le mode avion moi-même."
+             else "\n\n🚀 Pour aller plus loin : « optimise l'APN à fond » (réglages mesurés, le plus rapide gardé) et « teste les DNS ».")
     }
 
     /** Ouvre l'écran de réglage voulu (apn, reseau, operateur, appels, appels_wifi, sms, mode_avion, sim). */

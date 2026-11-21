@@ -100,6 +100,48 @@ object TestDebit {
         }
     }
 
+    data class Mesure(val latenceMs: Long?, val descenteMbps: Double?, val octets: Long)
+
+    /** Note d'une mesure (plus haut = mieux) : débit, pénalisé par la latence. */
+    internal fun note(m: Mesure?): Double {
+        val d = m?.descenteMbps ?: return 0.0
+        val lat = (m.latenceMs ?: 300).coerceAtLeast(10)
+        return d * (100.0 / (100.0 + lat))
+    }
+
+    /**
+     * Exécute [bloc] sur la connexion MOBILE (ouverte à la demande, même en Wi-Fi) avec un client lié à elle ; null si
+     * aucune connexion mobile.
+     */
+    fun <T> parMobile(app: JarvisApp, bloc: (Network, OkHttpClient) -> T): T? {
+        val reseau = reseauMobile(app) ?: return null
+        try {
+            val c = OkHttpClient.Builder().connectTimeout(6, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).retryOnConnectionFailure(false)
+                .socketFactory(reseau.socketFactory).dns(object : okhttp3.Dns { override fun lookup(hostname: String) = reseau.getAllByName(hostname).toList() }).build()
+            return try { bloc(reseau, c) } finally { c.connectionPool.evictAll() }
+        } finally {
+            enCours?.let { (cm, cb) -> runCatching { cm.unregisterNetworkCallback(cb) } }; enCours = null
+        }
+    }
+
+    /** Mesure courte (≈ 2,5 s, 4 Mo au plus) pour comparer des réglages entre eux. */
+    fun mesureCourte(c: OkHttpClient): Mesure {
+        val lat = (1..3).mapNotNull {
+            val t0 = System.nanoTime()
+            runCatching { c.newCall(Request.Builder().url("$HOTE/__down?bytes=0").build()).execute().use { it.body?.bytes() } }.getOrNull()?.let { (System.nanoTime() - t0) / 1_000_000 }
+        }.drop(1).minOrNull()
+        var recu = 0L
+        val t1 = System.currentTimeMillis()
+        runCatching {
+            c.newCall(Request.Builder().url("$HOTE/__down?bytes=4000000").build()).execute().use { r ->
+                val f = r.body?.byteStream() ?: return@use
+                val b = ByteArray(32 * 1024)
+                while (System.currentTimeMillis() - t1 < 2_500) { val n = f.read(b); if (n < 0) break; recu += n }
+            }
+        }
+        return Mesure(lat, if (recu > 0) mbps(recu, System.currentTimeMillis() - t1) else null, recu)
+    }
+
     /** Internet répond-il par le réseau mobile ? (une requête de quelques octets) */
     fun ping(app: JarvisApp): Boolean {
         val reseau = reseauMobile(app) ?: return false

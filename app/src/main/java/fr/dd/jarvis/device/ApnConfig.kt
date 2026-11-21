@@ -25,7 +25,7 @@ object ApnConfig {
     internal fun refuse(sortie: String) = Regex("(?i)(securityexception|no permission|permission denial|not allowed|unknown command)").containsMatchIn(sortie)
 
     private fun types(a: Map<String, String>) = a["type"].orEmpty().lowercase().split(',').map { it.trim() }.filter { it.isNotBlank() }
-    private fun estDonnees(a: Map<String, String>) = types(a).let { it.isEmpty() || "default" in it || "*" in it }
+    internal fun estDonnees(a: Map<String, String>) = types(a).let { it.isEmpty() || "default" in it || "*" in it }
     private fun estMms(a: Map<String, String>) = types(a).let { "mms" in it || "*" in it }
 
     /** Bits LTE / 5G du masque des réseaux d'un APN (0 = tous). */
@@ -64,14 +64,15 @@ object ApnConfig {
         return Analyse(p, a)
     }
 
-    private fun q(v: String) = "'" + v.replace("'", "'\\''") + "'"
+    internal fun q(v: String) = "'" + v.replace("'", "'\\''") + "'"
 
     /** Commandes d'ajout des APN « JARVIS » (internet, et MMS si l'opérateur en a un distinct). */
-    internal fun commandesAjout(reco: ReseauMobile.Apn, mccMnc: String, avecMms: Boolean): List<Pair<String, String>> {
+    internal fun commandesAjout(reco: ReseauMobile.Apn, mccMnc: String, avecMms: Boolean, protocole: String = "IPV4V6",
+                                mtu: List<String> = emptyList(), suffixe: String = ""): List<Pair<String, String>> {
         val mcc = mccMnc.take(3); val mnc = mccMnc.drop(3)
         fun ajout(nom: String, apn: String, type: String, extra: List<String>) = nom to (listOf("content insert --uri content://telephony/carriers",
             "--bind ${q("name:s:$nom")}", "--bind ${q("numeric:s:$mccMnc")}", "--bind ${q("mcc:s:$mcc")}", "--bind ${q("mnc:s:$mnc")}",
-            "--bind ${q("apn:s:$apn")}", "--bind ${q("type:s:$type")}", "--bind protocol:s:IPV4V6", "--bind roaming_protocol:s:IPV4V6",
+            "--bind ${q("apn:s:$apn")}", "--bind ${q("type:s:$type")}", "--bind protocol:s:$protocole", "--bind roaming_protocol:s:$protocole",
             "--bind carrier_enabled:i:1") + extra).joinToString(" ")
         val ident = buildList {
             if (reco.utilisateur.isNotBlank()) { add("--bind ${q("user:s:${reco.utilisateur}")}"); add("--bind ${q("password:s:${reco.motDePasse}")}"); add("--bind authtype:i:1") }
@@ -80,16 +81,16 @@ object ApnConfig {
             add("--bind ${q("mmsc:s:${reco.mmsc}")}")
             if (reco.proxyMms.isNotBlank()) { add("--bind ${q("mmsproxy:s:${reco.proxyMms}")}"); add("--bind ${q("mmsport:s:${reco.portMms}")}") }
         }
-        val op = reco.operateur.replace(' ', '-')
+        val op = reco.operateur.replace(' ', '-') + suffixe
         return if (reco.mmsApn.equals(reco.apn, true))
-            listOf(ajout("$PREFIXE-$op", reco.apn, "default,supl,mms", ident + mmsChamps))
-        else listOfNotNull(ajout("$PREFIXE-$op", reco.apn, "default,supl", ident),
+            listOf(ajout("$PREFIXE-$op", reco.apn, "default,supl,mms", ident + mmsChamps + mtu))
+        else listOfNotNull(ajout("$PREFIXE-$op", reco.apn, "default,supl", ident + mtu),
             if (avecMms) ajout("$PREFIXE-$op-MMS", reco.mmsApn, "mms", ident + mmsChamps) else null)
     }
 
     // ------------------------------------------------------------------ téléphone
 
-    private fun executer(app: JarvisApp, cmd: String, delaiMs: Long = 10_000): String {
+    internal fun executer(app: JarvisApp, cmd: String, delaiMs: Long = 10_000): String {
         var out = ""
         val t = Thread { out = runCatching { PhoneShell.exec(app, cmd) }.getOrElse { "Erreur : ${it.message}" } }
         t.isDaemon = true; t.start(); t.join(delaiMs)
@@ -97,7 +98,7 @@ object ApnConfig {
     }
 
     private fun subDonnees(): Int = runCatching { android.telephony.SubscriptionManager.getDefaultDataSubscriptionId() }.getOrDefault(-1)
-    private fun uriPrefere() = subDonnees().let { if (it >= 0) "content://telephony/carriers/preferapn/subId/$it" else "content://telephony/carriers/preferapn" }
+    internal fun uriPrefere() = subDonnees().let { if (it >= 0) "content://telephony/carriers/preferapn/subId/$it" else "content://telephony/carriers/preferapn" }
     private fun prefs(app: JarvisApp) = app.getSharedPreferences("reseau_mobile", 0)
 
     data class Lecture(val actuel: Map<String, String>?, val tous: List<Map<String, String>>, val refuse: Boolean)
@@ -122,12 +123,12 @@ object ApnConfig {
         if (an.problemes.isNotEmpty()) out += "❌ Problèmes :\n" + an.problemes.joinToString("\n") { "- $it" }
         if (an.ameliorations.isNotEmpty()) out += "💡 Améliorations possibles :\n" + an.ameliorations.joinToString("\n") { "- $it" }
         if (reco != null && (an.problemes.isNotEmpty() || an.ameliorations.isNotEmpty()))
-            out += "🛠️ « Jarvis, configure l'APN » : je crée un APN « $PREFIXE-${reco.operateur.replace(' ', '-')} » aux bonnes valeurs (IPv4/IPv6, assistance GPS, MMS) et je le choisis, après ton accord — ceux de l'opérateur ne sont pas touchés, et je reviens en arrière seul s'il n'y a plus internet."
+            out += "🛠️ « Jarvis, configure l'APN » : je crée un APN « $PREFIXE-${reco.operateur.replace(' ', '-')} » aux bonnes valeurs (IPv4/IPv6, assistance GPS, MMS) et je le choisis, après ton accord — ceux de l'opérateur ne sont pas touchés, et je reviens en arrière seul s'il n'y a plus internet.\n🚀 « Jarvis, optimise l'APN à fond » : je mesure l'actuel et plusieurs réglages (IPv4/IPv6, IPv4, MTU) et je garde le plus rapide."
         return out.joinToString("\n")
     }
 
     /** La connexion mobile marche-t-elle (requête par le réseau mobile) ? Essaie pendant [secondes]. */
-    private fun internetMobileOk(app: JarvisApp, secondes: Int): Boolean {
+    internal fun internetMobileOk(app: JarvisApp, secondes: Int): Boolean {
         val fin = System.currentTimeMillis() + secondes * 1000L
         while (System.currentTimeMillis() < fin) {
             if (runCatching { TestDebit.ping(app) }.getOrDefault(false)) return true
