@@ -113,6 +113,9 @@ fun CoffrePanel(app: JarvisApp) {
                 (s.coffreBilan.value.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""), color = HudDim, fontSize = 11.sp)
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 HudChip(if (occupe) "⏳" else "🔄 Synchroniser maintenant") { lancer { Coffre.synchroniser(app) } }
+                if (Coffre.estAdmin(app) && fr.dd.jarvis.ai.Serveur.sshConfigure(app)) HudChip("🔧 Relancer le coffre sur le serveur") {
+                    lancer { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { CoffreInstallation.relancer(app) ?: "❌ Docker ne répond pas sur le serveur (accès SSH ?)." } + "\n" + Coffre.synchroniser(app) }
+                }
                 HudChip(if (s.coffreAuto.value) "✅ Automatique (15 min + à chaque modification)" else "Synchro manuelle", s.coffreAuto.value) {
                     s.coffreAuto.set(!s.coffreAuto.value); if (s.coffreAuto.value) Coffre.planifier(app)
                 }

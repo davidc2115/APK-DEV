@@ -60,7 +60,13 @@ object Coffre {
     fun tunnel(app: JarvisApp): (() -> String)? =
         if (fr.dd.jarvis.ai.Serveur.sshConfigure(app)) { { "https://127.0.0.1:" + fr.dd.jarvis.ai.Serveur.tunnel(app, CoffreInstallation.PORT) } } else null
 
-    fun client(app: JarvisApp) = CoffreClient(adresses(app), app.store.coffreEmpreinte.value, tunnel(app)) { app.store.coffreJeton.value }
+    fun client(app: JarvisApp) = CoffreClient(adresses(app), app.store.coffreEmpreinte.value, tunnel(app), { app.store.coffreJeton.value },
+        tunnel(app)?.let { { fr.dd.jarvis.ai.Serveur.fermerTunnel(CoffreInstallation.PORT); it.invoke() } })
+
+    /** Le dernier essai n'a joint le coffre par aucun chemin (pour reprogrammer la synchro au lieu d'afficher l'erreur). */
+    @Volatile var injoignable = false
+        private set
+    @Volatile private var reparationA = 0L
 
     /** Clé d'une catégorie : dérivée de la clé maîtresse (administrateur) ou reçue à l'invitation (salarié). */
     fun cle(app: JarvisApp, categorie: String): ByteArray? {
@@ -131,28 +137,64 @@ object Coffre {
         }
     }
 
-    data class Bilan(var recus: Int = 0, var envoyes: Int = 0, var supprimes: Int = 0, var conflits: Int = 0, val erreurs: MutableList<String> = mutableListOf()) {
+    data class Bilan(var recus: Int = 0, var envoyes: Int = 0, var supprimes: Int = 0, var conflits: Int = 0, val erreurs: MutableList<String> = mutableListOf(), val notes: MutableList<String> = mutableListOf()) {
         override fun toString() = (if (recus + envoyes + supprimes == 0) "À jour" else listOfNotNull(
             recus.takeIf { it > 0 }?.let { "⬇️ $it reçu(s)" }, envoyes.takeIf { it > 0 }?.let { "⬆️ $it envoyé(s)" },
             supprimes.takeIf { it > 0 }?.let { "🗑️ $it supprimé(s)" }).joinToString(" · ")) +
-            (if (conflits > 0) " · ⚠️ $conflits conflit(s) fusionné(s)" else "") + (if (erreurs.isNotEmpty()) "\n❌ " + erreurs.take(3).joinToString("\n❌ ") else "")
+            (if (conflits > 0) " · ⚠️ $conflits conflit(s) fusionné(s)" else "") + (if (notes.isNotEmpty()) "\n" + notes.joinToString("\n") else "") +
+            (if (erreurs.isNotEmpty()) "\n❌ " + erreurs.take(3).joinToString("\n❌ ") else "")
     }
 
-    suspend fun synchroniser(app: JarvisApp): String = withContext(Dispatchers.IO) {
+    /**
+     * [differer] (synchro de fond) : si le coffre est injoignable, l'erreur n'est pas affichée — un nouvel essai est
+     * programmé (réveil du téléphone, Wi-Fi qui se reconnecte) ; le bilan dit seulement qu'un essai suit.
+     */
+    suspend fun synchroniser(app: JarvisApp, differer: Boolean = false): String = withContext(Dispatchers.IO) {
         if (!configure(app)) return@withContext "Coffre-fort non configuré."
         verrou.withLock {
             val b = Bilan()
+            injoignable = false
             try {
                 tour(app, b)
             } catch (e: CoffreException) {
-                b.erreurs += if (e.code == 401) "Accès refusé : cet appareil a été révoqué ou le coffre a été réinstallé." else e.message.orEmpty()
+                if (e.code == 0) {
+                    // Sur le Wi-Fi de la maison, adresse locale qui coupe ou refuse : le conteneur du coffre est arrêté ou
+                    // bloqué → relancé par SSH (au plus une fois par heure), puis un nouvel essai.
+                    val note = reparer(app, e)
+                    if (note != null) {
+                        b.notes += note
+                        runCatching { tour(app, b) }.onFailure { e2 -> b.erreurs += e2.message ?: e2.javaClass.simpleName; injoignable = e2 is CoffreException && e2.code == 0 }
+                    } else { b.erreurs += e.message.orEmpty() + conseil(app, e.message.orEmpty()); injoignable = true }
+                } else b.erreurs += if (e.code == 401) "Accès refusé : cet appareil a été révoqué ou le coffre a été réinstallé." else e.message.orEmpty()
             } catch (e: Exception) {
                 b.erreurs += e.message ?: e.javaClass.simpleName
+            }
+            if (injoignable && differer) {
+                app.store.coffreBilan.set("⏳ Coffre pas joignable pour l'instant (réveil du téléphone, réseau qui se reconnecte) : nouvel essai automatique dans quelques minutes.")
+                return@withLock app.store.coffreBilan.value
             }
             app.store.coffreDerniere.set(System.currentTimeMillis().toString())
             app.store.coffreBilan.set(b.toString())
             b.toString()
         }
+    }
+
+    /** Explication selon les chemins qui ont échoué. */
+    private fun conseil(app: JarvisApp, m: String): String = when {
+        adresses(app).firstOrNull() != app.store.coffreUrlLocal.value.trim() && Regex("refusée|coupée").containsMatchIn(m) ->
+            "\nHors du Wi-Fi de la maison : le port 8443 n'est pas ouvert sur la box (Réglages › Coffre-fort › Ouvrir le port) — sinon la synchro se fera au retour sur le Wi-Fi."
+        Regex("coupée|refusée").containsMatchIn(m) -> "\nLe serveur répond mais le coffre non : bouton « 🔧 Relancer le coffre sur le serveur » (Réglages › Coffre-fort)."
+        else -> ""
+    }
+
+    /** Coffre injoignable alors que le téléphone est sur le Wi-Fi de la maison : relance du conteneur par SSH ; message ou null. */
+    private fun reparer(app: JarvisApp, e: CoffreException): String? {
+        val local = app.store.coffreUrlLocal.value.trim()
+        if (local.isBlank() || adresses(app).firstOrNull() != local || !fr.dd.jarvis.ai.Serveur.sshConfigure(app)) return null
+        if (!Regex("${Regex.escape(CoffreClient.court(local))} : (connexion coupée|refusée)").containsMatchIn(e.message.orEmpty())) return null
+        if (System.currentTimeMillis() - reparationA < 3_600_000L) return null
+        reparationA = System.currentTimeMillis()
+        return runCatching { CoffreInstallation.relancer(app) }.getOrNull()
     }
 
     private fun tour(app: JarvisApp, b: Bilan) {
@@ -294,6 +336,7 @@ object Coffre {
         // changements faits sur les autres téléphones sans réveiller celui-ci toutes les 15 min.
         WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("coffre_periodique", ExistingPeriodicWorkPolicy.UPDATE,
             PeriodicWorkRequestBuilder<CoffreWorker>(60, TimeUnit.MINUTES)
+                .setBackoffCriteria(androidx.work.BackoffPolicy.LINEAR, 5, TimeUnit.MINUTES)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresBatteryNotLow(true).build()).build())
     }
 
@@ -303,14 +346,18 @@ object Coffre {
         if (!configure(app) || !app.store.coffreAuto.value) return
         WorkManager.getInstance(ctx).enqueueUniqueWork("coffre_maintenant", ExistingWorkPolicy.REPLACE,
             OneTimeWorkRequestBuilder<CoffreWorker>().setInitialDelay(20, TimeUnit.SECONDS)
+                .setBackoffCriteria(androidx.work.BackoffPolicy.LINEAR, 2, TimeUnit.MINUTES)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build())
     }
 
     class CoffreWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
         override suspend fun doWork(): Result {
             val app = applicationContext as JarvisApp
-            synchroniser(app)
-            return Result.success()
+            // Coffre injoignable (souvent au réveil, avant le retour du Wi-Fi) : jusqu'à 4 nouveaux essais espacés avant
+            // d'afficher l'erreur.
+            val dernierEssai = runAttemptCount >= 4
+            synchroniser(app, differer = !dernierEssai)
+            return if (injoignable && !dernierEssai) Result.retry() else Result.success()
         }
     }
 }

@@ -208,6 +208,9 @@ object Serveur {
 
     fun tunnelOllama(app: JarvisApp, portDistant: Int): Int = tunnel(app, portDistant)
 
+    /** Ferme le tunnel vers [portDistant] (session SSH morte après une nuit de veille) : le prochain appel en rouvre un. */
+    fun fermerTunnel(portDistant: Int) { synchronized(this) { tunnels.remove(portDistant) }?.let { (s, _) -> runCatching { s.disconnect() } } }
+
     private val tunnelsLan = java.util.concurrent.ConcurrentHashMap<String, Pair<com.jcraft.jsch.Session, Int>>()
 
     /**

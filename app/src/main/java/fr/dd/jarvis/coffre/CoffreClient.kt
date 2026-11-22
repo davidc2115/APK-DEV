@@ -26,11 +26,38 @@ class CoffreClient(
     private val empreinte: String,
     private val tunnel: (() -> String)? = null,
     private val jeton: () -> String = { "" },
+    /** Tunnel SSH rouvert à neuf : celui gardé de la veille est souvent mort après une nuit de veille du téléphone. */
+    private val tunnelNeuf: (() -> String)? = null,
 ) {
     companion object {
         /** Dernière adresse qui a répondu, par coffre (empreinte) : évite d'attendre les adresses injoignables à chaque fois. */
         private val bonnes = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+        /** Erreur réseau en clair. */
+        internal fun libelle(e: Throwable): String {
+            val m = generateSequence(e) { it.cause }.take(4).mapNotNull { it.message }.joinToString(" ").ifBlank { e.javaClass.simpleName }
+            return when {
+                m.contains("empreinte du coffre", true) -> m
+                e is java.net.SocketTimeoutException || Regex("timeout|timed out", RegexOption.IGNORE_CASE).containsMatchIn(m) -> "pas de réponse"
+                Regex("reset|broken pipe|connection abort|unexpected end of stream", RegexOption.IGNORE_CASE).containsMatchIn(m) -> "connexion coupée"
+                Regex("refused|ECONNREFUSED", RegexOption.IGNORE_CASE).containsMatchIn(m) -> "refusée (port fermé)"
+                Regex("unreachable|ENETUNREACH|EHOSTUNREACH|No route", RegexOption.IGNORE_CASE).containsMatchIn(m) -> "réseau inaccessible"
+                e is java.net.UnknownHostException -> "adresse inconnue"
+                e is java.net.ConnectException -> "refusée (port fermé)"
+                else -> m.take(90)
+            }
+        }
+
+        /** « https://192.168.1.133:8443 » → « 192.168.1.133 ». */
+        internal fun court(adresse: String) = runCatching { java.net.URI(adresse).host }.getOrNull()?.takeIf { it.isNotBlank() } ?: adresse
+
+        /** Erreur passagère (réseau qui se rétablit au réveil, connexion périmée) : un nouvel essai a des chances de passer. */
+        internal fun passagere(l: String) = l == "pas de réponse" || l == "connexion coupée" || l == "réseau inaccessible"
     }
+
+    /** Erreurs du dernier essai, adresse par adresse (pour le diagnostic). */
+    var erreurs: List<Pair<String, String>> = emptyList()
+        private set
 
     private val confiance = object : X509TrustManager {
         override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = throw java.security.cert.CertificateException("non utilisé")
@@ -52,19 +79,29 @@ class CoffreClient(
         val cle = empreinte.trim().lowercase()
         val ordre = (listOfNotNull(bonnes[cle]) + adresses).distinct().filter { it.isNotBlank() }
         require(ordre.isNotEmpty() || tunnel != null) { "Adresse du coffre non configurée." }
-        var derniere: Exception? = null
-        for (a in ordre) {
-            try { return f(a.trimEnd('/')).also { bonnes[cle] = a } }
-            catch (e: java.io.IOException) { derniere = e }   // injoignable : adresse suivante
-        }
-        if (tunnel != null) {
-            val parSsh = try { tunnel.invoke() } catch (e: Exception) { derniere = derniere ?: e; null }
-            if (parSsh != null) {
-                try { return f(parSsh.trimEnd('/')).also { bonnes[cle] = parSsh } }
-                catch (e: java.io.IOException) { derniere = e }
+        val err = mutableListOf<Pair<String, String>>()
+        // Deux tours : au réveil du téléphone le réseau se rétablit souvent pendant le premier (Wi-Fi qui se reconnecte).
+        for (tourNo in 1..2) {
+            err.clear()
+            for (a in ordre) {
+                try { return f(a.trimEnd('/')).also { bonnes[cle] = a; erreurs = emptyList() } }
+                catch (e: java.io.IOException) { err += court(a) to libelle(e) }   // injoignable : adresse suivante
             }
+            if (tunnel != null) {
+                val essais = listOfNotNull(tunnel, if (tourNo == 2 || err.any { passagere(it.second) }) tunnelNeuf else null)
+                for ((i, t) in essais.withIndex()) {
+                    val parSsh = try { t.invoke() } catch (e: Exception) { err += "tunnel SSH" to (e.message ?: e.javaClass.simpleName).take(120); null } ?: break
+                    try { return f(parSsh.trimEnd('/')).also { bonnes[cle] = parSsh; erreurs = emptyList() } }
+                    catch (e: java.io.IOException) { err += (if (i == 0) "tunnel SSH" else "tunnel SSH rouvert") to libelle(e) }
+                }
+            }
+            if (tourNo == 1 && err.any { passagere(it.second) }) {
+                http.connectionPool.evictAll()
+                Thread.sleep(4000)
+            } else break
         }
-        throw CoffreException(0, "Coffre injoignable (${(ordre + listOfNotNull(tunnel?.let { "tunnel SSH" })).joinToString(" / ")}) : ${derniere?.message ?: "pas de réponse"}")
+        erreurs = err.toList()
+        throw CoffreException(0, "Coffre injoignable — " + err.joinToString(" · ") { "${it.first} : ${it.second}" })
     }
 
     private fun appel(methode: String, chemin: String, corps: ByteArray? = null, type: String = "application/json"): Pair<Int, ByteArray> = essayer { base ->

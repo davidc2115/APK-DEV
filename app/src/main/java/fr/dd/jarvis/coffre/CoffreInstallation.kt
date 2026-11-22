@@ -28,6 +28,23 @@ object CoffreInstallation {
         return if (r.first != 0 && Regex("permission denied|docker.sock", RegexOption.IGNORE_CASE).containsMatchIn(r.second)) exec(app, "sudo docker $args 2>&1", timeoutS) else r
     }
 
+    /**
+     * Coffre arrêté ou bloqué (le serveur répond, le coffre non) : conteneur démarré s'il est arrêté, redémarré s'il tourne
+     * sans répondre ; politique de redémarrage automatique vérifiée. Message, ou null si Docker ne répond pas.
+     */
+    fun relancer(app: JarvisApp): String? {
+        val (code, sortie) = docker(app, "inspect -f '{{.State.Status}} {{.State.Restarting}} {{.HostConfig.RestartPolicy.Name}}' coffre-jarvis", 30)
+        if (code != 0) return null
+        val (etat, redemarre, politique) = sortie.trim().split(Regex("\\s+")).let { Triple(it.getOrElse(0) { "" }, it.getOrElse(1) { "" }, it.getOrElse(2) { "" }) }
+        if (politique.isNotBlank() && politique != "unless-stopped" && politique != "always") docker(app, "update --restart unless-stopped coffre-jarvis", 30)
+        val action = if (etat == "running" && redemarre != "true") "restart" else "start"
+        val r = docker(app, "$action coffre-jarvis", 120)
+        Thread.sleep(4000)
+        val journal = docker(app, "logs --tail 5 coffre-jarvis", 30).second.lines().filter { it.isNotBlank() }.takeLast(3).joinToString(" | ").take(300)
+        return (if (r.first == 0) (if (action == "start") "▶️ Le coffre était arrêté ($etat) : conteneur relancé." else "🔄 Le coffre ne répondait plus : conteneur redémarré.")
+            else "⚠️ Relance du coffre impossible : ${r.second.take(160)}") + (if (journal.isNotBlank()) " (journal : $journal)" else "")
+    }
+
     suspend fun installer(app: JarvisApp, progres: (String) -> Unit): String = withContext(Dispatchers.IO) {
         if (!Serveur.sshConfigure(app)) return@withContext "❌ Configure d'abord l'accès SSH à ton serveur (Réglages › Maison › Serveur)."
         progres("Envoi des fichiers sur le serveur…")
