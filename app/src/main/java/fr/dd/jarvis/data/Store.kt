@@ -217,6 +217,8 @@ class Store(context: Context) {
     /** Dernière liste de /image/models (JSON). */
     val imagesModelesCache = SPref("imagesModelesCache", "")
     val imagesNombre = IPref("imagesNombre", 1)
+    /** auto : la clé, puis le mode gratuit si le Pollen est épuisé · gratuit : toujours sans clé. */
+    val imagesAcces = SPref("imagesAcces", "auto")
     /** Noms donnés aux lecteurs Plex (« télé du salon » → identifiant du lecteur), en JSON. */
     val plexAlias = SPref("plexAlias", "{}")
     /** Actions autorisées une fois pour toutes (« Toujours autoriser »), par type d'outil (JSON). */

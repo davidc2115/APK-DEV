@@ -131,6 +131,8 @@ fun ImagesScreen(app: JarvisApp) {
     val reveles = remember { mutableStateListOf<String>() }
     val galerie = remember(StudioEtat.version) { StudioImages.galerie(app) }
     val avecCle = store.pollinationsCle.value.isNotBlank()
+    // Mode gratuit (sans clé) : pas de clé, choisi, ou Pollen épuisé depuis moins d'une heure.
+    val gratuit = !avecCle || store.imagesAcces.value == "gratuit" || StudioImages.pollenEpuise()
 
     LaunchedEffect(avecCle) {
         runCatching { modeles = withContext(Dispatchers.IO) { StudioImages.rafraichirModeles(app) } }
@@ -178,14 +180,29 @@ fun ImagesScreen(app: JarvisApp) {
                 Spacer(Modifier.height(8.dp))
                 if (avecCle && !changerCle) {
                     val c = store.pollinationsCle.value
-                    Text("🔑 Clé Pollinations enregistrée (${c.take(3)}…${c.takeLast(4)}) : tous les modèles, jusqu'à 2048 px.", color = HudText, fontSize = 12.sp)
+                    Text("🔑 Clé Pollinations enregistrée (${c.take(3)}…${c.takeLast(4)}) : tous les modèles, jusqu'à 2048 px, tant que le compte a du Pollen.", color = HudText, fontSize = 12.sp)
                     Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         HudChip("Changer") { changerCle = true; cleSaisie = "" }
                         HudChip("Supprimer") { runCatching { store.pollinationsCle.clear() }; store.imagesModelesCache.set("") }
+                        HudChip("Mon compte (Pollen, Quêtes)") {
+                            runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Pollinations.SITE_CLE)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        }
+                    }
+                    Etiquette("Accès")
+                    Rangee {
+                        HudChip("Clé, sinon gratuit", store.imagesAcces.value != "gratuit") { store.imagesAcces.set("auto") }
+                        HudChip("Gratuit uniquement", store.imagesAcces.value == "gratuit") { store.imagesAcces.set("gratuit") }
+                    }
+                    if (StudioImages.pollenEpuise() && store.imagesAcces.value != "gratuit") {
+                        Text("💸 Le compte Pollinations n'a plus de Pollen utilisable (402) : le mode gratuit sans clé est utilisé pendant 1 h. " +
+                            "Pollinations ne donne plus de Pollen gratuit chaque heure depuis juillet 2026 : gagne-en avec les Quêtes ou achètes-en, " +
+                            "puis donne un budget à la clé (une clé sans budget n'utilise que le Pollen acheté).", color = Color(0xFFFFCC80), fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 6.dp))
+                        Rangee { HudChip("Réessayer avec la clé") { StudioImages.epuiseJusqua = 0L } }
                     }
                 } else {
-                    Text(if (avecCle) "Nouvelle clé :" else "Sans clé : modèle flux uniquement, 768 px max, une image toutes les 15-45 s. Une clé (gratuite, " +
-                        "enter.pollinations.ai) débloque zimage, turbo, qwen-image… et la réécriture par les modèles de texte Pollinations.",
+                    Text(if (avecCle) "Nouvelle clé :" else "Sans clé (gratuit) : un seul modèle, environ 768 × 768, une image toutes les 45 s. Une clé avec du " +
+                        "Pollen (Quêtes ou achat sur enter.pollinations.ai) débloque zimage, klein, flux-2-dev… et le choix du modèle de texte.",
                         color = HudDim, fontSize = 11.sp)
                     HudTextField(cleSaisie, { cleSaisie = it.trim() }, Modifier.fillMaxWidth().padding(top = 6.dp), label = "Clé Pollinations (sk_… ou pk_…)", password = true)
                     Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -246,17 +263,18 @@ fun ImagesScreen(app: JarvisApp) {
                 Etiquette("Nombre d'images")
                 Rangee {
                     listOf(1, 2, 4).forEach { n -> HudChip("×$n", store.imagesNombre.value == n) { store.imagesNombre.set(n) } }
-                    if (!avecCle) Text("(2 max sans clé)", color = HudDim, fontSize = 10.sp, modifier = Modifier.padding(top = 6.dp))
+                    if (gratuit) Text("(2 max en mode gratuit, 45 s entre chaque)", color = HudDim, fontSize = 10.sp, modifier = Modifier.padding(top = 6.dp))
                 }
                 Etiquette("Modèle")
-                Rangee {
+                if (!gratuit) Rangee {
                     HudChip("🤖 Auto", modele == "auto") { modele = "auto" }
-                    (if (avecCle) modeles else modeles.filter { it.nom in setOf("flux", "turbo") }).forEach { m ->
+                    modeles.forEach { m ->
                         HudChip(m.nom + (if (m.payant) " 💰" else "") + (if (PromptImage.modere(m.nom)) " 🛡" else ""), modele == m.nom) { modele = m.nom }
                     }
                 }
-                Text(when (modele) {
-                    "auto" -> "Auto : zimage pour la photo réaliste, flux pour l'illustration / l'anime, qwen-image pour le texte dans l'image, turbo si tu dis « rapide ». En adulte, jamais un modèle 🛡 (filtré)."
+                Text(when {
+                    gratuit -> "Mode gratuit : Pollinations n'y propose qu'un seul modèle, le choix du modèle est ignoré."
+                    modele == "auto" -> "Auto : zimage pour la photo réaliste, flux pour l'illustration / l'anime, qwen-image ou gptimage pour le texte dans l'image, klein si tu dis « rapide » (parmi les modèles proposés par Pollinations). En adulte, jamais un modèle 🛡 (filtré)."
                     else -> modeles.firstOrNull { it.nom == modele }?.description.orEmpty().ifBlank { modele } + if (PromptImage.modere(modele)) " · 🛡 filtre la nudité" else ""
                 }, color = HudDim, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
                 Etiquette("Réécriture du prompt")

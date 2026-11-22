@@ -1,6 +1,8 @@
 package fr.dd.jarvis.images
 
 import android.content.ContentValues
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.content.Intent
 import android.os.Build
 import android.provider.MediaStore
@@ -75,6 +77,22 @@ object StudioImages {
         return l.ifEmpty { Pollinations.MODELES_DEFAUT }
     }
 
+    // ── Accès : clé, ou mode gratuit sans clé ─────────────────────────────────────────────────────────────────────
+    /**
+     * Pollen épuisé jusqu'à cette heure : après un 402 avec la clé, on passe en mode gratuit (sans clé) pendant 1 h
+     * au lieu de refaire une demande payante vouée à l'échec à chaque image.
+     */
+    var epuiseJusqua by androidx.compose.runtime.mutableLongStateOf(0L)
+
+    fun pollenEpuise(): Boolean = System.currentTimeMillis() < epuiseJusqua
+
+    /** Clé utilisée maintenant : vide en mode « gratuit », sans clé enregistrée ou Pollen épuisé. */
+    fun cleEffective(app: JarvisApp): String =
+        if (app.store.imagesAcces.value == "gratuit" || pollenEpuise()) "" else app.store.pollinationsCle.value.trim()
+
+    const val BASCULE = "💸 Solde Pollen épuisé : bascule sur le mode gratuit sans clé (un seul modèle, ~768 × 768, une image toutes les 45 s). " +
+        "Pour retrouver les autres modèles : Quêtes ou achat de Pollen sur enter.pollinations.ai, et un budget sur la clé."
+
     private fun gratuits(app: JarvisApp, avecCle: Boolean): List<String> =
         if (!avecCle) listOf("flux", "turbo")
         else modelesEnCache(app).filter { !it.payant }.flatMap { listOf(it.nom) + it.aliases }
@@ -88,8 +106,15 @@ object StudioImages {
 
     private suspend fun parPollinations(app: JarvisApp, demande: String, explicite: Boolean): PromptImage.Reponse {
         val modele = app.store.imagesModeleTexte.value.ifBlank { "mistral" }
-        val brut = Pollinations.texte(app.store.pollinationsCle.value.trim(), modele, PromptImage.systeme(explicite), demande)
-        return PromptImage.lireReponse(brut, demande, explicite, "Pollinations · $modele")
+        val cle = cleEffective(app)
+        val brut = try {
+            Pollinations.texte(cle, modele, PromptImage.systeme(explicite), demande)
+        } catch (e: fr.dd.jarvis.ai.ApiException) {
+            if (e.code != 402 || cle.isBlank()) throw e
+            epuiseJusqua = System.currentTimeMillis() + 3_600_000L
+            return PromptImage.lireReponse(Pollinations.texte("", modele, PromptImage.systeme(explicite), demande), demande, explicite, "Pollinations gratuit")
+        }
+        return PromptImage.lireReponse(brut, demande, explicite, if (cle.isBlank()) "Pollinations gratuit" else "Pollinations · $modele")
     }
 
     private suspend fun reecrire(app: JarvisApp, demande: String, explicite: Boolean, mode: String, etapes: MutableList<String>): PromptImage.Prompt {
@@ -147,33 +172,49 @@ object StudioImages {
         }
         val prompt = PromptImage.finaliser(prompt0, explicite)
 
-        val cle = app.store.pollinationsCle.value.trim()
-        val choix = if (o.modele.isNotBlank() && o.modele != "auto") {
-            if (explicite && PromptImage.modere(o.modele)) etapes += "⚠️ ${o.modele} filtre la nudité : l'image risque d'être refusée ou censurée."
-            PromptImage.Choix(o.modele, "choisi à la main")
-        } else PromptImage.choisirModele(prompt.style, explicite, PromptImage.rapide(demande), gratuits(app, cle.isNotBlank()))
+        var cle = cleEffective(app)
+        if (cle.isBlank() && app.store.pollinationsCle.value.isNotBlank() && pollenEpuise()) etapes += BASCULE
+        val choixAuto = PromptImage.choisirModele(prompt.style, explicite, PromptImage.rapide(demande), gratuits(app, true))
+        val manuel = o.modele.trim().takeIf { it.isNotBlank() && it != "auto" && it != "gratuit" && !it.startsWith("modèle") }
+        val choix = if (manuel != null) {
+            if (explicite && PromptImage.modere(manuel)) etapes += "⚠️ $manuel filtre la nudité : l'image risque d'être refusée ou censurée."
+            PromptImage.Choix(manuel, "choisi à la main")
+        } else choixAuto
         val format = o.format ?: prompt.format ?: PromptImage.format(demande)
             ?: if (prompt.style == PromptImage.Style.PHOTO || explicite) PromptImage.Format.PORTRAIT else PromptImage.Format.CARRE
-        etapes += "🎨 Modèle ${choix.modele} (${choix.raison}) · ${format.libelle}" + if (cle.isBlank()) " · sans clé (768 px max)" else ""
+        fun libelleModele() = if (cle.isBlank()) "modèle gratuit (sans clé)" else choix.modele
+        etapes += "🎨 " + (if (cle.isBlank()) "Mode gratuit sans clé · un seul modèle" else "Modèle ${choix.modele} (${choix.raison})") + " · ${format.libelle}"
 
         val n = if (cle.isBlank()) o.nombre.coerceIn(1, 2) else o.nombre.coerceIn(1, 4)
         val base = o.seed ?: Random.nextLong(1, 2_000_000_000L)
         val images = mutableListOf<Image>(); val erreurs = mutableListOf<String>()
-        for (i in 0 until n) {
-            progres(if (n > 1) "Génération ${i + 1}/$n avec ${choix.modele}…" else "Génération avec ${choix.modele}…")
+        var i = 0
+        while (i < n) {
+            progres(if (n > 1) "Génération ${i + 1}/$n · ${libelleModele()}…" else "Génération · ${libelleModele()}…")
             val seed = base + i
-            val url = Pollinations.urlImage(prompt.positif, prompt.negatif, choix.modele, format.largeur, format.hauteur, seed, cle.isNotBlank(), filtre = !explicite)
+            val modele = if (cle.isBlank()) "flux" else choix.modele
+            val url = Pollinations.urlImage(prompt.positif, prompt.negatif, modele, format.largeur, format.hauteur, seed, cle.isNotBlank(), filtre = !explicite)
             try {
-                val octets = Pollinations.image(cle, url)
+                val octets = Pollinations.image(cle, url) { s -> progres("Mode gratuit : attente $s s (une image toutes les 45 s)…") }
                 val (w, h) = Pollinations.taille(format.largeur, format.hauteur, cle.isNotBlank())
                 images += enregistrer(app, octets, Image(File(""), demande.ifBlank { o.promptManuel }, prompt.positif, prompt.negatif,
-                    choix.modele, seed, w, h, explicite, System.currentTimeMillis()))
+                    if (cle.isBlank()) "gratuit" else modele, seed, w, h, explicite, System.currentTimeMillis()))
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                val code = (e as? fr.dd.jarvis.ai.ApiException)?.code
+                if (code == 402 && cle.isNotBlank()) {
+                    // Plus de Pollen sur le compte : même image refaite en mode gratuit, et les suivantes aussi.
+                    epuiseJusqua = System.currentTimeMillis() + 3_600_000L
+                    cle = ""
+                    etapes += BASCULE
+                    continue
+                }
                 erreurs += e.message.orEmpty().ifBlank { e.javaClass.simpleName }
-                if (images.isEmpty() && i == 0 && n > 1 && (e as? fr.dd.jarvis.ai.ApiException)?.code in setOf(401, 402)) break
+                if (images.isEmpty() && i == 0 && n > 1 && code in setOf(401, 402)) break
             }
+            i++
+            if (cle.isBlank() && i >= 2) break
         }
-        Resultat(images, prompt, choix.modele, choix.raison, explicite, etapes, erreurs)
+        Resultat(images, prompt, libelleModele(), choix.raison, explicite, etapes, erreurs)
     }
 
     // ── Galerie privée ────────────────────────────────────────────────────────────────────────────────────────────

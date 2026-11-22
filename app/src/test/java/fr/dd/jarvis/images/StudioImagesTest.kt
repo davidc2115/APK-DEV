@@ -122,7 +122,9 @@ class StudioImagesTest {
         assertTrue(u.contains("model=zimage") && u.contains("width=832") && u.contains("height=1216") && u.contains("seed=42"))
         assertTrue(u.contains("safe=false") && u.contains("private=true") && u.contains("nologo=true") && u.contains("negative_prompt=blurry"))
         assertTrue(Pollinations.urlImage("x", "", "flux", 1024, 1024, 1, false, filtre = true).let { it.startsWith("https://image.pollinations.ai/prompt/x?") && it.contains("safe=true") && it.contains("width=768") })
-        assertEquals(Pair(512, 768), Pollinations.taille(832, 1216, false))
+        assertEquals(Pair(624, 928), Pollinations.taille(832, 1216, false))
+        assertEquals(Pair(768, 768), Pollinations.taille(1024, 1024, false))
+        Pollinations.taille(1216, 832, false).let { (w, h) -> assertTrue(w * h <= 768 * 768 && w > h) }
         assertEquals(Pair(1216, 832), Pollinations.taille(1216, 832, true))
     }
 
@@ -140,6 +142,9 @@ class StudioImagesTest {
         assertTrue(Pollinations.messageErreur(402, "{\"error\":{\"message\":\"Insufficient pollen\"}}", true).contains("Pollen"))
         assertTrue(Pollinations.messageErreur(401, "", false).contains("enter.pollinations.ai"))
         assertTrue(Pollinations.messageErreur(429, "", false).contains("sans clé"))
+        // Sans clé, 402 = limite de débit (45 s), pas un solde.
+        assertTrue(Pollinations.messageErreur(402, "", false).contains("45 s"))
+        assertTrue(Pollinations.messageErreur(402, "Insufficient balance. Your available paid balance is 0.0000.", true).let { it.contains("Quêtes") && it.contains("0.0000") })
         assertTrue(Pollinations.estImage(byteArrayOf(0xFF.toByte(), 0xD8.toByte()) + ByteArray(100)))
         assertFalse(Pollinations.estImage("<html>error</html>".toByteArray() + ByteArray(100)))
     }

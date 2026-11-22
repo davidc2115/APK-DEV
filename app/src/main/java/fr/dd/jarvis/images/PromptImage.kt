@@ -67,14 +67,14 @@ object PromptImage {
     }
 
     fun candidats(style: Style, explicite: Boolean, rapide: Boolean): List<String> = when {
-        rapide -> listOf("turbo", "flux", "zimage")
+        rapide -> listOf("klein", "turbo", "flux", "zimage")
         explicite -> when (style) {
-            Style.PHOTO, Style.AUTO -> listOf("zimage", "flux", "turbo")
-            else -> listOf("flux", "zimage", "turbo")
+            Style.PHOTO, Style.AUTO -> listOf("zimage", "flux", "klein", "turbo")
+            else -> listOf("flux", "zimage", "klein", "turbo")
         }
         else -> when (style) {
             Style.TEXTE -> listOf("qwen-image", "gptimage", "flux")
-            Style.PHOTO -> listOf("zimage", "flux")
+            Style.PHOTO -> listOf("zimage", "flux-2-dev", "flux")
             Style.ART -> listOf("flux", "qwen-image", "zimage")
             else -> listOf("flux", "zimage")
         }
