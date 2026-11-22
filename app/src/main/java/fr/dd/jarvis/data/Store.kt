@@ -198,6 +198,25 @@ class Store(context: Context) {
     val sitesIdentifiants = SecretPref("sitesIdentifiants")
     /** Déclarations en ligne : JARVIS clique lui-même sur le bouton final (envoi / paiement) sans demander. */
     val declarationValidationAuto = BPref("declarationValidationAuto", false)
+
+    // ── Studio d'images (onglet « Images », Pollinations) ──
+    /** Clé Pollinations (enter.pollinations.ai), saisie dans l'onglet Images, chiffrée. */
+    val pollinationsCle = SecretPref("pollinationsCle")
+    /** Majorité confirmée : nécessaire pour le contenu adulte. */
+    val imagesMajeur = BPref("imagesMajeur", false)
+    /** Aperçus floutés tant qu'on ne touche pas l'image. */
+    val imagesFlou = BPref("imagesFlou", true)
+    /** Onglet verrouillé par empreinte / code du téléphone. */
+    val imagesVerrou = BPref("imagesVerrou", false)
+    /** Onglet masqué des apps récentes et des captures. */
+    val imagesSecure = BPref("imagesSecure", false)
+    /** auto · gemini · pollinations · locale · aucune */
+    val imagesReecriture = SPref("imagesReecriture", "auto")
+    /** Modèle de texte Pollinations utilisé pour réécrire les demandes adultes. */
+    val imagesModeleTexte = SPref("imagesModeleTexte", "mistral")
+    /** Dernière liste de /image/models (JSON). */
+    val imagesModelesCache = SPref("imagesModelesCache", "")
+    val imagesNombre = IPref("imagesNombre", 1)
     /** Noms donnés aux lecteurs Plex (« télé du salon » → identifiant du lecteur), en JSON. */
     val plexAlias = SPref("plexAlias", "{}")
     /** Actions autorisées une fois pour toutes (« Toujours autoriser »), par type d'outil (JSON). */

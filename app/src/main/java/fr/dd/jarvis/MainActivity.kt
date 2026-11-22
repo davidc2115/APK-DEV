@@ -34,6 +34,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Dashboard
@@ -304,6 +305,7 @@ private val tabs = listOf(
     Tab("Courrier", Icons.Filled.Inbox),
     Tab("Graphe", Icons.Filled.Hub),
     Tab("Wi-Fi", Icons.Filled.Wifi),
+    Tab("Images", Icons.Filled.Palette),
     Tab("Réglages", Icons.Filled.Settings)
 )
 
@@ -355,6 +357,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
             // « wifi », « wifi_lies » : l'onglet Wi-Fi (et son sous-onglet « Liés à Jarvis »).
             if (t.startsWith("wifi")) { terrain = ""; tab = 8; fr.dd.jarvis.ui.OngletWifi.lies.value = t == "wifi_lies" }
             else if (t == "courrier") { terrain = ""; tab = 6 }
+            else if (t == "images") { terrain = ""; tab = 9 }
             else { terrain = t; tab = 0 }
             terrainDemande.value = ""
         }
@@ -421,6 +424,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
                 6 -> fr.dd.jarvis.ui.CourrierScreen(app)
                 7 -> GraphScreen(app)
                 8 -> fr.dd.jarvis.ui.AppareilsWifiScreen(app, demander)
+                9 -> fr.dd.jarvis.ui.ImagesScreen(app)
                 else -> SettingsScreen(app) { vm.send(it) }
             }
         }
