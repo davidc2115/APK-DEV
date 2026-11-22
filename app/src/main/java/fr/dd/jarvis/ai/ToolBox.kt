@@ -138,7 +138,7 @@ class ToolBox(
         put(tool("regler_tri_mails", "Règle du tri des mails (fixe) : seuls les mails LUS sont triés, les non lus restent dans la boîte de réception. action=voir pour la rappeler.",
             mapOf("statut" to prop("lus | non_lus | tous : nouvelle règle à enregistrer."),
                 "action" to prop("definir | voir ; défaut définir si statut fourni, sinon voir."))))
-        put(tool("changer_voix", "Change la voix de JARVIS (personnage) : homme, femme, jeune, âgé(e), grave, douce, IA/robot, narrateur, animatrice radio, murmure, Jarvis (par défaut), ou un nom de voix Gemini (Kore, Puck…). Sans précision : liste les voix.",
+        put(tool("changer_voix", "Change la voix de JARVIS (personnage) : homme, femme, jeune, âgé(e), grave, douce, IA/robot, narrateur, animatrice radio, murmure, Jarvis (par défaut), ou un nom de voix Gemini (Kore, Puck…). Sans précision : liste les voix. Pour ENREGISTRER un message avec une voix (Père Noël, lutin…) : message_vocal.",
             mapOf("voix" to prop("Description de la voix voulue, ex. « femme âgée », « jeune homme », « robot », « par défaut ». Vide = lister."),
                 "description" to prop("Facultatif : description libre (âge, ton, accent) pour une voix sur mesure, ex. « homme de 60 ans avec un accent du Sud »."))))
         put(tool("routines", "Gestion complète des routines JARVIS : lister, consulter, lancer, créer, modifier partiellement ou complètement, activer/désactiver et supprimer. Toute modification conserve les paramètres non mentionnés. Permet de changer le déclencheur, les phrases, l'heure, les jours, le nom et les actions ; ajouter/retirer/remplacer une action sans réécrire les autres.",
@@ -418,6 +418,17 @@ class ToolBox(
                 "depart" to prop("oui = au départ du lieu (défaut : à l'arrivée)"), "chaque_fois" to prop("oui = à chaque passage (défaut : une fois)")), listOf("texte", "lieu")))
         put(tool("declarer_en_ligne", "Fait une déclaration sur le site officiel (URSSAF, impôts, net-entreprises…) dans le navigateur de JARVIS : connexion avec les identifiants enregistrés (jamais vus par l'IA), remplissage des montants calculés, accord de l'utilisateur avant l'envoi. Sans échéance : la prochaine à faire.",
             mapOf("echeance" to prop("Identifiant de l'échéance (ex. urssaf-2026-10) ou mot : urssaf, tva, cfe, dsn, impot."))))
+        put(tool("message_vocal", "Crée un MESSAGE VOCAL enregistré (fichier audio à écouter, partager par WhatsApp / SMS, ou garder) avec une voix de " +
+            "personnage : Père Noël, Mère Noël, lutin, lutine, renne, bonhomme de neige, fée, sorcière, magicien, géant, dragon, pirate, robot, " +
+            "fantôme, super-héros, princesse, ou une voix normale (homme, femme, âgée, narrateur…). Plusieurs voix : un dialogue, une réplique par " +
+            "ligne « Père Noël : … » / « Lutin : … ». Sans texte exact, donne « idee » et JARVIS écrit le message. Le message s'ouvre dans l'écran " +
+            "Messages vocaux. Ce n'est PAS pour parler à voix haute maintenant ni pour changer la voix de JARVIS.",
+            mapOf("texte" to prop("Mots EXACTS à dire, ou dialogue « Nom : réplique » (une par ligne). Vide si l'utilisateur donne seulement une idée."),
+                "voix" to prop("Personnage principal : père noël, lutin, fée, pirate… (défaut : Père Noël si Noël est évoqué, sinon Jarvis)."),
+                "idee" to prop("Si pas de texte exact : sujet du message (pour qui, âge, ce qu'il faut dire)."),
+                "personnages" to prop("Avec « idee » et plusieurs voix : personnages du dialogue séparés par des virgules (ex. « père noël, lutin »)."),
+                "clochettes" to prop("oui | non : clochettes de Noël au début et à la fin (défaut : oui pour les voix de Noël)."),
+                "action" to prop("creer (défaut) | voix (liste des voix) | liste (messages déjà créés) | ouvrir (écran Messages vocaux)"))))
         put(tool("anniversaires", "Anniversaires (contacts Android + ceux dits à JARVIS) : lister (prochains, sur N jours) | de (date d'une personne) | ajouter (nom, date JJ/MM ou JJ/MM/AAAA) | supprimer (nom). Ils sont annoncés au point du matin, la veille au soir et par notification.",
             mapOf("action" to prop("lister (défaut) | de | ajouter | supprimer"), "nom" to prop("Personne."), "date" to prop("ajouter : JJ/MM ou JJ/MM/AAAA."), "jours" to prop("lister : nombre de jours (défaut 60).")))) 
         put(tool("rdv_termine", "Marque un rendez-vous de l'agenda comme TERMINÉ : il prend la couleur demandée (sinon celle des rendez-vous terminés) et JARVIS le considère comme fait. N'écris JAMAIS « terminé » dans le titre ou la description (pas d'update_event pour ça). Sans précision : le rendez-vous en cours, sinon le dernier commencé aujourd'hui.",
@@ -1225,6 +1236,33 @@ class ToolBox(
             val l = fr.dd.jarvis.societe.Declarations.echeances(data).filter { fr.dd.jarvis.societe.DeclarationEnLigne.automatisable(it) && it.id !in data.declarationsFaites.keys }
             val e = l.firstOrNull { it.id == q } ?: fr.dd.jarvis.societe.DeclarationEnLigne.intention("fais ma déclaration $q", data) ?: l.firstOrNull()
             ToolResult(if (e == null) "Aucune déclaration en ligne à faire pour l'instant (onglet Société › Déclarations)." else fr.dd.jarvis.societe.DeclarationEnLigne.ouvrir(app, e), direct = true)
+        }
+        "message_vocal" -> {
+            val MV = fr.dd.jarvis.voice.MessagesVocaux
+            when (a.optString("action").trim().lowercase()) {
+                "voix" -> return ToolResult("🎙️ Voix pour les messages vocaux :\n" + MV.TOUS.groupBy { it.groupe }.entries.joinToString("\n") { (g, l) ->
+                    "$g : " + l.joinToString(", ") { it.libelle } } + "\nPlusieurs voix : une réplique par ligne « Père Noël : … » / « Lutin : … ».")
+                "liste" -> return ToolResult(MV.liste(app).take(10).let { l -> if (l.isEmpty()) "Aucun message vocal enregistré."
+                    else "🎙️ Messages vocaux :\n" + l.joinToString("\n") { "• ${it.titre} (${it.dureeMs / 1000} s)" } })
+                "ouvrir" -> { MV.ouvrir(app); return ToolResult("🎙️ J'ouvre l'écran Messages vocaux.") }
+            }
+            val texte0 = a.optString("texte").trim()
+            val idee = a.optString("idee").trim()
+            if (texte0.isBlank() && idee.isBlank()) return ToolResult("Que doit dire le message vocal (ou de quoi doit-il parler) ?")
+            val indices = listOf(texte0, idee, a.optString("voix"), a.optString("personnages")).joinToString(" ")
+            val noel = Regex("(?i)no[eë]l|lutin|renne|traineau|traîneau|cadeau").containsMatchIn(indices)
+            val principal = a.optString("voix").trim().takeIf { it.isNotBlank() }?.let { MV.role(it) }
+                ?: if (noel) MV.parId("pere_noel")!! else MV.TOUS.first { it.id == "jarvis" }
+            val roles = (listOf(principal) + a.optString("personnages").split(',', ';', '&').mapNotNull { n -> n.trim().takeIf { it.isNotBlank() }?.let { MV.role(it) } })
+                .distinctBy { it.id }
+            val texte = texte0.ifBlank { MV.rediger(app, idee, roles) }
+            val clochettes = when (a.optString("clochettes").trim().lowercase()) { "oui", "true", "1" -> true; "non", "false", "0" -> false
+                else -> MV.scenario(texte, principal).any { it.role.groupe == MV.NOEL } }
+            val m = try { MV.creer(app, texte, principal, clochettes) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+                return ToolResult("Message vocal impossible : ${e.message ?: e.javaClass.simpleName}")
+            }
+            MV.ouvrir(app, m.id)
+            ToolResult("🎙️ ${m.titre} prêt (${(m.dureeMs + 500) / 1000} s, ${m.source}). Je l'ai ouvert dans Messages vocaux : ▶️ écouter, 📤 partager (WhatsApp, SMS…), 💾 enregistrer.\n\nTexte :\n$texte")
         }
         "anniversaires" -> {
             val A = fr.dd.jarvis.device.Anniversaires

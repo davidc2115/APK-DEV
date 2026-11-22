@@ -130,7 +130,8 @@ object Capacites {
             i("Mémoire : consignes, faits (lieux, surnoms), préférences apprises", "souviens-toi que ma femme c'est Angeline|qu'as-tu retenu ?", "memoire_ajouter,memoire_lire,memoire_oublier,memoire_faits,memoire_apprendre,memoire_apprentissages"),
             i("Conversations : retrouver et reprendre une ancienne conversation", "reprends la conversation sur le devis Martin", "conversations"),
         )),
-        Categorie("creation", "🎨", "Images, vidéos et réseaux sociaux", r("images?|dessins?|coloriages?|photos?|videos?|montages?|tiktok|discord|reels?"), listOf(
+        Categorie("creation", "🎨", "Images, vidéos, messages vocaux et réseaux sociaux", r("images?|dessins?|coloriages?|photos?|videos?|montages?|tiktok|discord|reels?|messages? vocaux?|vocal|vocaux|pere noel|lutins?"), listOf(
+            i("Messages vocaux avec des voix de personnages (Père Noël, lutin, fée, pirate…), seul ou en dialogue, à écouter et partager", "fais un message vocal du Père Noël pour Léo qui a été sage|enregistre un message avec la voix d'un lutin|un dialogue entre le Père Noël et un lutin pour Emma", "message_vocal"),
             i("Générer des images, les analyser, les animer en vidéo", "dessine un dragon en coloriage|anime cette image", "generer_image,analyser_image,animer_image"),
             i("Vidéos montées de la durée voulue (plans IA, tes photos et vidéos, musique, voix off)", "crée une vidéo de 40 s sur le chantier|fais 3 TikToks sur les panneaux solaires", "generer_video,video_montage,tiktok_video", Voie.REFLEXE),
             i("TikTok : connexion, profil, statistiques, analyse, script", "analyse mes vidéos TikTok|écris un script TikTok sur l'entretien des panneaux", "tiktok_connexion,tiktok_deconnexion,tiktok_profil,tiktok_mes_videos,tiktok_analyse,tiktok_script"),

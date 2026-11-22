@@ -62,7 +62,7 @@ data class TuileAction(val tuile: Tuile, val onglet: Int? = null, val demande: S
 @Composable
 fun CentreCommande(app: JarvisApp, vm: ChatViewModel, onOnglet: (Int) -> Unit, onDemander: (String) -> Unit,
                    onRegarder: () -> Unit = {}, onCompteRendu: () -> Unit = {}, onSante: () -> Unit = {}, onPresence: () -> Unit = {},
-                   onRappels: () -> Unit = {}, onMusique: () -> Unit = {}) {
+                   onRappels: () -> Unit = {}, onMusique: () -> Unit = {}, onMessagesVocaux: () -> Unit = {}) {
     val agenda by rafraichi(app, 120_000, Tuile("📅", "Agenda", "…", etat = EtatTuile.CHARGEMENT)) { tuileAgenda(app) }
     val meteo by rafraichi(app, 900_000, Tuile("🌤️", "Météo", "…", etat = EtatTuile.CHARGEMENT)) { tuileMeteo(app) }
     val maison by rafraichi(app, 120_000, Tuile("🏠", "Maison", "…", etat = EtatTuile.CHARGEMENT)) { tuileMaison(app) }
@@ -103,7 +103,7 @@ fun CentreCommande(app: JarvisApp, vm: ChatViewModel, onOnglet: (Int) -> Unit, o
         onTuile = { t -> t.action?.invoke() ?: t.onglet?.let(onOnglet) ?: t.demande?.let(onDemander) },
         onRaccourci = onDemander, onRegarder = onRegarder, onCompteRendu = onCompteRendu,
         sante = sante?.let { fr.dd.jarvis.device.Sante.resume(it) } ?: "🩺 Vérification de la santé de Jarvis…", onSante = onSante,
-        onPresence = onPresence, onRappels = onRappels, onMusique = onMusique,
+        onPresence = onPresence, onRappels = onRappels, onMusique = onMusique, onMessagesVocaux = onMessagesVocaux,
     )
 }
 
@@ -134,6 +134,7 @@ fun CentreCommandeVue(
     tuiles: List<TuileAction>, onParler: () -> Unit, onEcrire: () -> Unit, onTuile: (TuileAction) -> Unit, onRaccourci: (String) -> Unit,
     heure: String? = null, onRegarder: () -> Unit = {}, onCompteRendu: () -> Unit = {},
     sante: String = "", onSante: () -> Unit = {}, onPresence: () -> Unit = {}, onRappels: () -> Unit = {}, onMusique: () -> Unit = {},
+    onMessagesVocaux: () -> Unit = {},
 ) {
     val accent = LocalAccent.current
     val maintenant by produceState(heure ?: horloge()) { if (heure == null) while (true) { value = horloge(); delay(15_000) } }
@@ -171,6 +172,7 @@ fun CentreCommandeVue(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             HudButton("⏰ Rappels", Modifier.weight(1f), onClick = onRappels)
             HudButton("🎵 Musique", Modifier.weight(1f), onClick = onMusique)
+            HudButton("🎙️ Vocaux", Modifier.weight(1f), onClick = onMessagesVocaux)
         }
         // --- Ce que Jarvis fait / vient de dire
         val ligne = when {

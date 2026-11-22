@@ -130,6 +130,9 @@ object VoixNaturelle {
 
     private val http = OkHttpClient.Builder().dns(fr.dd.jarvis.ai.Http.dnsGoogle).connectionPool(fr.dd.jarvis.ai.Http.poolGoogle).addInterceptor(fr.dd.jarvis.ai.Http.relocalisation).connectTimeout(6, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).callTimeout(25, TimeUnit.SECONDS).build()
 
+    /** Messages vocaux enregistrés : textes plus longs, on attend jusqu'à 90 s par morceau. */
+    private val httpLong = http.newBuilder().readTimeout(80, TimeUnit.SECONDS).callTimeout(90, TimeUnit.SECONDS).build()
+
     @Volatile private var indisponibleJusqua = 0L
     @Volatile var raison = ""
         private set
@@ -185,11 +188,33 @@ object VoixNaturelle {
     }
 
     /** Un modèle par ses deux API : Interactions (modèles récents), puis generateContent (anciens modèles, ou si refusé). */
-    private fun essayer(k: String, m: String, texte: String, voix: String, style: String): Audio {
-        if (m.startsWith("gemini-2.5")) return ancienne(k, m, texte, voix, style)
-        return try { interactions(k, m, texte, voix, style) } catch (e: Echec) {
-            if (e.code in setOf(400, 404, 501)) ancienne(k, m, texte, voix, style) else throw e
+    private fun essayer(k: String, m: String, texte: String, voix: String, style: String, client: OkHttpClient = http): Audio {
+        if (m.startsWith("gemini-2.5")) return ancienne(k, m, texte, voix, style, client)
+        return try { interactions(k, m, texte, voix, style, client) } catch (e: Echec) {
+            if (e.code in setOf(400, 404, 501)) ancienne(k, m, texte, voix, style, client) else throw e
         }
+    }
+
+    /**
+     * Synthèse pour un message vocal enregistré (onglet Messages vocaux) : voix et interprétation données, toutes les
+     * clés et tous les modèles essayés, sans mettre en pause la voix de Jarvis. Exception lisible si rien ne passe.
+     */
+    fun enregistrement(app: JarvisApp, texte: String, voix: String, style: String): Audio {
+        val cles = app.store.geminiKeys.filter { it.isNotBlank() && !fr.dd.jarvis.ai.KeyRing.estCleOpenAi(it) }
+        if (cles.isEmpty()) throw IllegalStateException("aucune clé Gemini dans les réglages")
+        var dernier = ""; var quota = false
+        for (m in (listOfNotNull(modeleQuiMarche) + MODELES).distinct()) {
+            for (i in cles.indices) {
+                val k = cles[(cle + i) % cles.size]
+                try {
+                    return essayer(k, m, texte, voix, style, httpLong).also { modeleQuiMarche = m }
+                } catch (e: Echec) {
+                    dernier = "HTTP ${e.code} ${e.message.orEmpty().take(100)}"
+                    when (e.code) { 429 -> { quota = true; continue }; 401, 403 -> continue; else -> break }
+                }
+            }
+        }
+        throw IllegalStateException(if (quota) "quota Gemini atteint sur toutes les clés" else dernier.ifBlank { "synthèse refusée" })
     }
 
     /** Essai de chaque modèle avec la première clé : résultat lisible (pour comprendre pourquoi la voix ne passe pas). */
@@ -212,33 +237,33 @@ object VoixNaturelle {
 
     fun reactiver() { indisponibleJusqua = 0; raison = "" }
 
-    private fun post(url: String, cle: String, corps: JSONObject): JSONObject {
+    private fun post(url: String, cle: String, corps: JSONObject, client: OkHttpClient = http): JSONObject {
         val req = Request.Builder().url(url).header("x-goog-api-key", cle).post(corps.toString().toRequestBody(JSON)).build()
         // Refus de localisation de Google : même relais par la passerelle Cloudflare que le reste de Gemini.
-        val (code, t) = fr.dd.jarvis.ai.GeminiPasserelle.executer(http, req)
+        val (code, t) = fr.dd.jarvis.ai.GeminiPasserelle.executer(client, req)
         if (code !in 200..299) throw Echec(code, runCatching { JSONObject(t).optJSONObject("error")?.optString("message") }.getOrNull().orEmpty().ifBlank { "HTTP $code" })
         return JSONObject(t)
     }
 
-    private fun interactions(cle: String, modele: String, texte: String, voix: String, style: String): Audio {
+    private fun interactions(cle: String, modele: String, texte: String, voix: String, style: String, client: OkHttpClient = http): Audio {
         val corps = JSONObject().put("model", modele)
             .put("input", JSONArray().put(JSONObject().put("type", "user_input").put("content", JSONArray().put(
                 JSONObject().put("type", "text").put("text", texte)
                     .put("annotations", JSONArray().put(JSONObject().put("type", "speech_metadata").put("style", style)))))))
             .put("response_format", JSONObject().put("type", "audio"))
             .put("generation_config", JSONObject().put("speech_config", JSONArray().put(JSONObject().put("voice", voix))))
-        return audioDe(post("https://generativelanguage.googleapis.com/v1beta/interactions", cle, corps))
+        return audioDe(post("https://generativelanguage.googleapis.com/v1beta/interactions", cle, corps, client))
             ?: throw Echec(502, "réponse sans audio")
     }
 
-    private fun ancienne(cle: String, modele: String, texte: String, voix: String, style: String): Audio {
+    private fun ancienne(cle: String, modele: String, texte: String, voix: String, style: String, client: OkHttpClient = http): Audio {
         // Anciens modèles : la description de la voix se donne en tête du texte (« Dis ce qui suit avec … : »).
         val consigne = "Dis ce qui suit avec cette voix — ${style.trim()} :\n$texte"
         val corps = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", consigne)))))
             .put("generationConfig", JSONObject().put("responseModalities", JSONArray().put("AUDIO"))
                 .put("speechConfig", JSONObject().put("voiceConfig", JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", voix)))))
-        return audioDe(post("https://generativelanguage.googleapis.com/v1beta/models/$modele:generateContent", cle, corps))
+        return audioDe(post("https://generativelanguage.googleapis.com/v1beta/models/$modele:generateContent", cle, corps, client))
             ?: throw Echec(502, "réponse sans audio")
     }
 
