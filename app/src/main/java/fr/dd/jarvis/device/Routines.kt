@@ -98,17 +98,33 @@ object Routines {
         .replace(Regex(" (s il te plait|s il vous plait|stp|merci|jarvis)$"), "")
         .trim()
 
-    /** La phrase dite déclenche-t-elle cette routine ? (phrase exacte, ou « lance la routine <nom> »). */
+    /** Verbe d'ordre et mot « mode / routine » retirés : « active le mode coucher », « passe en mode coucher » → « coucher ». */
+    private val ORDRE = Regex("^(?:(?:active|activer|lance|lancer|demarre|demarrer|execute|executer|enclenche|declenche|mets|met|mettre|passe|passer|bascule|on passe|fais|je veux|je passe)\\s+)?" +
+        "(?:en\\s+|sur\\s+)?(?:le |la |ma |mon |l |les |mes )?(?:mode |routine |scenario |scene |ambiance )?")
+
+    internal fun cle(s: String): String = norm(s).replace(Regex("^(ok |hey |dis |bon )?jarvis "), "").replace(Regex(" (s il te plait|s il vous plait|stp|merci|jarvis)$"), "")
+        .replace(ORDRE, "").removePrefix("mode ").removePrefix("routine ").trim()
+
+    /**
+     * La phrase dite déclenche-t-elle cette routine ? Phrase exacte, ou nom / phrase de la routine précédés d'un ordre
+     * (« mode coucher », « active le mode coucher », « lance la routine coucher », « passe en mode coucher »).
+     */
     internal fun correspond(r: Routine, texte: String): Boolean {
         if (!r.active) return false
         val e = essentiel(texte)
         if (e.isBlank()) return false
         if (r.declencheur == "phrase" && r.phrases.any { norm(it) == e }) return true
-        val nom = norm(r.nom)
-        return nom.isNotBlank() && Regex("^(lance|demarre|execute|active) (la |ma )?routine $nom$").matches(e)
+        val c = cle(texte)
+        if (c.length < 3) return false
+        return cle(r.nom) == c || (r.declencheur == "phrase" && r.phrases.any { cle(it) == c })
     }
 
     fun parPhrase(app: JarvisApp, texte: String): Routine? = if (texte.length > 80) null else liste(app).firstOrNull { correspond(it, texte) }
+
+    /** Routine désignée par son nom (« coucher », « mode coucher ») : repli de l'activation d'un mode. */
+    fun parNom(app: JarvisApp, nom: String): Routine? = cle(nom).takeIf { it.length >= 3 }?.let { c ->
+        liste(app).firstOrNull { it.active && (cle(it.nom) == c || it.phrases.any { p -> cle(p) == c }) }
+    }
 
     internal fun joursOk(jours: String, jour: DayOfWeek): Boolean = when (jours) {
         "semaine" -> jour.value <= 5

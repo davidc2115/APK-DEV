@@ -221,6 +221,7 @@ object RelaisGroq {
         if (Regex("waze|gps|coordonn").containsMatchIn(t) && Regex("planning|agenda|rendez|\\brdv\\b|lieu|adresse").containsMatchIn(t)) out += listOf("agenda_lieu_gps", "get_planning")
         if (Regex("[ée]conomiseur|mode (d.)?alimentation|(mode|performance|[ée]quilibr|[ée]conomie).{0,40}(t[ée]l[ée]phone|portable|smartphone)|(t[ée]l[ée]phone|portable|smartphone).{0,40}(mode|performance|[ée]quilibr|[ée]conomie)").containsMatchIn(t))
             if (!Regex("s[ée]curis").containsMatchIn(t)) out += "telephone_mode_energie"
+        if (Regex("(mode|passe|mets).{0,40}([ée]conomi|[ée]quilibr|performance)|mode de fonctionnement").containsMatchIn(t)) out += "jarvis_mode_fonctionnement"
         return out
     }
 

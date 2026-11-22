@@ -106,6 +106,18 @@ object Energie {
         runCatching { fr.dd.jarvis.work.VeilleWorker.planifier(ctx) }
     }
 
+    /** Mode de fonctionnement de JARVIS (« economie », « equilibre », « performance ») : enregistré et appliqué ; message. */
+    fun changerMode(app: JarvisApp, mode: String): String {
+        val m = when (mode) { "economie", "eco" -> "eco"; "performance" -> "performance"; else -> "balanced" }
+        app.store.modeEnergie.set(m)
+        appliquerMode(app)
+        return when (m) {
+            "eco" -> "🔋 Jarvis en mode économie : les tâches secondaires sont réduites, l'écoute et les commandes restent disponibles."
+            "performance" -> "⚡ Jarvis en mode haute performance : réactivité maximale, dans les limites imposées par Android."
+            else -> "⚖️ Jarvis en mode équilibré : son activité s'adapte à la batterie, à la température et à la mémoire."
+        }
+    }
+
     /** Hors interface (workers) : état à jour sans dépendre du suivi. */
     fun economieMaintenant(ctx: Context): Boolean { maj(ctx); return economie }
 

@@ -28,6 +28,7 @@ object Capacites {
             i("Réseau mobile : signal, 4G / 5G, APN, réception des SMS, qualité des appels — diagnostic et amélioration", "comment est mon réseau ?|améliore ma réception|je ne reçois pas mes SMS|montre-moi l'APN", "reseau_mobile", Voie.REFLEXE),
             i("Lampe torche, volume, luminosité, Wi-Fi, Bluetooth, données mobiles, verrouillage, capture d'écran", "allume la torche|volume à 40 %|coupe le Wi-Fi|verrouille le téléphone", "phone_action", Voie.REFLEXE),
             i("Mode sonore : ne pas déranger, vibreur, sonnerie + vibreur", "mets le téléphone en vibreur|active ne pas déranger|remets la sonnerie", "mode_sonore", Voie.REFLEXE),
+            i("Mode de fonctionnement de Jarvis : économie, équilibré, performance", "passe en mode équilibré|mets Jarvis en mode économie", "jarvis_mode_fonctionnement", Voie.REFLEXE),
             i("Mode d'alimentation du téléphone : économie, équilibré, performance", "passe le téléphone en mode économie", "telephone_mode_energie", Voie.REFLEXE),
             i("Ouvrir une application installée, lister les applications", "ouvre WhatsApp|lance Spotify", "phone_action", Voie.REFLEXE),
             i("Heure, date, niveau de batterie", "quelle heure est-il ?|combien de batterie ?", "", Voie.REFLEXE),

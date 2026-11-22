@@ -301,6 +301,12 @@ class Brain(
                 onStatus("🧰 Ce que je sais faire…")
                 return reflexe(Capacites.repondre(app, d, tools.schemaAll()), lecture = true)
             }
+            // « Passe en mode équilibré » : le mode de fonctionnement de JARVIS, sauf si la phrase parle du téléphone.
+            modeEnergieDemande(fr.dd.jarvis.societe.core.normaliser(texteUser))?.let { (cible, mode) ->
+                if (cible == "telephone") { onStatus("📱 Réglage du mode du téléphone…"); return reflexe(fr.dd.jarvis.device.ModeTelephone.appliquer(app, mode)) }
+                onStatus("⚙️ Mode de fonctionnement de Jarvis…")
+                return reflexe(appliquerModeJarvis(mode) + if (cible == "jarvis?") "\n(Le téléphone, lui, n'a pas changé : pour lui, dis « passe le téléphone en mode ${mode.replace("equilibre", "équilibré").replace("economie", "économie")} ».)" else "")
+            }
             // « Quels appareils contrôles-tu ? » : appareils liés à Jarvis, en local et à distance.
             if (Regex("\\b(quels?|quelles?|liste|montre|donne)\\b.{0,30}\\b(appareils?|equipements?|services?)\\b.{0,30}\\b(controles?|pilotes?|geres?|lies?|associes?|relies?)\\b|\\bappareils? (lies|associes|relies) (a|avec) (toi|jarvis)\\b")
                     .containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser)) && !Regex("\\b(box|freebox|wi ?fi|reseau)\\b.{0,20}\\b(connectes?)\\b").containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser))) {
@@ -1026,16 +1032,7 @@ class Brain(
      * capture d'écran. Les confirmations habituelles (Wi-Fi coupé, verrouillage…) restent demandées par l'outil.
      */
     /** Mode de fonctionnement de JARVIS (économie / équilibré / performance) : réglé tout de suite, sans IA. */
-    private fun appliquerModeJarvis(mode: String): String {
-        val m = when (mode) { "economie", "eco" -> "eco"; "performance" -> "performance"; else -> "balanced" }
-        app.store.modeEnergie.set(m)
-        fr.dd.jarvis.device.Energie.appliquerMode(app)
-        return when (m) {
-            "eco" -> "🔋 Jarvis en mode économie : les tâches secondaires sont réduites, l'écoute et les commandes restent disponibles."
-            "performance" -> "⚡ Jarvis en mode haute performance : réactivité maximale, dans les limites imposées par Android."
-            else -> "⚖️ Jarvis en mode équilibré : son activité s'adapte à la batterie, à la température et à la mémoire."
-        }
-    }
+    private fun appliquerModeJarvis(mode: String): String = fr.dd.jarvis.device.Energie.changerMode(app, mode)
 
     /**
      * Plusieurs actions simples dans une même phrase : chacune reconnue SANS IA (modes de Jarvis et du téléphone, mode
@@ -1269,6 +1266,28 @@ class Brain(
             if (candidats.size == 1) return candidats.first()
             val avecClient = candidats.filter { (c, _) -> dans(c) }
             return avecClient.singleOrNull()
+        }
+
+        /**
+         * « Passe en mode équilibré » (phrase normalisée) → (« jarvis » | « jarvis? » sans précision | « telephone », mode), ou
+         * null. Sans le mot téléphone / portable / batterie, c'est le mode de fonctionnement de JARVIS. Les phrases à
+         * plusieurs actions (« … et le téléphone aussi ») restent au découpage habituel.
+         */
+        internal fun modeEnergieDemande(n: String): Pair<String, String>? {
+            if (n.length > 120 || Regex("\\b(et|puis|ensuite)\\b|,").containsMatchIn(n) || Regex("securis").containsMatchIn(n)) return null
+            val niveau = "(eco|economie|economique|haute performance|performance|equilibre|balanced)"
+            val ordre = Regex("\\b(passe|passer|mets|mettre|met|active|activer|bascule|basculer|choisis|choisir|regle|regler|change|changer|remets|remettre)\\b.{0,60}\\b(mode\\s*)?$niveau\\b").containsMatchIn(n) ||
+                Regex("^(jarvis )?(en )?mode $niveau$").containsMatchIn(n)
+            if (!ordre) return null
+            val mode = modeEnergieDans(n) ?: return null
+            val jarvis = Regex("\\b(jarvis|application|appli|app|assistant|toi|ton mode|ta configuration|mode de fonctionnement|fonctionnement)\\b").containsMatchIn(n)
+            val tel = Regex("\\b(telephone|smartphone|portable|mobile|xiaomi|redmi|hyperos|economiseur|batterie|alimentation|tel)\\b").containsMatchIn(n)
+            return when {
+                jarvis && tel -> if (Regex("mode de fonctionnement (de |d )?(jarvis|l application|l appli)|\\bjarvis\\b").containsMatchIn(n) && !Regex("\\b(du|le|mon) (telephone|portable|smartphone)\\b").containsMatchIn(n)) "jarvis" to mode else null
+                tel -> "telephone" to mode
+                jarvis -> "jarvis" to mode
+                else -> "jarvis?" to mode
+            }
         }
 
         /** « économie » / « performance » / « equilibre » nommé dans la phrase (normalisée), ou null. */

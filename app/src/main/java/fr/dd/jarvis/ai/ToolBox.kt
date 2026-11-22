@@ -493,7 +493,9 @@ class ToolBox(
                 "options" to prop("Réglages « cle=oui|non » séparés par « ; » : sirene_detection, notifications_ha, mms."),
                 "nouveau_nom" to prop("Nouveau nom (modifier).")
             ), listOf("action")))
-        put(tool("telephone_mode_energie", "Règle UNIQUEMENT le MODE D'ALIMENTATION (batterie) DU TÉLÉPHONE : économie d'énergie (économiseur de batterie), équilibré ou performance — directement par le système, sans piloter l'écran ; « etat » indique le mode actuel. Pour TOUT AUTRE mode (téléphone sécurisé, maison sécurisée, cinéma, nuit, vacances…), utilise modes_jarvis. À ne pas confondre non plus avec le mode de fonctionnement de l'application Jarvis.",
+        put(tool("jarvis_mode_fonctionnement", "Règle le MODE DE FONCTIONNEMENT DE JARVIS (l'application elle-même) : économie, équilibré ou performance ; « etat » indique le mode actuel. C'est CET outil pour « passe en mode équilibré / économie / performance » sans le mot téléphone, et pour « le mode de fonctionnement de Jarvis ». Ne touche jamais au mode du téléphone.",
+            mapOf("mode" to prop("economie | equilibre | performance | etat"))))
+        put(tool("telephone_mode_energie", "Règle UNIQUEMENT le MODE D'ALIMENTATION (batterie) DU TÉLÉPHONE, et SEULEMENT si l'utilisateur parle explicitement du téléphone, du portable, de la batterie ou de l'économiseur (sinon : jarvis_mode_fonctionnement) : économie d'énergie (économiseur de batterie), équilibré ou performance — directement par le système, sans piloter l'écran ; « etat » indique le mode actuel. Pour TOUT AUTRE mode (téléphone sécurisé, maison sécurisée, cinéma, nuit, vacances…), utilise modes_jarvis. À ne pas confondre non plus avec le mode de fonctionnement de l'application Jarvis.",
             mapOf("mode" to prop("economie, equilibre, performance ou etat.")), listOf("mode")))
         put(tool("reseau_mobile", "Réseau mobile du téléphone (si l'utilisateur demande de l'AMÉLIORER : action=optimiser, qui agit — n'explique pas seulement) : qualité du signal et de la réception (5G / 4G / 3G, dBm, barres), opérateur, données mobiles, itinérance, APN, réception des SMS / MMS, qualité des appels — diagnostic, réglage et amélioration. action=diagnostic (lecture), optimiser (AGIT : plan selon la situation — mode avion, données, passage en 4G si la 5G décroche, activation des appels Wi-Fi, relance d'antenne — en une confirmation, puis avant / après et ce qui ne dépend d'aucun réglage), appels_wifi (active les appels Wi-Fi en « Wi-Fi de préférence »), reenregistrer (relance la recherche d'antenne par 5 s de mode avion, après accord), apn (APN de la SIM analysés : problèmes et améliorations possibles, valeurs de l'opérateur ; ouvrir=oui ouvre l'écran des APN), apn_configurer (crée et choisit un APN « JARVIS » aux bonnes valeurs — IPv4/IPv6, assistance GPS, MMS — après accord, sans toucher à ceux de l'opérateur, retour automatique s'il n'y a plus internet), apn_optimiser (JARVIS cherche LUI-MÊME le meilleur APN, au-delà des valeurs de l'opérateur : en partant de l'APN qui marche, il essaie d'autres noms d'APN, protocoles IPv4/IPv6 / IPv4 / IPv6 et MTU autour de celle du chemin réel, mesure chacun par le réseau mobile, re-mesure le gagnant face à l'origine et ne le garde que s'il est nettement meilleur ; il mémorise les essais pour la fois suivante ; en arrière-plan, après accord, ≈ 3 à 5 min, ≈ 40 Mo max), apn_restaurer (remet l'APN de l'opérateur), dns (compare le DNS de l'opérateur aux DNS privés Cloudflare / Google / Quad9), dns_appliquer (cible=cloudflare | google | quad9 : DNS privé activé, vérifié, réversible), dns_restaurer, mtu (MTU du lien et du chemin réel), messages (SMS / MMS qui n'arrivent pas), appels (appels qui coupent, son haché, messagerie directe), ouvrir (cible=apn | reseau | operateur | appels | appels_wifi | sms | mode_avion | sim : écran de réglage), type_reseau (cible=4g pour couper la 5G, 5g pour la remettre, avant pour revenir au réglage précédent ; après accord, avec Shizuku / ADB), sim (cartes SIM et à quoi sert chacune), debit (vrai test de débit par le réseau mobile : latence, descente, montée, ≈ 13 Mo), historique (où et quand la réception est mauvaise). Sans Shizuku / ADB, Android interdit aux applis d'écrire les APN : JARVIS donne les valeurs et ouvre l'écran.", mapOf(
             "action" to prop("diagnostic | optimiser | appels_wifi | reenregistrer | apn | apn_configurer | apn_optimiser | apn_restaurer | dns | dns_appliquer | dns_restaurer | mtu | messages | appels | ouvrir | type_reseau | sim | debit | historique"),
@@ -646,6 +648,10 @@ class ToolBox(
             a.optString("forcer").trim().lowercase() in setOf("true", "oui", "1")) { texte -> confirm(texte, false) })
         "modes_jarvis", "systeme_securite" -> systemeSecurite(a)
         "jarvis_reglages" -> ToolResult(reglagesJarvis())
+        "jarvis_mode_fonctionnement" -> ToolResult(when (val m = fr.dd.jarvis.societe.core.normaliser(a.optString("mode")).let { fr.dd.jarvis.ai.Brain.modeEnergieDans(it) ?: it }) {
+            "economie", "equilibre", "performance" -> fr.dd.jarvis.device.Energie.changerMode(app, m)
+            else -> "Mode de fonctionnement de Jarvis : " + fr.dd.jarvis.device.Energie.libelle(app)
+        }, direct = true)
         "telephone_mode_energie" -> ToolResult(fr.dd.jarvis.device.ModeTelephone.appliquer(app, a.optString("mode").ifBlank { "etat" }))
         "delete_event" -> deleteEvent(a)
         "set_event_color" -> setEventColor(a)
@@ -2688,7 +2694,12 @@ class ToolBox(
             }
             "consulter", "voir" -> ToolResult(fr.dd.jarvis.securite.Systemes.trouver(app, nom)?.let { fr.dd.jarvis.securite.Systemes.presenter(it) } ?: fr.dd.jarvis.securite.Systemes.presenterTous(app))
             "activer" -> {
-                val s = fr.dd.jarvis.securite.Systemes.trouver(app, nom) ?: return ToolResult("Mode « $nom » introuvable.\n" + fr.dd.jarvis.securite.Systemes.presenterTous(app))
+                val s = fr.dd.jarvis.securite.Systemes.trouver(app, nom) ?: run {
+                    // « Mode coucher » créé dans les routines (pas dans les modes) : c'est la routine qui est lancée.
+                    fr.dd.jarvis.device.Routines.parNom(app, nom)?.let { r -> return ToolResult(fr.dd.jarvis.device.Routines.executer(app, r, tools = this), direct = true) }
+                    return ToolResult("Mode « $nom » introuvable (ni dans les modes, ni dans les routines).\n" + fr.dd.jarvis.securite.Systemes.presenterTous(app) +
+                        fr.dd.jarvis.device.Routines.liste(app).filter { it.active }.takeIf { it.isNotEmpty() }?.let { l -> "\nRoutines : " + l.joinToString { it.nom } }.orEmpty())
+                }
                 ToolResult(fr.dd.jarvis.securite.Systemes.activer(app, s, this))
             }
             "desactiver" -> {
