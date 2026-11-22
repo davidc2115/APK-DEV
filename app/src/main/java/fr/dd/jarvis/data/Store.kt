@@ -101,7 +101,14 @@ class Store(context: Context) {
             }
             // Suppression des anciens identifiants Google Flow : fournisseur retiré de JARVIS.
             secure.edit().remove("googleFlowApiToken").commit()
+            // Onglet Images (Pollinations) retiré : clé effacée.
+            if (secure.contains("pollinationsCle")) secure.edit().remove("pollinationsCle").commit()
             prefs.edit().remove("googleFlowAccountEmail").remove("googleFlowModel").apply()
+            // Réglages et images privées de l'ancien onglet Images (Pollinations), retiré.
+            val anciensImages = listOf("imagesMajeur", "imagesFlou", "imagesVerrou", "imagesSecure", "imagesReecriture",
+                "imagesModeleTexte", "imagesModelesCache", "imagesNombre", "imagesAcces")
+            if (anciensImages.any(prefs::contains)) prefs.edit().apply { anciensImages.forEach { remove(it) } }.apply()
+            runCatching { java.io.File(context.filesDir, "studio_images").takeIf { it.exists() }?.deleteRecursively() }
             // Migration automatique des clés OpenAI déjà collées dans le champ Gemini.
             // Écriture atomique : on ne retire les clés de Gemini que si leur copie chiffrée réussit.
             val geminiRaw = secure.getString("geminiKeys", "").orEmpty()
@@ -198,27 +205,6 @@ class Store(context: Context) {
     val sitesIdentifiants = SecretPref("sitesIdentifiants")
     /** Déclarations en ligne : JARVIS clique lui-même sur le bouton final (envoi / paiement) sans demander. */
     val declarationValidationAuto = BPref("declarationValidationAuto", false)
-
-    // ── Studio d'images (onglet « Images », Pollinations) ──
-    /** Clé Pollinations (enter.pollinations.ai), saisie dans l'onglet Images, chiffrée. */
-    val pollinationsCle = SecretPref("pollinationsCle")
-    /** Majorité confirmée : nécessaire pour le contenu adulte. */
-    val imagesMajeur = BPref("imagesMajeur", false)
-    /** Aperçus floutés tant qu'on ne touche pas l'image. */
-    val imagesFlou = BPref("imagesFlou", true)
-    /** Onglet verrouillé par empreinte / code du téléphone. */
-    val imagesVerrou = BPref("imagesVerrou", false)
-    /** Onglet masqué des apps récentes et des captures. */
-    val imagesSecure = BPref("imagesSecure", false)
-    /** auto · gemini · pollinations · locale · aucune */
-    val imagesReecriture = SPref("imagesReecriture", "auto")
-    /** Modèle de texte Pollinations utilisé pour réécrire les demandes adultes. */
-    val imagesModeleTexte = SPref("imagesModeleTexte", "mistral")
-    /** Dernière liste de /image/models (JSON). */
-    val imagesModelesCache = SPref("imagesModelesCache", "")
-    val imagesNombre = IPref("imagesNombre", 1)
-    /** auto : la clé, puis le mode gratuit si le Pollen est épuisé · gratuit : toujours sans clé. */
-    val imagesAcces = SPref("imagesAcces", "auto")
     /** Noms donnés aux lecteurs Plex (« télé du salon » → identifiant du lecteur), en JSON. */
     val plexAlias = SPref("plexAlias", "{}")
     /** Actions autorisées une fois pour toutes (« Toujours autoriser »), par type d'outil (JSON). */
