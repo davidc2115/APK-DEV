@@ -129,6 +129,103 @@ object HaSur {
         return "## API Home Assistant\n$api\n\n## Hôte Debian — conteneur Home Assistant (lecture seule)\n```\n$hote\n```"
     }
 
+    // ------------------------------------------------------------------ redémarrages à répétition : pourquoi ?
+
+    /** Redémarrages de Home Assistant demandés par JARVIS lui-même (ou Hermès par ses outils) : notés pour les recouper. */
+    fun noterDemande(app: JarvisApp, origine: String) {
+        fr.dd.jarvis.voice.JournalVoix.noter("maison", "⚠️ REDÉMARRAGE de Home Assistant demandé par JARVIS ($origine)")
+        runCatching {
+            val p = app.getSharedPreferences("ha_redemarrages", android.content.Context.MODE_PRIVATE)
+            val l = (p.getString("liste", "").orEmpty().lines().filter { it.isNotBlank() } + "${System.currentTimeMillis()}|$origine").takeLast(20)
+            p.edit().putString("liste", l.joinToString("\n")).apply()
+        }
+    }
+
+    private fun demandesJarvis(app: JarvisApp): List<Pair<Long, String>> = runCatching {
+        app.getSharedPreferences("ha_redemarrages", android.content.Context.MODE_PRIVATE).getString("liste", "").orEmpty().lines()
+            .mapNotNull { l -> l.substringBefore('|').toLongOrNull()?.let { it to l.substringAfter('|') } }
+    }.getOrDefault(emptyList())
+
+    /** Script en LECTURE SEULE : état du conteneur, événements Docker, mémoire, OOM du noyau, journaux, tâches et surveillants. */
+    internal fun scriptCauses(c: Conteneur): String = """
+C=${q(c.nom)}; CFG=${q(c.config)}
+D=docker; ${'$'}D info >/dev/null 2>&1 || D="sudo -n docker"
+lire(){ cat "${'$'}1" 2>/dev/null || sudo -n cat "${'$'}1" 2>/dev/null; }
+echo '== ETAT'
+${'$'}D inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} demarre={{.State.StartedAt}} arrete={{.State.FinishedAt}} redemarrages={{.RestartCount}} politique={{.HostConfig.RestartPolicy.Name}} limite_memoire={{.HostConfig.Memory}} sante={{if .State.Health}}{{.State.Health.Status}}{{else}}aucune{{end}}' "${'$'}C" 2>&1
+echo '== EVENEMENTS (72 h)'
+timeout 20 ${'$'}D events --since 72h --until "${'$'}(date +%s)" --filter "container=${'$'}C" --format '{{.Time}} {{.Action}} exit={{index .Actor.Attributes "exitCode"}}' 2>/dev/null | grep -E ' (die|oom|kill|stop|restart|start|health_status: unhealthy)' | tail -40 | while read t rest; do echo "${'$'}(date -d @${'$'}t '+%d/%m %H:%M:%S' 2>/dev/null || echo ${'$'}t) ${'$'}rest"; done
+echo '== MEMOIRE'
+free -m 2>&1; uptime 2>&1
+${'$'}D stats --no-stream --format 'conteneur {{.Name}} mem={{.MemUsage}} cpu={{.CPUPerc}}' 2>/dev/null | head -8
+echo '== NOYAU OOM'
+( journalctl -k --since -72h --no-pager 2>/dev/null || sudo -n journalctl -k --since -72h --no-pager 2>/dev/null || dmesg -T 2>/dev/null || sudo -n dmesg -T 2>/dev/null ) | grep -iE 'out of memory|oom-kill|killed process' | tail -8
+echo '== JOURNAL PRECEDENT (fin de la session arretee)'
+lire "${'$'}CFG/home-assistant.log.1" | grep -iE 'restart|stopping|shutdown|received signal|sigterm|sigkill|homeassistant\.(restart|stop)|watchdog|memoryerror|out of memory|segmentation|fatal|timed out.*stop|safe mode|recovery' | tail -20
+echo '-- dernieres lignes'
+lire "${'$'}CFG/home-assistant.log.1" | tail -12
+echo '== JOURNAL ACTUEL (demandes de redemarrage)'
+lire "${'$'}CFG/home-assistant.log" | grep -iE 'homeassistant\.(restart|stop)|restart.*requested|received signal|safe mode|recovery' | tail -10
+echo '== TACHES PLANIFIEES'
+( crontab -l 2>/dev/null; sudo -n crontab -l 2>/dev/null; lire /etc/crontab; for f in /etc/cron.d/*; do lire "${'$'}f"; done ) | grep -v '^\s*#' | grep -iE 'docker|home.?assistant|hass|restart|reboot' | head -12
+systemctl list-timers --all --no-pager 2>/dev/null | grep -iE 'docker|hass|home|restart|reboot' | head -8
+echo '== AUTOMATISATIONS QUI REDEMARRENT'
+grep -rnE 'homeassistant\.(restart|stop)|hassio\.host_reboot|shell_command' "${'$'}CFG"/*.yaml 2>/dev/null | head -10 || sudo -n grep -rnE 'homeassistant\.(restart|stop)' "${'$'}CFG"/*.yaml 2>/dev/null | head -10
+echo '== SURVEILLANTS'
+${'$'}D ps --format '{{.Names}} {{.Image}}' 2>/dev/null | grep -iE 'autoheal|watchtower|ouroboros|diun|deunhealth' 
+echo '== DISQUE'
+df -h / 2>/dev/null | tail -1; [ -n "${'$'}CFG" ] && df -h "${'$'}CFG" 2>/dev/null | tail -1
+ls -la "${'$'}CFG"/home-assistant_v2.db 2>/dev/null || sudo -n ls -la "${'$'}CFG"/home-assistant_v2.db 2>/dev/null
+""".trimIndent()
+
+    /** Ce que disent les relevés : causes probables, par ordre d'importance. */
+    internal fun interpreter(brut: String, demandes: List<Pair<Long, String>> = emptyList()): List<String> {
+        val causes = mutableListOf<String>()
+        val evenements = brut.substringAfter("== EVENEMENTS", "").substringBefore("== MEMOIRE")
+        val morts = Regex("die exit=(\\d+)").findAll(evenements).map { it.groupValues[1] }.toList()
+        val demarrages = Regex("\\bstart\\b").findAll(evenements).count()
+        if (demarrages > 0) causes += "📊 Home Assistant a démarré $demarrages fois en 72 h (arrêts : ${morts.groupingBy { it }.eachCount().entries.joinToString { "code ${it.key} ×${it.value}" }.ifBlank { "aucun relevé" }})."
+        val oom = Regex("oom=true").containsMatchIn(brut) || Regex("\\boom\\b").containsMatchIn(evenements) ||
+            brut.substringAfter("== NOYAU OOM", "").substringBefore("== JOURNAL").let { Regex("(?i)killed process.*(python|hass)|out of memory").containsMatchIn(it) }
+        if (oom || "137" in morts) causes += "🧠 MÉMOIRE SATURÉE : le système tue Home Assistant faute de mémoire (code 137 / OOM). Avec 2 Go de RAM partagés " +
+            "(Plex, bot Discord…), c'est la cause la plus probable : réduis l'historique (recorder : purge_keep_days 3, exclure les capteurs bavards), " +
+            "retire les intégrations inutiles, ajoute de la mémoire d'échange (swap 2 Go) ou de la RAM."
+        Regex("Mem:\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+\\d+\\s+\\d+\\s+(\\d+)").find(brut)?.let { m ->
+            val total = m.groupValues[1].toInt(); val dispo = m.groupValues[4].toInt()
+            if (dispo < total * 0.15) causes += "🧠 Mémoire très basse en ce moment : $dispo Mo libres sur $total Mo."
+        }
+        Regex("Swap:\\s+(\\d+)\\s+(\\d+)").find(brut)?.let { m -> if (m.groupValues[1] == "0") causes += "💾 Aucune mémoire d'échange (swap) : au moindre pic, le noyau tue un programme — souvent Home Assistant." }
+        val surveillants = brut.substringAfter("== SURVEILLANTS", "").substringBefore("== DISQUE").lines().filter { it.isNotBlank() }
+        if (surveillants.any { Regex("(?i)watchtower|ouroboros").containsMatchIn(it) }) causes += "🔄 Un conteneur de mise à jour automatique (Watchtower…) tourne : il redémarre Home Assistant à chaque nouvelle image."
+        if (surveillants.any { Regex("(?i)autoheal|deunhealth").containsMatchIn(it) }) causes += "🩺 Un conteneur « autoheal » redémarre Home Assistant dès qu'il le juge malade (démarrage lent, contrôle de santé trop strict)."
+        if (Regex("sante=unhealthy").containsMatchIn(brut) || Regex("health_status: unhealthy").containsMatchIn(evenements)) causes += "🩺 Le contrôle de santé Docker déclare Home Assistant « malade » : avec un surveillant ou un script, cela provoque des redémarrages."
+        val taches = brut.substringAfter("== TACHES PLANIFIEES", "").substringBefore("== AUTOMATISATIONS").lines().filter { it.isNotBlank() }
+        if (taches.any { Regex("(?i)restart|reboot").containsMatchIn(it) }) causes += "⏰ Une tâche planifiée du serveur redémarre Docker / Home Assistant : ${taches.first { Regex("(?i)restart|reboot").containsMatchIn(it) }.take(140)}"
+        val autos = brut.substringAfter("== AUTOMATISATIONS QUI REDEMARRENT", "").substringBefore("== SURVEILLANTS").lines().filter { Regex("homeassistant\\.(restart|stop)").containsMatchIn(it) }
+        if (autos.isNotEmpty()) causes += "🤖 Une automatisation / un script de Home Assistant appelle homeassistant.restart : ${autos.first().take(140)}"
+        val journal = brut.substringAfter("== JOURNAL PRECEDENT", "").substringBefore("== TACHES")
+        if (Regex("(?i)safe mode|recovery").containsMatchIn(journal)) causes += "🛟 Home Assistant a démarré en mode de récupération (configuration refusée ou intégration en échec)."
+        if (Regex("(?i)homeassistant\\.restart|restart.*requested").containsMatchIn(journal)) causes += "📨 Le redémarrage a été DEMANDÉ (service homeassistant.restart) : automatisation, tableau de bord, ou outil (JARVIS / Hermès)."
+        if (Regex("(?i)database.*(malformed|corrupt)|disk i/o error").containsMatchIn(brut)) causes += "🗄️ Base de l'historique endommagée : chaque démarrage est long et peut échouer."
+        Regex("(\\d+)%\\s+/\\s*$", RegexOption.MULTILINE).find(brut.substringAfter("== DISQUE", ""))?.let { if (it.groupValues[1].toInt() >= 90) causes += "💽 Disque presque plein (${it.groupValues[1]} %) : Home Assistant peut planter en écrivant." }
+        val recents = demandes.filter { System.currentTimeMillis() - it.first < 72 * 3600_000L }
+        if (recents.isNotEmpty()) causes += "🧾 JARVIS a lui-même demandé ${recents.size} redémarrage(s) en 72 h : " +
+            recents.takeLast(5).joinToString { java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRANCE).format(java.util.Date(it.first)) + " (" + it.second + ")" }
+        return causes
+    }
+
+    /** « Pourquoi Home Assistant redémarre ? » : relevés du serveur (lecture seule) + causes probables. */
+    fun causesRedemarrages(app: JarvisApp): String {
+        if (!Serveur.sshConfigure(app)) return "Pour savoir pourquoi Home Assistant redémarre, il faut l'accès SSH au serveur (Réglages › Maison › Serveur) : les causes (mémoire, tâches, surveillants) se lisent sur la machine."
+        val c = conteneur(app, frais = true) ?: return "❌ Conteneur Home Assistant introuvable sur le serveur."
+        val r = Serveur.exec(app, scriptCauses(c), 90)
+        val brut = r.second.trim()
+        val causes = interpreter(brut, demandesJarvis(app))
+        val synthese = if (causes.none { !it.startsWith("📊") }) "Aucune cause évidente dans les relevés : regarde les dernières lignes du journal précédent ci-dessous (ce qui se passait juste avant l'arrêt)."
+            else causes.joinToString("\n")
+        return "# 🔁 Pourquoi Home Assistant redémarre\n\n$synthese\n\n_Relevés du serveur (lecture seule, rien n'a été modifié) :_\n```\n${brut.take(6500)}\n```"
+    }
+
     // ------------------------------------------------------------------ rechargement et redémarrage
 
     /** Recharge à chaud tout le YAML rechargeable (automatisations, scripts, scènes, modèles…) : aucune coupure. */
@@ -141,6 +238,7 @@ object HaSur {
      * diagnostic s'il ne revient pas.
      */
     suspend fun redemarrer(app: JarvisApp, verifierAvant: Boolean = true): String {
+        noterDemande(app, kotlin.coroutines.coroutineContext[fr.dd.jarvis.device.Autorisations.OutilEnCours]?.nom?.let { "outil $it" } ?: "redémarrage demandé")
         if (verifierAvant) verifier(app)?.let { return "⛔ Redémarrage annulé : Home Assistant refuserait sa configuration (il démarrerait en mode de récupération, entités indisponibles).\n```\n$it\n```\nCorrige le fichier en cause (ou dis « restaure le dernier fichier modifié »)." }
         val parApi = Serveur.haConfigure(app) && runCatching { Serveur.ha(app, "POST", "/api/services/homeassistant/restart") }.isSuccess
         if (!parApi) {

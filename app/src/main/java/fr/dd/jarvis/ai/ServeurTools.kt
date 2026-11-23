@@ -263,6 +263,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (sensible && !confirm("Home Assistant : exécuter $d.$s ${e}?", true)) return ToolResult("Refusé par l'utilisateur.")
                 // Redémarrage : configuration vérifiée avant, retour en ligne attendu (jamais « redémarré » à l'aveugle).
                 if (d == "homeassistant" && s == "restart") return ToolResult(HaSur.redemarrer(app), direct = true)
+                if (d == "homeassistant" && s in setOf("stop", "reload_all", "reload_core_config", "reload_config_entry")) HaSur.noterDemande(app, "ha_service $d.$s")
                 val data = when (val raw = a.opt("donnees")) {
                     is JSONObject -> JSONObject(raw.toString())
                     is String -> raw.trim().takeIf { it.startsWith("{") }?.let { runCatching { JSONObject(it) }.getOrNull() }
@@ -337,7 +338,13 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 ToolResult(sb.toString(), direct = true)
             }
             "ha_config" -> haConfig(a)
-            "ha_admin" -> ToolResult(HomeAssistantAdmin(app, confirm).executer(a.optString("action"), a))
+            "ha_admin" -> {
+                // Actions qui redémarrent ou rechargent Home Assistant : notées (« pourquoi Home Assistant redémarre ? »).
+                val act = a.optString("action").trim().lowercase()
+                if (act in setOf("redemarrer", "hacs_installer", "installer_hacs") || act.contains("recharg") || act.contains("reload"))
+                    HaSur.noterDemande(app, "ha_admin $act")
+                ToolResult(HomeAssistantAdmin(app, confirm).executer(a.optString("action"), a))
+            }
             "ssh_script" -> {
                 ssh()
                 val code = a.optString("code")

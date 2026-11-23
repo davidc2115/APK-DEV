@@ -545,6 +545,11 @@ class Brain(
                 onStatus(i.statut)
                 executerDirecte(i)?.let { return reflexe(it, lecture = i.local == null && i.appli == null && estLecture(i.outil)) }
             }
+            // « Pourquoi Home Assistant redémarre ? » : relevés du serveur en lecture seule + causes probables, sans IA.
+            if (CAUSES_REDEMARRAGE_HA.containsMatchIn(fr.dd.jarvis.societe.core.normaliser(texteUser))) {
+                onStatus("🔁 Enquête sur les redémarrages de Home Assistant…")
+                return reflexe(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { HaSur.causesRedemarrages(app) }.getOrElse { "❌ Enquête impossible : ${it.message}" } }, lecture = true)
+            }
             // Poêle : « mets le poêle du salon en mode nuit » — préréglage, interrupteur ou sélecteur du mode, puis relu.
             if (!pourSociete && PoeleDirect.modeDemande(texteUser) != null) {
                 onStatus("🔥 Poêle…")
@@ -1178,6 +1183,10 @@ class Brain(
     }
 
     companion object {
+        /** « Pourquoi Home Assistant redémarre (tout le temps) ? », « cause des redémarrages de HA », « HA redémarre en boucle ». */
+        internal val CAUSES_REDEMARRAGE_HA = Regex("(pourquoi|cause|causes|raison|raisons|origine|enquete|analyse|diagnostique|diagnostic|cherche|regarde|comprendre|explique).{0,40}" +
+            "(home ?assistant|\\bha\\b).{0,30}(redemarr|reboot|plant|crash|coup)|(home ?assistant|\\bha\\b).{0,20}(redemarre|reboot|plante|crashe?)\\w*.{0,20}" +
+            "(tout le temps|souvent|sans arret|en boucle|regulierement|tous les|plusieurs fois|encore|toujours|recurren)|redemarrages?( recurrents?| repetes?)? (de |d )?(home ?assistant|\\bha\\b)")
         /** Outils jamais utilisés par une routine (administration, serveur, redémarrages). */
         private val INTERDITS_ROUTINE = setOf("ha_admin", "ha_config", "ha_sauvegarde", "ha_dashboard", "serveur_service", "serveur_tache", "serveur_diagnostic",
             "serveur_fichiers", "serveur_scan_ports", "ssh_commande", "ssh_fichier", "ssh_script", "pilote_ecran", "piloter_telephone")

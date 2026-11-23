@@ -18,8 +18,8 @@ object PoeleDirect {
     data class Demande(val allumer: Boolean, val lieu: List<String>)
 
     private val POELE = Regex("\\b(poeles?|poiles?|poils?|granules?|pellets?|inserts?|stove)\\b")
-    private val ALLUMER = Regex("\\b(allume|allumer|rallume|rallumer|relance|relancer|redemarre|redemarrer|demarre|demarrer|mets en marche|remets en marche|remet en marche|lance|lancer)\\b")
-    private val ETEINDRE = Regex("\\b(eteins|eteint|eteindre|coupe|couper|arrete|arreter|stoppe|stopper)\\b")
+    private val ALLUMER = Regex("\\b(allume|allumer|allumes?|rallume|rallumer|relance|relancer|redemarre|redemarrer|demarre|demarrer|mets en marche|remets en marche|remet en marche|lance|lancer|allumage|en marche)\\b")
+    private val ETEINDRE = Regex("\\b(eteins|eteint|eteints|eteindre|coupe|couper|arrete|arreter|stoppe|stopper|extinction|a l arret)\\b")
     /** Ce que ce réflexe ne traite pas (consigne, mode, programmation, question…) : laissé au cerveau. */
     private val AUTRE = Regex("\\d|\\b(degres?|temperature|consigne|mode|nuit|silence|silencieux|natural|naturel|eco|turbo|boost|puissance|ventil\\w*|programm\\w*|chrono|minuteur|demain|ce soir|dans|pendant|jusqu|quand|si|est ce|combien|pourquoi|comment|etat|note|notes|prends?)\\b")
     private val VIDES = setOf("le", "la", "les", "l", "mon", "ma", "mes", "de", "du", "des", "d", "a", "au", "aux", "en", "dans", "sur", "et", "jarvis",
@@ -144,7 +144,11 @@ object PoeleDirect {
         val n = simple(texte)
         if (n.split(' ').size > 16 || !CHAUFFE.containsMatchIn(n) || PAS_REGLAGE.containsMatchIn(n)) return null
         val monter = MONTER.containsMatchIn(n); val baisser = BAISSER.containsMatchIn(n)
-        if (!REGLER.containsMatchIn(n) && !monter && !baisser && !Regex("\\b(temperature|consigne)\\b").containsMatchIn(n)) return null
+        // Sans verbe (« Poêle du salon à 18 degrés », écrit tel quel dans une routine) : une valeur en degrés, ou « à N ».
+        val sansVerbe = !REGLER.containsMatchIn(n) && !monter && !baisser
+        if (sansVerbe && !Regex("\\b(temperature|consigne)\\b").containsMatchIn(n) &&
+            !Regex("\\b(a|sur)? ?\\d{1,2}(\\.\\d)? degres?\\b|\\ba \\d{1,2}(\\.\\d)?$|\\b(a|sur) (dix|onze|douze|treize|quatorze|quinze|seize|vingt|trente)").containsMatchIn(n)) return null
+        if (sansVerbe && texte.trim().endsWith("?")) return null
         val chiffre = Regex("\\b(\\d{1,2}(?:\\.\\d)?)\\b( et demie?)?").find(n)
         val (v, ou) = chiffre?.let { m -> (m.groupValues[1].toDouble() + if (m.groupValues[2].isNotBlank()) 0.5 else 0.0) to m.range } ?: nombreEcrit(n) ?: (null to null)
         val avant = if (ou != null) n.substring(0, ou.first) else n
@@ -216,13 +220,16 @@ object PoeleDirect {
                 fr.dd.jarvis.voice.JournalVoix.noter("maison", "poêle : climate.set_temperature $t → $id")
                 val res = runCatching { Serveur.haService(app, "climate", "set_temperature", id, JSONObject().put("temperature", t)) }
                     .getOrElse { e -> return@map "❌ $nom : Home Assistant n'a pas accepté le réglage (${e.message ?: e.javaClass.simpleName})." }
+                val confirme = res.startsWith("✅") || (!res.contains("INDISPONIBLE") && confirmerLongtemps(app, id) { x ->
+                    kotlin.math.abs((x.optJSONObject("attributes")?.optDouble("temperature") ?: Double.NaN) - t) < 0.26
+                } != null)
                 val apres = runCatching { JSONObject(Serveur.ha(app, "GET", "/api/states/$id")) }.getOrNull() ?: o
                 val etat = apres?.optString("state").orEmpty()
                 val mesure = apres?.optJSONObject("attributes")?.optDouble("current_temperature")?.takeIf { !it.isNaN() }
                 val eteint = etat == "off"
                 when {
                     etat == "unavailable" -> "⚠️ $nom est indisponible dans Home Assistant : consigne non prise."
-                    res.startsWith("✅") -> "🔥 $nom réglé à ${nombre(t)} °C" + (mesure?.let { " (il fait ${nombre(it)} °C)" } ?: "") +
+                    confirme -> "🔥 $nom réglé à ${nombre(t)} °C" + (mesure?.let { " (il fait ${nombre(it)} °C)" } ?: "") +
                         (if (eteint) ". Il est éteint : dis « allume le poêle » pour le démarrer." else ".")
                     else -> "⚠️ $nom : consigne ${nombre(t)} °C envoyée, mais il affiche encore " +
                         (apres?.optJSONObject("attributes")?.optDouble("temperature")?.takeIf { !it.isNaN() }?.let { "${nombre(it)} °C" } ?: "une autre consigne") +
@@ -247,13 +254,15 @@ object PoeleDirect {
     /** Mode d'un poêle à activer / retirer (texte brut), ou null. */
     fun modeDemande(texte: String): ModeDemande? {
         val n = simple(texte)
-        if (n.split(' ').size > 14 || !POELE.containsMatchIn(n)) return null
+        if (n.split(' ').size > 14 || !POELE.containsMatchIn(n) || texte.trim().endsWith("?")) return null
         if (Regex("\\d|\\b(degres?|temperature|demain|ce soir|dans|pendant|jusqu|quand|si|est ce|combien|pourquoi|quel|quelle)\\b").containsMatchIn(n)) return null
         val groupe = SYNONYMES_MODE.firstOrNull { g -> g.any { Regex("\\b$it\\b").containsMatchIn(n) } } ?: return null
         val off = MODE_OFF.containsMatchIn(n)
-        if (!off && !MODE_ON.containsMatchIn(n)) return null
+        // Sans verbe (« Poêle du salon en mode nuit », comme on l'écrit dans une routine) : activer le mode.
+        if (!off && !MODE_ON.containsMatchIn(n) && !Regex("\\bmode\\b").containsMatchIn(n)) return null
+        if (!off && !MODE_ON.containsMatchIn(n) && Regex("^(est|quel|quelle|le poele est|les poeles sont)\\b|\\b(est il|sont ils)\\b").containsMatchIn(n)) return null
         val tous = Regex("\\b(tous|toutes|les deux|les 2|chacun|ensemble|poeles)\\b").containsMatchIn(n)
-        val lieu = n.split(' ').filter { it.length >= 2 && it !in VIDES_MODE && !POELE.matches(it) && it !in groupe }
+        val lieu = n.split(' ').filter { it.length >= 2 && it !in VIDES_MODE && !POELE.matches(it) && it !in groupe && it !in setOf("en", "sur", "nuit", "activer", "active") }
         if (lieu.size > 3) return null
         return ModeDemande(groupe, !off, lieu, tous && lieu.isEmpty())
     }
@@ -313,6 +322,21 @@ object PoeleDirect {
         return res.ifEmpty { null }
     }
 
+    /**
+     * Un poêle (intégration cloud MCZ, Palazzetti…) peut mettre 5 à 15 s à afficher un réglage : au lieu d'un échec après
+     * 2,5 s, l'état est relu jusqu'à [ms]. Vrai dès que [ok] est vérifié.
+     */
+    private fun confirmerLongtemps(app: JarvisApp, id: String, ms: Long = 12_000, ok: (JSONObject) -> Boolean): JSONObject? {
+        val fin = System.currentTimeMillis() + ms
+        var o: JSONObject? = null
+        while (System.currentTimeMillis() < fin) {
+            o = runCatching { JSONObject(Serveur.ha(app, "GET", "/api/states/$id")) }.getOrNull() ?: o
+            if (o != null && ok(o)) return o
+            Thread.sleep(1000)
+        }
+        return null
+    }
+
     /** « Mets le poêle du salon en mode nuit » : exécuté puis relu dans Home Assistant ; null si introuvable (le cerveau reprend). */
     suspend fun executerMode(app: JarvisApp, texte: String): String? {
         val d = modeDemande(texte) ?: return null
@@ -330,8 +354,12 @@ object PoeleDirect {
                 fr.dd.jarvis.voice.JournalVoix.noter("maison", "poêle : ${c.domaine}.${c.service} → ${c.id}")
                 val nom = toutes.firstOrNull { it.optString("entity_id") == c.id }?.optJSONObject("attributes")?.optString("friendly_name").orEmpty().ifBlank { c.id }
                 val r = runCatching { Serveur.haService(app, c.domaine, c.service, c.id, c.donnees?.let { JSONObject(it.toString()) }) }.getOrElse { "❌ ${it.message}" }
+                // Pas confirmé en 2,5 s : relu encore jusqu'à 12 s (poêle lent) avant de parler d'échec.
+                val tard = !r.startsWith("✅") && !r.startsWith("❌") && !r.contains("INDISPONIBLE") && confirmerLongtemps(app, c.id) { o ->
+                    Serveur.confirmeService(c.domaine, c.service, c.donnees ?: JSONObject(), o)
+                } != null
                 when {
-                    r.startsWith("✅") -> "🔥 $nom : mode $nomMode ${if (d.activer) "activé" else "retiré"}."
+                    r.startsWith("✅") || tard -> "🔥 $nom : mode $nomMode ${if (d.activer) "activé" else "retiré"}."
                     r.contains("INDISPONIBLE") -> "⚠️ $nom est indisponible dans Home Assistant : mode $nomMode non appliqué."
                     else -> "⚠️ $nom : mode $nomMode demandé, mais Home Assistant ne le confirme pas (l'appareil n'a peut-être pas suivi)."
                 }

@@ -71,3 +71,60 @@ class PoeleReglageTest {
         assertNull(PoeleDirect.commandesMode(toutes, PoeleDirect.modeDemande("mets le poêle du salon en mode silence")!!))
     }
 }
+
+class PoeleRoutineEtRedemarragesTest {
+    @Test fun actionsDeRoutineSansVerbe() {
+        PoeleDirect.modeDemande("Poêle de l'étage en mode nuit")!!.let { assertTrue(it.activer); assertEquals(listOf("etage"), it.lieu) }
+        PoeleDirect.modeDemande("Poêle du salon en mode nuit")!!.let { assertEquals(listOf("salon"), it.lieu) }
+        PoeleDirect.modeDemande("poêle salon mode silence")!!.let { assertEquals(listOf("salon"), it.lieu) }
+        assertNull(PoeleDirect.modeDemande("le poêle du salon est en mode nuit ?"))
+        PoeleDirect.reglage("Poêle du salon à 18 degrés")!!.let { assertEquals(18.0, it.valeur!!, 0.0); assertEquals(listOf("salon"), it.lieu) }
+        PoeleDirect.reglage("poêles 19°")!!.let { assertEquals(19.0, it.valeur!!, 0.0); assertTrue(it.tous) }
+        PoeleDirect.reglage("Poêle de l'étage à 17")!!.let { assertEquals(17.0, it.valeur!!, 0.0) }
+        assertNull(PoeleDirect.reglage("le poêle du salon est à 18 degrés ?"))
+        assertTrue(PoeleDirect.demande("Extinction du poêle du salon")!!.let { !it.allumer })
+    }
+
+    @Test fun phrasesDEnquete() {
+        listOf("pourquoi home assistant redémarre", "Home Assistant redémarre tout le temps", "peux-tu chercher pourquoi HA plante",
+            "cause des redémarrages de Home Assistant", "home assistant redémarre en boucle", "analyse les redémarrages récurrents de home assistant").forEach {
+            assertTrue(it, Brain.CAUSES_REDEMARRAGE_HA.containsMatchIn(fr.dd.jarvis.societe.core.normaliser(it)))
+        }
+        listOf("redémarre home assistant", "allume la lumière", "quel est l'état de home assistant").forEach {
+            assertTrue(it, !Brain.CAUSES_REDEMARRAGE_HA.containsMatchIn(fr.dd.jarvis.societe.core.normaliser(it)))
+        }
+    }
+
+    @Test fun interpretationDesReleves() {
+        val brut = """
+            == ETAT
+            status=running exit=0 oom=false demarre=2026-11-23 redemarrages=0 politique=unless-stopped limite_memoire=0 sante=aucune
+            == EVENEMENTS (72 h)
+            22/11 23:01:02 die exit=137
+            22/11 23:01:05 start exit=
+            23/11 22:58:40 die exit=137
+            23/11 22:58:44 start exit=
+            == MEMOIRE
+                          total        used        free      shared  buff/cache   available
+            Mem:           1900        1750          40          10         110          90
+            Swap:             0           0           0
+            == NOYAU OOM
+            [Sun Nov 23 22:58] Out of memory: Killed process 1234 (python3) total-vm:900000kB
+            == JOURNAL PRECEDENT (fin de la session arretee)
+            == TACHES PLANIFIEES
+            == AUTOMATISATIONS QUI REDEMARRENT
+            == SURVEILLANTS
+            watchtower containrrr/watchtower
+            == DISQUE
+            /dev/sda1  50G  20G  28G  42% /
+        """.trimIndent()
+        val c = HaSur.interpreter(brut, listOf(System.currentTimeMillis() - 3600_000L to "ha_admin redemarrer"))
+        assertTrue(c.joinToString("\n"), c.any { it.contains("2 fois") })
+        assertTrue(c.any { it.startsWith("🧠 MÉMOIRE SATURÉE") })
+        assertTrue(c.any { it.contains("90 Mo libres") })
+        assertTrue(c.any { it.contains("swap") })
+        assertTrue(c.any { it.contains("Watchtower") })
+        assertTrue(c.any { it.contains("JARVIS a lui-même demandé 1") })
+        assertTrue(HaSur.interpreter("== ETAT\nstatus=running oom=false\n== EVENEMENTS\n== MEMOIRE\n== NOYAU OOM\n== JOURNAL\n").isEmpty())
+    }
+}
