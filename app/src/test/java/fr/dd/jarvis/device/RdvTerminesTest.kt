@@ -94,4 +94,17 @@ class RdvTerminesTest {
         }
         assertEquals(listOf("dupont"), (RdvTermines.intention("retire la marque terminé sur le rendez-vous de Dupont", auj) as RdvTermines.Intention.Reprendre).cible.mots)
     }
+
+    @Test fun retraitJusteApresUnMarquage() {
+        val maintenant = System.currentTimeMillis()
+        // Sans « rendez-vous » dans la phrase : seulement juste après un marquage.
+        listOf("remets-le à faire", "enlève le terminé", "retire le marquage terminé", "décoche-le").forEach {
+            assertTrue(it, RdvTermines.intention(it, auj, dernierMarque = maintenant - 60_000, maintenant = maintenant) is RdvTermines.Intention.Reprendre)
+            assertNull(it, RdvTermines.intention(it, auj, dernierMarque = 0, maintenant = maintenant))
+            assertNull(it, RdvTermines.intention(it, auj, dernierMarque = maintenant - 5 * 3_600_000L, maintenant = maintenant))
+        }
+        assertNull(RdvTermines.intention("décoche le pain de la liste de courses", auj, dernierMarque = maintenant - 60_000, maintenant = maintenant))
+        assertTrue((RdvTermines.intention("retire l'état terminé des rendez-vous d'hier", auj) as RdvTermines.Intention.Reprendre).cible.tous)
+        assertTrue(RdvTermines.estRetrait("remets-le à faire") && !RdvTermines.estRetrait("le rendez-vous est terminé"))
+    }
 }

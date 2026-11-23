@@ -355,7 +355,7 @@ class Brain(
                 return reflexe(fr.dd.jarvis.device.Anniversaires.executer(app, i), lecture = i is fr.dd.jarvis.device.Anniversaires.Intention.Lister || i is fr.dd.jarvis.device.Anniversaires.Intention.DeQui)
             }
             // « Le rendez-vous est terminé (mets-le en vert) » : couleur + état terminé gardé dans JARVIS, sans annotation dans l'événement.
-            fr.dd.jarvis.device.RdvTermines.intention(texteUser)?.let { i ->
+            fr.dd.jarvis.device.RdvTermines.intention(texteUser, dernierMarque = fr.dd.jarvis.device.RdvTermines.dernierMarquage(app.store))?.let { i ->
                 onStatus("✅ Rendez-vous terminé…")
                 return reflexe(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.RdvTermines.executer(app, i) },
                     lecture = i is fr.dd.jarvis.device.RdvTermines.Intention.Lister)

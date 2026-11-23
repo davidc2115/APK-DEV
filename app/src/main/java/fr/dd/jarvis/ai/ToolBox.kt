@@ -1281,13 +1281,15 @@ class ToolBox(
             val phrase = a.optString("phrase").trim()
             val coul = a.optString("couleur").trim().lowercase().ifBlank { null }
             val action = a.optString("action").trim().lowercase()
-            val lue = R.intention(phrase.ifBlank { "le rendez-vous est terminé" })
+            val lue = R.intention(phrase.ifBlank { "le rendez-vous est terminé" }, dernierMarque = R.dernierMarquage(app.store))
             val i: fr.dd.jarvis.device.RdvTermines.Intention = when {
                 action == "lister" -> fr.dd.jarvis.device.RdvTermines.Intention.Lister(null)
                 action == "reglage" -> fr.dd.jarvis.device.RdvTermines.Intention.Reglage(coul, null)
                 action == "reprendre" -> fr.dd.jarvis.device.RdvTermines.Intention.Reprendre((lue as? fr.dd.jarvis.device.RdvTermines.Intention.Reprendre)?.cible ?: R.cible(phrase, LocalDate.now()))
                 lue is fr.dd.jarvis.device.RdvTermines.Intention.Terminer -> lue.copy(couleur = coul ?: lue.couleur)
                 lue != null -> lue
+                // « remets-le à faire » mal compris : jamais re-marqué terminé par défaut.
+                R.estRetrait(phrase) -> fr.dd.jarvis.device.RdvTermines.Intention.Reprendre(R.cible(phrase, LocalDate.now()))
                 else -> fr.dd.jarvis.device.RdvTermines.Intention.Terminer(R.cible(phrase, LocalDate.now()), coul)
             }
             // Précisions données par l'IA (jour, « tous ») ajoutées à ce que la phrase dit déjà.

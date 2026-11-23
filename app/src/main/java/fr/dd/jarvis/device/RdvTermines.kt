@@ -127,7 +127,7 @@ object RdvTermines {
     /** « tous les rendez-vous », « les rendez-vous d'hier », « mes 3 rendez-vous », « … sont terminés » : tous ceux du jour visé. */
     private val PLURIEL = listOf(
         Regex("\\b(?:tous|toutes) (?:mes |les |ces |nos )?(?:\\d+ )?(?:rendez vous|rdvs?|reunions|visites|consultations)\\b"),
-        Regex("\\b(?:les|mes|ces|nos) (?:\\d+ |deux |trois |quatre |cinq |six )?(?:rendez vous|rdvs?|reunions|visites|consultations)\\b"),
+        Regex("\\b(?:les|mes|ces|nos|des) (?:\\d+ |deux |trois |quatre |cinq |six )?(?:rendez vous|rdvs?|reunions|visites|consultations)\\b"),
         Regex("\\b(?:sont|ont ete) (?:bien |enfin |maintenant |deja |donc |tous |toutes )?(?:termine|fini|acheve|clos|cloture|boucle|fait)e?s\\b"),
         Regex("\\b(?:marque|mets?|passe)[ -]les\\b"),
     )
@@ -150,11 +150,28 @@ object RdvTermines {
         )
     }
 
-    fun intention(texte: String, aujourdhui: LocalDate = LocalDate.now()): Intention? {
+    /** Phrase qui retire l'état terminé (« remets-le à faire », « enlève le terminé »…). */
+    fun estRetrait(texte: String): Boolean {
+        val n = DatesFr.normaliser(texte)
+        return Regex("termin|fini|fait|a faire|coche|marquage|demarque|en cours").containsMatchIn(n) && NEG.any { it.containsMatchIn(n) } && !QUESTION.containsMatchIn(n)
+    }
+
+    /** Heure du dernier marquage « terminé » (0 s'il n'y en a pas). */
+    fun dernierMarquage(store: Store): Long = lire(store).values.maxOfOrNull { it.optLong("ts") } ?: 0L
+
+    /**
+     * [dernierMarque] : heure du dernier marquage. Juste après avoir marqué un rendez-vous, « remets-le à faire » ou
+     * « enlève le terminé » (sans dire « rendez-vous ») le visent aussi.
+     */
+    fun intention(texte: String, aujourdhui: LocalDate = LocalDate.now(), dernierMarque: Long = 0L, maintenant: Long = System.currentTimeMillis()): Intention? {
         val o = texte.trim()
         if (o.isBlank() || o.length > 240) return null
         val n = DatesFr.normaliser(o).replace(Regex("^(?:(?:jarvis|ok|alors|bon|voila|bien)\\s+)+"), "")
-        if (!SUJET.containsMatchIn(n) || !Regex("termin|fini|fait|achev|clos|clotur|boucl|\\bfin\\b|comme marque|a faire|coche|marquage|demarque").containsMatchIn(n)) return null
+        if (!SUJET.containsMatchIn(n) && dernierMarque > 0 && maintenant - dernierMarque < 3 * 3_600_000L && o.length < 90 && estRetrait(o) &&
+            (Regex("termin|a faire|marquage|fini|\\bfait|en cours").containsMatchIn(n) || Regex("^(?:decoche|demarque|devalide)\\w* (?:le|la|les)$").matches(n.trim())) &&
+            !Regex("\\b(?:listes?|courses|taches?|alarmes?|reveils?|minuteurs?|rappels?|notes?|cases?)\\b").containsMatchIn(n))
+            return Intention.Reprendre(Cible())
+        if (!SUJET.containsMatchIn(n) || !Regex("termin|fini|fait|achev|clos|clotur|boucl|\\bfin\\b|comme marque|a faire|coche|marquage|demarque|(?:remets?|repasse)\\b.{0,40}\\ben cours").containsMatchIn(n)) return null
         // Réglages : « quand un rendez-vous est terminé, mets-le en gris », « la couleur seulement dans l'application ».
         val couleur = couleurDite(n)
         val google = when {
@@ -319,12 +336,35 @@ object RdvTermines {
                     else { fr.dd.jarvis.ai.Annulation.noterRdvTermine(c.l.map { cle(it) }); "✅ ${r.size} rendez-vous terminés :\n" + r.joinToString("\n") { "- " + it.removePrefix("✅ ") } }
                 }
             }
-            is Intention.Reprendre -> when (val c = choisir(evenements(app, i.cible, aujourdhui), i.cible, maintenant, termines.keys, reprendre = true)) {
-                is Choix.Echec -> "📅 ${c.message}"
-                is Choix.Trouve -> c.l.filter { cle(it) in termines }.ifEmpty { c.l }.joinToString("\n") { reprendre(app, it) }
+            is Intention.Reprendre -> {
+                val c0 = i.cible
+                val marques = termines.values.distinctBy { it.optLong("id") to it.optLong("b") }
+                if (marques.isEmpty()) return "Aucun rendez-vous n'est marqué terminé."
+                val precis = c0.jour != null || c0.heure != null || c0.minute != null || c0.mots.isNotEmpty() || c0.rang != null || c0.tous || c0.partie != null
+                // Sans précision : le DERNIER marqué terminé, quel que soit son jour. Avant, seuls les rendez-vous du jour
+                // étaient cherchés : un rendez-vous d'hier (ou l'unique rendez-vous du jour, non marqué) restait « terminé ».
+                if (!precis) return reprendre(app, evenementDe(app, marques.maxBy { it.optLong("ts") }))
+                when (val c = choisir(evenements(app, c0, aujourdhui), c0, maintenant, termines.keys, reprendre = true)) {
+                    is Choix.Echec -> "📅 ${c.message}"
+                    is Choix.Trouve -> {
+                        val l = c.l.filter { cle(it) in termines }
+                        if (l.isEmpty()) "📅 " + c.l.joinToString(", ") { "« ${it.title} »" } + (if (c.l.size > 1) " n'étaient" else " n'était") + " pas marqué terminé."
+                        else l.joinToString("\n") { reprendre(app, it) }
+                    }
+                }
             }
             else -> ""
         }
+    }
+
+    /** Rendez-vous correspondant à un marquage (retrouvé dans l'agenda, sinon reconstitué depuis le marquage). */
+    private fun evenementDe(app: JarvisApp, m: JSONObject): EventInfo {
+        val debut = m.optLong("b")
+        val j = Instant.ofEpochMilli(debut).atZone(ZoneId.systemDefault()).toLocalDate()
+        val ids = setOf(m.optLong("id"), m.optLong("exception"))
+        return runCatching { app.calendar.events(j.minusDays(1), 3, onlyVisible = false) }.getOrDefault(emptyList())
+            .firstOrNull { it.begin == debut && it.id in ids }
+            ?: EventInfo(m.optLong("id"), 0, m.optString("t"), debut, debut, false, "", "", null)
     }
 
     /** Défait le dernier « terminé » (« annule ») : rendez-vous retrouvés par leur clé. */
