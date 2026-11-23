@@ -40,7 +40,9 @@ object ConversationAuto {
     }
 
     private suspend fun parler(app: JarvisApp, texte: String) {
-        withTimeoutOrNull(90_000) {
+        // Garde-fou proportionnel à la longueur : une longue réponse (agenda, mails…) dure plus de 90 s ; l'ancienne limite
+        // fixe coupait la voix au milieu d'une phrase et passait à l'écoute suivante.
+        withTimeoutOrNull(90_000L + texte.length * 110L) {
             suspendCancellableCoroutine { c ->
                 VoixVoiture.parler(app, texte) { if (c.isActive) c.resume(Unit) }
                 c.invokeOnCancellation { VoixVoiture.taire() }

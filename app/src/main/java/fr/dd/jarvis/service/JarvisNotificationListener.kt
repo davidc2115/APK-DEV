@@ -27,8 +27,10 @@ class JarvisNotificationListener : NotificationListenerService() {
         @Synchronized fun pauseMediaPourVoix(ctx: Context): Boolean = runCatching {
             val manager = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
             val composant = ComponentName(ctx, JarvisNotificationListener::class.java)
+            // Jamais la session de JARVIS lui-même (sa carte « lecture » dans Android Auto) : la mettre en pause déclenchait
+            // son onPause → voix coupée au milieu de la phrase, conversation interrompue (la suite restait sur le téléphone).
             val enLecture = manager.getActiveSessions(composant).filter {
-                it.playbackState?.state == PlaybackState.STATE_PLAYING
+                it.packageName != ctx.packageName && it.playbackState?.state == PlaybackState.STATE_PLAYING
             }
             sessionsPauseesPourVoix = enLecture
             enLecture.forEach { runCatching { it.transportControls.pause() } }
@@ -46,6 +48,23 @@ class JarvisNotificationListener : NotificationListenerService() {
                 if (runCatching { controller.playbackState?.state == PlaybackState.STATE_PAUSED }.getOrDefault(false)) {
                     runCatching { controller.transportControls.play() }
                 }
+            }
+        }
+
+        /** Service connecté (lecture des notifications actives : guidage Waze / Maps vraiment démarré ?). */
+        @Volatile var service: JarvisNotificationListener? = null
+
+        /**
+         * Vrai si une appli de [paquets] affiche une notification de guidage publiée ou mise à jour depuis [depuis]
+         * (Maps et Waze mettent à jour la leur à chaque instruction) ; null si l'accès aux notifications manque.
+         */
+        fun navigationActive(paquets: Set<String>, depuis: Long): Boolean? {
+            val s = service ?: return null
+            val actives = runCatching { s.activeNotifications }.getOrNull() ?: return null
+            return actives.any { sbn ->
+                sbn.packageName in paquets && sbn.postTime >= depuis && sbn.notification?.let { n ->
+                    n.category == Notification.CATEGORY_NAVIGATION || (n.flags and Notification.FLAG_ONGOING_EVENT) != 0
+                } == true
             }
         }
 
@@ -82,7 +101,7 @@ class JarvisNotificationListener : NotificationListenerService() {
     }
 
     override fun onListenerConnected() {
-        active = true; recharger(applicationContext)
+        active = true; service = this; recharger(applicationContext)
         (applicationContext as? fr.dd.jarvis.JarvisApp)?.let { fr.dd.jarvis.device.Telephony.NumerosCoffre.preparer(it) }
     }
 
@@ -111,7 +130,7 @@ class JarvisNotificationListener : NotificationListenerService() {
     private val enCours = HashMap<String, java.util.concurrent.Future<String?>>()
     private val fond = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "jarvis-qui-appelle").apply { isDaemon = true } }
     override fun onListenerDisconnected() {
-        active = false
+        active = false; if (service === this) service = null
         runCatching { requestRebind(android.content.ComponentName(this, JarvisNotificationListener::class.java)) }
     }
 
@@ -119,6 +138,8 @@ class JarvisNotificationListener : NotificationListenerService() {
         try {
             if (sbn.packageName == packageName) return
             val n = sbn.notification ?: return
+            // Guidage Waze / Maps (notification permanente mise à jour) : sert à vérifier qu'un itinéraire a vraiment démarré.
+            fr.dd.jarvis.car.GuidageVoiture.noter(sbn.packageName, sbn.postTime, n.category, (n.flags and Notification.FLAG_ONGOING_EVENT) != 0)
             val appel = n.category == Notification.CATEGORY_CALL
             if ((n.flags and Notification.FLAG_GROUP_SUMMARY) != 0 || ((n.flags and Notification.FLAG_ONGOING_EVENT) != 0 && !appel)) return
             val e = n.extras

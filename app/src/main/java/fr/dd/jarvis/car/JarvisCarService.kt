@@ -96,13 +96,14 @@ object NavigationVoiture {
     suspend fun lancer(destination: String, point: Pair<Double, Double>? = null): Boolean {
         val c = contexte ?: return false
         if (destination.isBlank() && point == null) return false
-        // Formats documentés par Android Auto : « geo:lat,lon » (point précis : fiche client, GPS) ou « geo:0,0?q=adresse ».
-        val geo = if (point != null) "geo:${point.first},${point.second}" else "geo:0,0?q=" + Uri.encode(destination)
+        // Formats documentés par Android Auto : « geo:lat,lon » (point précis : fiche client, GPS) ou « geo:0,0?q=mots+séparés+par+des+plus »
+        // (l'adresse encodée en %20 / %2C n'était pas toujours comprise : recherche vide, aucun itinéraire).
+        val geo = GuidageVoiture.geo(destination, point)
         return withContext(Dispatchers.Main) {
             runCatching { c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse(geo))); true }
                 .recoverCatching {
                     // Certaines applis de navigation refusent le format avec coordonnées : nouvel essai avec l'adresse seule.
-                    if (point != null) { c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse("geo:0,0?q=" + Uri.encode(destination)))); true } else false
+                    if (point != null && destination.isNotBlank()) { c.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse(GuidageVoiture.geo(destination, null)))); true } else false
                 }.getOrDefault(false)
         }
     }
@@ -216,7 +217,7 @@ class EvenementVoitureScreen(ctx: CarContext, private val e: fr.dd.jarvis.device
         val b = ItemList.Builder()
         val quand = if (e.allDay) "Journée" else "${hm(e.begin)}–${hm(e.end)}"
         if (e.location.isNotBlank()) b.addItem(Row.Builder().setTitle("🧭 Y aller").addText(e.location.take(90))
-            .setOnClickListener { runCatching { carContext.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse("geo:0,0?q=" + Uri.encode(e.location)))) } }.build())
+            .setOnClickListener { runCatching { carContext.startCarApp(Intent(CarContext.ACTION_NAVIGATE).setData(Uri.parse(GuidageVoiture.geo(e.location, null)))) } }.build())
         telephone()?.let { (nom, tel) ->
             b.addItem(Row.Builder().setTitle("📞 Appeler $nom").addText(tel)
                 .setOnClickListener { runCatching { carContext.startCarApp(Intent(Intent.ACTION_DIAL).setData(Uri.parse("tel:$tel"))) } }.build())

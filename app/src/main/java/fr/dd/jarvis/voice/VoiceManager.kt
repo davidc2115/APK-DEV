@@ -1405,6 +1405,7 @@ class VoiceManager(private val ctx: Context) {
                 piste = AudioTrack.Builder().setAudioAttributes(attrsVoix)
                     .setAudioFormat(AudioFormat.Builder().setSampleRate(a.frequence).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(canal).build())
                     .setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(min * 4).build()
+                piste?.let { surveillerSortie(it) }
                 formatPiste = a.frequence to a.canaux
                 ecrits = 0L
                 fenetre = (a.frequence / 50).coerceAtLeast(1)
@@ -1432,6 +1433,29 @@ class VoiceManager(private val ctx: Context) {
             ecrits += a.pcm.size / (2L * a.canaux)
         }
         private var ecrits = 0L
+
+        /** Dernière sortie « voiture » connue de la voix (pour l'y ramener si Android la bascule sur le téléphone). */
+        private var sortieVoiture: AudioDeviceInfo? = null
+
+        /**
+         * En voiture : note dans le journal où sort la voix, et si Android la bascule sur le haut-parleur du téléphone en
+         * pleine phrase, la renvoie vers la voiture (sortie précédente imposée + focus audio redemandé).
+         */
+        private fun surveillerSortie(t: AudioTrack) {
+            if (appli()?.enVoiture != true) return
+            val telephone = setOf(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
+            runCatching {
+                t.addOnRoutingChangedListener(android.media.AudioRouting.OnRoutingChangedListener { r ->
+                    val d = runCatching { r.routedDevice }.getOrNull() ?: return@OnRoutingChangedListener
+                    JournalVoix.noter(nom, "voix → ${d.productName} (type ${d.type})")
+                    if (d.type !in telephone) { sortieVoiture = d; return@OnRoutingChangedListener }
+                    if (fini.get()) return@OnRoutingChangedListener
+                    JournalVoix.noter(nom, "⚠️ voix basculée sur le haut-parleur du téléphone en pleine réponse : retour vers la voiture demandé")
+                    sortieVoiture?.let { v -> runCatching { t.setPreferredDevice(v) } }
+                    demanderFocusReponse(attrsVoix)
+                }, main)
+            }
+        }
 
         /**
          * Attend que tout ce qui a été écrit soit réellement joué, puis libère la piste. Un peu de silence est ajouté :
@@ -1473,8 +1497,12 @@ class VoiceManager(private val ctx: Context) {
             Presence.parole(false); Presence.sousTitre = ""
             val b = barge; barge = null
             finVoix = System.currentTimeMillis()
+            // Android Auto : le son arrive dans la voiture avec du retard (flux sans fil, tampon de l'autoradio). Rendre le
+            // focus audio — ou rouvrir le micro de la voiture — dès que le téléphone a fini d'écrire coupait la fin de la
+            // phrase : on garde la main un peu plus longtemps.
+            val voiture = externe && appli()?.enVoiture == true
             val suite = Runnable {
-                main.post {
+                main.postDelayed({
                     if (paroleEnCours === this) paroleEnCours = null
                     val etaitAppel = appelActif
                     sortirModeAppel()
@@ -1484,9 +1512,9 @@ class VoiceManager(private val ctx: Context) {
                     // parole » rendu et le son revenu du mode appel (annulation d'écho). Avant, la reconnaissance de Google
                     // démarrait sur un micro encore pris ou en reconfiguration → « erreur 7 (après parole) » puis fin.
                     // Bluetooth / autoradio : le son sort avec du retard (tampon A2DP) : on attend la fin réelle de la phrase.
-                    val delai = when { externe -> 1000L; etaitAppel -> 600L; b != null -> 300L; else -> 150L }
+                    val delai = when { voiture -> 500L; externe -> 1000L; etaitAppel -> 600L; b != null -> 300L; else -> 150L }
                     main.postDelayed({ finVoix = System.currentTimeMillis(); onDone() }, delai)
-                }
+                }, if (voiture) 1300L else 0L)
             }
             if (b != null) Thread({ b.stopEtAttendre(700); suite.run() }, "jarvis-fin-voix").start() else suite.run()
         }

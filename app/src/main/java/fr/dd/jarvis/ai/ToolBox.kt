@@ -1035,13 +1035,10 @@ class ToolBox(
             ?: app.phone.mediaKey(a.optString("action")))
         "naviguer" -> {
             // En voiture : Android Auto lance son propre GPS (Waze / Maps de la voiture), sans question ni écran du téléphone.
+            // Vérifié : « guidage lancé » seulement si Waze / Maps l'a vraiment démarré (sinon réponse honnête + notification).
             if (app.enVoiture && a.optString("destination").isNotBlank()) {
-                val pt = runCatching { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) }.getOrNull()
-                if (fr.dd.jarvis.car.NavigationVoiture.lancer(a.optString("destination"), pt?.let { it.lat to it.lon }))
-                    return ToolResult("🧭 Guidage lancé dans Android Auto vers ${a.optString("destination")}.")
-                // JARVIS pas ouvert dans Android Auto : l'appli de navigation du téléphone est lancée (son guidage
-                // s'affiche dans la voiture), avec les coordonnées si l'adresse a été trouvée.
-                fr.dd.jarvis.voice.JournalVoix.noter("voiture", "guidage par le téléphone (JARVIS n'est pas ouvert dans Android Auto)")
+                val pt = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) } }.getOrNull()
+                return ToolResult(fr.dd.jarvis.car.GuidageVoiture.lancer(app, a.optString("destination"), pt?.let { it.lat to it.lon }, a.optString("appli").trim()))
             }
             var appli = a.optString("appli").trim()
             val toujours = a.optString("toujours").trim().lowercase() in setOf("true", "oui", "1", "vrai")

@@ -311,16 +311,12 @@ class JarvisMediaService : MediaBrowserService() {
     private fun naviguer(d: AgendaVoiture.Destination, titre: String) {
         afficher("🧭 $titre", "Waze → ${d.adresse}", PlaybackState.STATE_BUFFERING, "auto_route")
         portee.launch {
-            val r = if (NavigationVoiture.lancer(d.adresse, AgendaVoiture.pointGps(d.adresse)?.let { it.lat to it.lon })) "🧭 Guidage lancé dans Android Auto vers ${d.libelle.removePrefix("📍 GPS — ")}"
-            else withContext(Dispatchers.IO) {
-                runCatching {
-                    val pc = PhoneControl(app)
-                    pc.navigate(d.adresse, "d", if (pc.navApps().containsKey("Waze")) "Waze" else "")
-                }.getOrElse { "Navigation impossible : ${it.message}" }
-            }
+            val r = runCatching {
+                GuidageVoiture.lancer(app, d.adresse, withContext(Dispatchers.IO) { AgendaVoiture.pointGps(d.adresse) }?.let { it.lat to it.lon })
+            }.getOrElse { "Navigation impossible : ${it.message}" }
             val ok = r.startsWith("🧭")
             afficher("🧭 $titre", if (ok) r.removePrefix("🧭 ") else r.take(160), PlaybackState.STATE_PAUSED, "auto_route")
-            if (!ok) VoixVoiture.parler(this@JarvisMediaService, "Je n'ai pas pu lancer la navigation.")
+            if (!ok) VoixVoiture.parler(this@JarvisMediaService, r.removePrefix("⚠️ ").substringBefore(" Pour que je le lance").take(400))
         }
     }
 
