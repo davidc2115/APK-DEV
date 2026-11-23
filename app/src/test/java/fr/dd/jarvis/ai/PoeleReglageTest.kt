@@ -226,3 +226,21 @@ class ConsignesParLigneTest {
         }
     }
 }
+
+class PoeleApprentissageTest {
+    @Test fun consigneAppriseRelueParLaCommandeDirecte() {
+        val d = PoeleDirect.modeDemande("enlève le mode nuit du poêle du salon")!!
+        val ligne = PoeleDirect.consigneApprise(d, "select_option", "select.salon_puissance", "option Confort")
+        assertEquals("pour retirer le mode nuit du poêle salon : service select_option sur select.salon_puissance (option Confort)", ligne)
+        val notes = fr.dd.jarvis.device.Carnet.entitesParLigne(listOf("maison" to "- $ligne"), fr.dd.jarvis.device.NotesPertinentes.motsCles("poele salon mode nuit"))
+        assertEquals(listOf("select.salon_puissance"), notes.map { it.first })
+        val toutes = listOf(
+            JSONObject().put("entity_id", "climate.poele_salon").put("state", "heat").put("attributes", JSONObject().put("friendly_name", "Poêle salon")),
+            JSONObject().put("entity_id", "select.salon_puissance").put("state", "Nuit").put("attributes", JSONObject().put("friendly_name", "Salon puissance")
+                .put("options", JSONArray(listOf("Confort", "Nuit", "Turbo")))))
+        // Routine « Poêle du salon : fin du mode nuit » : la commande directe la refait seule.
+        PoeleDirect.commandesMode(toutes, PoeleDirect.modeDemande("Poêle du salon : fin du mode nuit")!!, notes.map { it.first }, notes)!!.single().let {
+            assertEquals("Confort", it.donnees!!.getString("option"))
+        }
+    }
+}

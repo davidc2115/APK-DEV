@@ -199,8 +199,11 @@ object Routines {
                 poeleAvant = poele
                 val t0 = System.currentTimeMillis()
                 val direct = runCatching { brain.reflexeSeul(a) }.getOrNull()
+                // Comme une demande dite à Jarvis : avec la conversation récente (ce que tu lui as expliqué sur tes poêles,
+                // tes entités…) — avant, l'action arrivait seule, sans ce que la même phrase dite hors routine avait.
+                val fil = runCatching { app.chat.toList().takeLast(12) }.getOrDefault(emptyList())
                 val rep = direct ?: runCatching {
-                    brain.reply(listOf(ChatMsg(true, a)), apprendre = false, vocal = CanalDemande.vocal) { }
+                    brain.reply(fil + ChatMsg(true, a), apprendre = false, vocal = CanalDemande.vocal) { }
                 }.getOrElse { "❌ ${it.message ?: it.javaClass.simpleName}" }
                 fr.dd.jarvis.voice.JournalVoix.noter("routine", "« ${a.take(60)} » ${if (direct != null) "sans IA" else "comme une demande normale"} en ${System.currentTimeMillis() - t0} ms : ${rep.lineSequence().firstOrNull().orEmpty().take(80)}")
                 lignes += ligne(a, rep)

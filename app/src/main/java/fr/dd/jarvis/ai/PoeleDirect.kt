@@ -29,6 +29,8 @@ object PoeleDirect {
         "etage" to listOf("etage", "haut", "1er", "premier", "upstairs", "mezzanine"),
         "haut" to listOf("etage", "haut", "1er", "premier", "upstairs", "mezzanine"),
         "bas" to listOf("bas", "rdc", "rez", "chaussee", "downstairs", "salon", "sejour"),
+        "salon" to listOf("salon", "sejour", "bas", "rdc", "rez", "chaussee", "downstairs", "living"),
+        "sejour" to listOf("salon", "sejour", "bas", "rdc", "rez", "chaussee", "downstairs", "living"),
         "rdc" to listOf("bas", "rdc", "rez", "chaussee", "downstairs"),
     )
     /** Interrupteurs / sélecteurs de MODE d'un poêle : jamais pris pour le poêle lui-même. */
@@ -271,7 +273,8 @@ object PoeleDirect {
         if (!off && !MODE_ON.containsMatchIn(n) && !Regex("\\bmode\\b").containsMatchIn(n)) return null
         if (!off && !MODE_ON.containsMatchIn(n) && Regex("^(est|quel|quelle|le poele est|les poeles sont)\\b|\\b(est il|sont ils)\\b").containsMatchIn(n)) return null
         val tous = Regex("\\b(tous|toutes|les deux|les 2|chacun|ensemble|poeles)\\b").containsMatchIn(n)
-        val lieu = n.split(' ').filter { it.length >= 2 && it !in VIDES_MODE && !POELE.matches(it) && it !in groupe && it !in setOf("en", "sur", "nuit", "activer", "active") }
+        val lieu = n.split(' ').filter { it.length >= 2 && it !in VIDES_MODE && !POELE.matches(it) && it !in groupe && it !in setOf("en", "sur", "nuit", "activer", "active", "plus", "pas", "off") &&
+            !MODE_OFF.matches(it) && !MODE_ON.matches(it) }
         if (lieu.size > 3) return null
         return ModeDemande(groupe, !off, lieu, tous && lieu.isEmpty())
     }
@@ -390,6 +393,28 @@ object PoeleDirect {
         return null
     }
 
+    /**
+     * L'IA a réussi le mode d'un poêle (ha_service confirmé) : la commande est retenue dans tes consignes (« maison »),
+     * avec le mode, la pièce, le service et l'entité — la prochaine fois (routine comprise), la commande directe la
+     * refait sans IA.
+     */
+    fun retenir(app: JarvisApp, demande: String, args: JSONObject) {
+        val d = modeDemande(demande) ?: return
+        val id = args.optString("entity_id").split(",").map { it.trim() }.singleOrNull()?.takeIf { it.isNotBlank() } ?: return
+        val service = args.optString("service").trim().ifBlank { return }
+        val donnees = (args.opt("donnees") as? JSONObject)?.let { o -> o.keys().asSequence().filter { it != "entity_id" }.joinToString(", ") { "$it ${o.opt(it)}" } }
+            ?: (args.opt("donnees") as? String)?.takeIf { it.isNotBlank() }.orEmpty()
+        val texte = consigneApprise(d, service, id, donnees)
+        val r = app.memo.ajouterConsigne("maison", texte)
+        fr.dd.jarvis.voice.JournalVoix.noter("maison", "consigne apprise du poêle : $texte ($r)")
+    }
+
+    internal fun consigneApprise(d: ModeDemande, service: String, id: String, donnees: String): String {
+        val mode = if (d.mode.size > 3) "les modes particuliers" else "le mode ${d.mode.first()}"
+        val lieu = if (d.tous) "des poêles" else "du poêle" + (if (d.lieu.isNotEmpty()) " " + d.lieu.joinToString(" ") else "")
+        return "pour ${if (d.activer) "activer" else "retirer"} $mode $lieu : service $service sur $id" + (if (donnees.isNotBlank()) " ($donnees)" else "")
+    }
+
     /** « Mets le poêle du salon en mode nuit » : exécuté puis relu dans Home Assistant ; null si introuvable (le cerveau reprend). */
     suspend fun executerMode(app: JarvisApp, texte: String): String? {
         val d = modeDemande(texte) ?: return null
@@ -399,7 +424,11 @@ object PoeleDirect {
         val notes = runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, "poele " + d.lieu.joinToString(" ") + " mode " + d.mode.first()) }.getOrDefault(emptyList())
         val explicites = Regex("\\b(?:climate|switch|select|input_boolean|input_select|button|input_button|script|scene)\\.[a-z0-9_]+").findAll(texte.lowercase()).map { it.value }.toList()
         val cmds = commandesMode(toutes, d, notes.map { it.first }, notes, explicites) ?: run {
-            fr.dd.jarvis.voice.JournalVoix.noter("maison", "poêle : mode ${d.mode.first()} ${d.lieu} → aucune entité unique, le cerveau reprend")
+            // Pour comprendre la prochaine fois : ce que JARVIS a vu (interrupteurs / sélecteurs des poêles, consignes).
+            val vus = toutes.map { it.optString("entity_id") }.filter { id -> listOf("switch.", "select.", "input_boolean.", "input_select.", "button.").any { id.startsWith(it) } }
+                .filter { id -> val x = texte(id, toutes.first { it.optString("entity_id") == id }.optJSONObject("attributes")?.optString("friendly_name").orEmpty()); POELE.containsMatchIn(x) || d.lieu.any { x.contains(" $it") } || MODE.containsMatchIn(x) }
+                .take(12)
+            fr.dd.jarvis.voice.JournalVoix.noter("maison", "poêle : ${if (d.activer) "activer" else "retirer"} mode ${d.mode.first()} ${d.lieu} → aucune entité unique ; vus : ${vus.joinToString()} ; consignes : ${notes.joinToString { it.first }}")
             return null
         }
         val nomMode = d.mode.first().let { if (it == "eco") "éco" else it }

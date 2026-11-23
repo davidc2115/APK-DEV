@@ -846,6 +846,8 @@ class Brain(
                     ToolResult("Erreur : ${e.message}")
                 }
                 fr.dd.jarvis.voice.JournalVoix.noter("brain", "outil $name en ${System.currentTimeMillis() - debutOutil} ms")
+                // Mode d'un poêle réussi par l'IA (✅ relu) : retenu dans tes consignes, la commande directe le refera seule.
+                if (!pourHermes && name == "ha_service" && args != null && res.text.startsWith("✅")) runCatching { PoeleDirect.retenir(app, texteUser, args) }
                 // Un résultat « direct » (planning, SMS, liste d'entités, confirmation d'une action…) n'est rendu tel quel que
                 // s'il RÉPOND à toute la demande. Si elle demandait autre chose — une action après cette lecture (« lis mes SMS
                 // et réponds à Paul », « navigation vers mon rendez-vous », « supprime le réveil de 7 h »), ou une seconde
