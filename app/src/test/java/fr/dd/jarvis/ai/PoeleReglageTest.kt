@@ -128,3 +128,34 @@ class PoeleRoutineEtRedemarragesTest {
         assertTrue(HaSur.interpreter("== ETAT\nstatus=running oom=false\n== EVENEMENTS\n== MEMOIRE\n== NOYAU OOM\n== JOURNAL\n").isEmpty())
     }
 }
+
+class PoeleModeNotesTest {
+    private fun etat(id: String, nom: String, attrs: JSONObject = JSONObject()) =
+        JSONObject().put("entity_id", id).put("state", "heat").put("attributes", attrs.put("friendly_name", nom))
+
+    @Test fun notesEtEntitesDesignees() {
+        // Poêles Agua IoT : le mode nuit n'a pas de nom évident — ce sont tes notes / la phrase qui le désignent.
+        val toutes = listOf(
+            etat("climate.poele_salon", "Poêle salon", JSONObject().put("fan_modes", JSONArray(listOf("1", "2", "3", "night")))),
+            etat("climate.poele_etage", "Poêle étage"),
+            etat("select.etage_puissance", "Etage puissance", JSONObject().put("options", JSONArray(listOf("Normal", "Nuit", "Turbo")))),
+            etat("switch.etage_option_7", "Etage option 7"))
+        // Mode de ventilation « night » de l'entité climate.
+        PoeleDirect.commandesMode(toutes, PoeleDirect.modeDemande("Poêle du salon en mode nuit")!!)!!.single().let {
+            assertEquals("set_fan_mode", it.service); assertEquals("night", it.donnees!!.getString("fan_mode"))
+        }
+        // Sélecteur noté pour le mode nuit du poêle de l'étage.
+        val notes = listOf("select.etage_puissance" to "maison : le mode nuit du poêle de l'étage c'est select.etage_puissance")
+        PoeleDirect.commandesMode(toutes, PoeleDirect.modeDemande("Poêle de l'étage en mode nuit")!!, notes.map { it.first }, notes)!!.single().let {
+            assertEquals("select_option", it.service); assertEquals("Nuit", it.donnees!!.getString("option"))
+        }
+        // Entité écrite dans l'action de la routine.
+        val d = PoeleDirect.modeDemande("Poêle de l'étage en mode nuit avec switch.etage_option_7")!!
+        assertEquals(listOf("etage"), d.lieu)
+        assertEquals("switch.etage_option_7", PoeleDirect.commandesMode(toutes, d, explicites = listOf("switch.etage_option_7"))!!.single().id)
+    }
+
+    @Test fun gardeDesRoutines() {
+        assertNull(fr.dd.jarvis.device.Routines.refus("ha_admin", JSONObject()))       // pas de routine en cours
+    }
+}

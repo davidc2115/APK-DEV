@@ -927,6 +927,7 @@ object Serveur {
                 kotlin.math.abs(a.optDouble("temperature", Double.NaN) - donnees.optDouble("temperature", Double.NaN)) < 0.26
             service == "set_hvac_mode" && donnees.has("hvac_mode") -> etat == donnees.optString("hvac_mode")
             service == "set_preset_mode" && donnees.has("preset_mode") -> a.optString("preset_mode").equals(donnees.optString("preset_mode"), true)
+            service == "set_fan_mode" && donnees.has("fan_mode") -> a.optString("fan_mode").equals(donnees.optString("fan_mode"), true)
             service == "volume_set" && donnees.has("volume_level") ->
                 kotlin.math.abs(a.optDouble("volume_level", Double.NaN) - donnees.optDouble("volume_level", Double.NaN)) < 0.03
             service == "volume_mute" && donnees.has("is_volume_muted") -> a.optBoolean("is_volume_muted") == donnees.optBoolean("is_volume_muted")

@@ -40,12 +40,6 @@ class Brain(
     @Volatile private var memoireAjouteeCeTour = false
     /** Réflexes seuls (actions d'une routine) : s'arrête avant le bavardage, Hermès et l'IA. */
     @Volatile private var reflexesSeuls = false
-    /**
-     * Cerveau d'une routine : ni administration de Home Assistant, ni serveur, ni redémarrage. Une routine « mode coucher »
-     * dont l'IA ne trouvait pas le mode nuit d'un poêle pouvait finir par recharger une intégration ou redémarrer Home
-     * Assistant (qui redémarrait à chaque coucher).
-     */
-    @Volatile var enRoutine = false
     private val fond = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     private fun consigneExigeUneSuite(texte: String): Boolean = forcerCerveau || runCatching { Restitution.exigeUneSuite(app.memo.all(), texte) }.getOrDefault(false)
@@ -265,7 +259,7 @@ class Brain(
     }
 
     // En voiture, pas de relais automatique vers Hermès (jusqu'à 35 s d'attente de plus au volant) : Jarvis répond.
-    private fun escaladePossible(pourHermes: Boolean, suivi: Suivi) = !pourHermes && !enRoutine && !suivi.hermesEssaye && !app.enVoiture &&
+    private fun escaladePossible(pourHermes: Boolean, suivi: Suivi) = !pourHermes && !suivi.hermesEssaye && !app.enVoiture &&
         app.store.hermesMode.value in setOf("auto", "tout") && !fr.dd.jarvis.hermes.Hermes.degrade()
 
     private suspend fun repondre(history: List<ChatMsg>, pourHermes: Boolean, onStatus: (String) -> Unit, suivi: Suivi, onTexte: ((String) -> Unit)? = null): String {
@@ -625,9 +619,9 @@ class Brain(
             catch (e: Exception) { "❌ Impossible de lire les états de Home Assistant : ${e.message ?: "erreur inconnue"}" }
         }
         // Hermès, cerveau principal (mode « tout » : toutes les autres demandes ; mode « auto » : les tâches complexes).
-        // S'il est indisponible, Jarvis reprend la main avec ses outils. Jamais pour une routine (Hermès administre Home
-        // Assistant et le serveur : une action de routine ne doit rien pouvoir redémarrer).
-        if (!pourHermes && !enRoutine) {
+        // S'il est indisponible, Jarvis reprend la main avec ses outils. (Pendant une routine, ses outils d'administration
+        // sont refusés : Routines.refus.)
+        if (!pourHermes) {
             val precedent = history.dropLastWhile { it.fromUser }.lastOrNull()?.text
             val choix = fr.dd.jarvis.hermes.Routeur.choisir(app, texteUser, precedent)
             if (choix.cible == fr.dd.jarvis.hermes.Routeur.Cible.JARVIS && app.store.hermesMode.value in setOf("auto", "demande", "tout") && fr.dd.jarvis.hermes.Hermes.degrade()) suivi.hermesIndisponible = true
@@ -823,8 +817,6 @@ class Brain(
                     // partait avec des arguments vides ou incomplets — commandes SSH tronquées).
                     if (args == null) ToolResult("❌ Arguments incomplets ou illisibles (réponse coupée) : l'outil n'a PAS été exécuté. Renvoie l'appel avec des arguments JSON complets.")
                     else if (name in retires) ToolResult(if (name.startsWith("ssh") || name == "serveur_diagnostic") "Pour Home Assistant, utilise l'API (ha_entites, ha_etat, ha_service, ha_config, ha_dashboard, ha_admin), pas le SSH." else "Outil indisponible ici.")
-                    else if (enRoutine && (name in INTERDITS_ROUTINE || (name == "ha_service" && args.optString("domaine").trim().lowercase() in setOf("homeassistant", "hassio", "recorder", "system_log", "logger"))))
-                        ToolResult("⛔ Interdit pendant une routine : pas d'administration de Home Assistant ni du serveur (recharger, redémarrer, configurer). Fais seulement l'action demandée avec ha_service sur l'appareil, sinon réponds ❌ pour cette action.")
                     else if (name == "ha_service" && PoeleDirect.modeNonDemande(args, texteUser) != null) ToolResult(PoeleDirect.modeNonDemande(args, texteUser)!!)
                     else if (name == "mode_sonore" && PoeleDirect.visePasLeTelephone(texteUser)) ToolResult(PoeleDirect.REFUS_MODE_TELEPHONE)
                     // Consigne de cette demande déjà enregistrée automatiquement (📌) : pas de doublon dans la mémoire.
@@ -1187,9 +1179,6 @@ class Brain(
         internal val CAUSES_REDEMARRAGE_HA = Regex("(pourquoi|cause|causes|raison|raisons|origine|enquete|analyse|diagnostique|diagnostic|cherche|regarde|comprendre|explique).{0,40}" +
             "(home ?assistant|\\bha\\b).{0,30}(redemarr|reboot|plant|crash|coup)|(home ?assistant|\\bha\\b).{0,20}(redemarre|reboot|plante|crashe?)\\w*.{0,20}" +
             "(tout le temps|souvent|sans arret|en boucle|regulierement|tous les|plusieurs fois|encore|toujours|recurren)|redemarrages?( recurrents?| repetes?)? (de |d )?(home ?assistant|\\bha\\b)")
-        /** Outils jamais utilisés par une routine (administration, serveur, redémarrages). */
-        private val INTERDITS_ROUTINE = setOf("ha_admin", "ha_config", "ha_sauvegarde", "ha_dashboard", "serveur_service", "serveur_tache", "serveur_diagnostic",
-            "serveur_fichiers", "serveur_scan_ports", "ssh_commande", "ssh_fichier", "ssh_script", "pilote_ecran", "piloter_telephone")
         /** Réponse interne de [reflexeSeul] : aucun réflexe ne sait faire cette action. */
         private const val SANS_REFLEXE = "\u0000sans-reflexe"
         /** Demande d'AGIR après une lecture (planning, SMS, mails, réveils…) : la lecture n'est alors qu'une étape. Verbes seulement. */

@@ -141,38 +141,54 @@ object Routines {
             "puis réponds par un compte rendu très court, une ligne par action commençant par ✅ ou ❌ :\n" +
             r.actions.mapIndexed { i, a -> "${i + 1}. $a" }.joinToString("\n")
 
+    /** Routine en cours jusqu'à cette heure (0 = aucune) : les outils d'administration sont refusés à tous. */
+    @Volatile private var enCoursJusqua = 0L
+    private val INTERDITS = setOf("ha_admin", "ha_config", "ha_sauvegarde", "ha_dashboard", "serveur_service", "serveur_tache", "serveur_diagnostic",
+        "serveur_fichiers", "serveur_scan_ports", "ssh_commande", "ssh_fichier", "ssh_script", "pilote_ecran", "piloter_telephone")
+
+    /** Refus d'un outil pendant une routine (null : autorisé). */
+    fun refus(outil: String, a: JSONObject): String? {
+        if (System.currentTimeMillis() > enCoursJusqua) return null
+        val domaine = a.optString("domaine").trim().lowercase()
+        if (outil !in INTERDITS && !(outil == "ha_service" && domaine in setOf("homeassistant", "hassio", "recorder", "system_log", "logger"))) return null
+        fr.dd.jarvis.voice.JournalVoix.noter("routine", "outil « $outil » refusé pendant la routine (administration / redémarrage)")
+        return "⛔ Interdit pendant une routine : pas d'administration de Home Assistant ni du serveur (recharger, redémarrer, configurer). " +
+            "Fais seulement l'action demandée avec ha_service sur l'appareil, sinon réponds ❌ pour cette action."
+    }
+
     /**
      * Exécute la routine action par action, dans l'ordre. Chaque action qu'une commande directe sait faire (musique,
-     * lumière, appli, navigation, mode du téléphone…) part TOUT DE SUITE, sans IA ; seules les autres passent par l'IA
-     * (ou Hermès), regroupées quand elles se suivent. Avant : toute la routine partait à l'IA (voire à Hermès), même pour
-     * trois commandes simples — de longues secondes sur « réfléchit ».
+     * poêle, lumière, appli, navigation, mode du téléphone…) part TOUT DE SUITE, sans IA ; les autres sont traitées
+     * EXACTEMENT comme si tu les disais toi-même (mêmes notes, même cerveau, Hermès compris) — avant, elles partaient
+     * dans une consigne « routine » à part, qui échouait là où la même phrase dite hors routine marchait. Pendant la
+     * routine, rien ne peut administrer ni redémarrer Home Assistant ou le serveur.
      */
     suspend fun executer(app: JarvisApp, r: Routine, contexte: String = "", tools: ToolBox? = null): String {
         marquer(app, r)
         if (r.actions.isEmpty()) return "La routine « ${r.nom} » n'a aucune action : ajoute-en dans Réglages › Agents › Routines."
-        val brain = Brain(app.llm, tools ?: ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.apply { enRoutine = true }
+        val brain = Brain(app.llm, tools ?: ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }
         val debut = System.currentTimeMillis()
         val lignes = mutableListOf<String>()
-        val pourIA = mutableListOf<String>()
-        suspend fun viderIA() {
-            if (pourIA.isEmpty()) return
-            val t0 = System.currentTimeMillis()
-            val rep = runCatching { brain.reply(listOf(ChatMsg(true, consigne(r.copy(actions = pourIA.toList()), contexte))), apprendre = false, vocal = CanalDemande.vocal) { } }
-                .getOrElse { "❌ ${it.message ?: it.javaClass.simpleName}" }
-            fr.dd.jarvis.voice.JournalVoix.noter("routine", "${pourIA.size} action(s) par l'IA en ${System.currentTimeMillis() - t0} ms")
-            lignes += rep.trim()
-            pourIA.clear()
-        }
-        for (a in r.actions.map { it.trim() }.filter { it.isNotBlank() }) {
-            // Une action qui suit des actions confiées à l'IA attend son tour (l'ordre de la routine est gardé).
-            if (pourIA.isNotEmpty()) { pourIA += a; continue }
-            val t0 = System.currentTimeMillis()
-            val direct = runCatching { brain.reflexeSeul(a) }.getOrNull()
-            if (direct == null) { pourIA += a; continue }
-            fr.dd.jarvis.voice.JournalVoix.noter("routine", "« ${a.take(60)} » sans IA en ${System.currentTimeMillis() - t0} ms")
-            lignes += ligne(a, direct)
-        }
-        viderIA()
+        val actions = r.actions.map { it.trim() }.filter { it.isNotBlank() }
+        enCoursJusqua = System.currentTimeMillis() + 10 * 60_000L
+        try {
+            var poeleAvant = false
+            for (a in actions) {
+                enCoursJusqua = System.currentTimeMillis() + 5 * 60_000L
+                // Deux poêles du même compte cloud (Agua IoT, MCZ…) commandés coup sur coup : le second ordre arrivait
+                // pendant le premier et le cloud l'abandonnait (« jobAnswerStatus … terminated »). Un temps de battement.
+                val poele = Regex("\\b(poeles?|poiles?|poils?|granules?|pellets?)\\b").containsMatchIn(fr.dd.jarvis.societe.core.normaliser(a))
+                if (poele && poeleAvant) kotlinx.coroutines.delay(4000)
+                poeleAvant = poele
+                val t0 = System.currentTimeMillis()
+                val direct = runCatching { brain.reflexeSeul(a) }.getOrNull()
+                val rep = direct ?: runCatching {
+                    brain.reply(listOf(ChatMsg(true, a)), apprendre = false, vocal = CanalDemande.vocal) { }
+                }.getOrElse { "❌ ${it.message ?: it.javaClass.simpleName}" }
+                fr.dd.jarvis.voice.JournalVoix.noter("routine", "« ${a.take(60)} » ${if (direct != null) "sans IA" else "comme une demande normale"} en ${System.currentTimeMillis() - t0} ms : ${rep.lineSequence().firstOrNull().orEmpty().take(80)}")
+                lignes += ligne(a, rep)
+            }
+        } finally { enCoursJusqua = 0L }
         fr.dd.jarvis.voice.JournalVoix.noter("routine", "« ${r.nom} » terminée en ${System.currentTimeMillis() - debut} ms")
         return "⚙️ Routine « ${r.nom} »\n" + lignes.joinToString("\n")
     }

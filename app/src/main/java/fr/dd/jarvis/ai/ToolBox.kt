@@ -612,6 +612,8 @@ class ToolBox(
 
     /** Exécute un outil ; les surnoms et lieux mémorisés (« les potes », « la maison »…) sont d'abord remplacés par leur cible. */
     suspend fun execute(name: String, a0: JSONObject): ToolResult {
+        // Routine en cours : ni administration de Home Assistant ou du serveur, ni redémarrage — même demandés par Hermès.
+        fr.dd.jarvis.device.Routines.refus(name.removePrefix("mcp_jarvis_"), a0)?.let { return ToolResult(it) }
         val a = runCatching { fr.dd.jarvis.device.Faits.appliquer(app, name, a0) }.getOrDefault(a0)
         return kotlinx.coroutines.withContext(fr.dd.jarvis.device.Autorisations.OutilEnCours(name.removePrefix("mcp_jarvis_"), fr.dd.jarvis.device.Autorisations.canonique(a))) { executerOutil(name, a) }
             .also { r -> runCatching { Annulation.noter(name, a, r.text) } }

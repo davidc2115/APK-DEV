@@ -253,7 +253,8 @@ object PoeleDirect {
 
     /** Mode d'un poêle à activer / retirer (texte brut), ou null. */
     fun modeDemande(texte: String): ModeDemande? {
-        val n = simple(texte)
+        // Entité écrite dans la phrase (« … avec switch.xxx ») : retirée avant de chercher la pièce.
+        val n = simple(texte.replace(Regex("(?i)\\b(?:avec |via |par |entite |l entite )?(?:climate|switch|select|input_boolean|input_select|button|input_button|script|scene)\\.[a-z0-9_]+"), " "))
         if (n.split(' ').size > 14 || !POELE.containsMatchIn(n) || texte.trim().endsWith("?")) return null
         if (Regex("\\d|\\b(degres?|temperature|demain|ce soir|dans|pendant|jusqu|quand|si|est ce|combien|pourquoi|quel|quelle)\\b").containsMatchIn(n)) return null
         val groupe = SYNONYMES_MODE.firstOrNull { g -> g.any { Regex("\\b$it\\b").containsMatchIn(n) } } ?: return null
@@ -274,11 +275,36 @@ object PoeleDirect {
      * Commandes pour le mode demandé, poêle par poêle : préréglage de son entité climate (preset_modes), sinon son
      * interrupteur ou sélecteur de ce mode (au bon endroit). Null si introuvable ou ambigu (le cerveau reprend).
      */
-    internal fun commandesMode(toutes: List<JSONObject>, d: ModeDemande, notees: List<String> = emptyList()): List<Commande>? {
+    internal fun commandesMode(toutes: List<JSONObject>, d: ModeDemande, notees: List<String> = emptyList(),
+                               notes: List<Pair<String, String>> = emptyList(), explicites: List<String> = emptyList()): List<Commande>? {
         val parId = toutes.associateBy { it.optString("entity_id") }
         val paires = toutes.map { it.optString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
         fun t(id: String) = texte(id, parId[id]?.optJSONObject("attributes")?.optString("friendly_name").orEmpty())
         fun contientMode(x: String) = d.mode.any { x.contains(" $it") }
+        fun options(id: String, cle: String) = parId[id]?.optJSONObject("attributes")?.optJSONArray(cle)?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+        /** Commande pour une entité DÉSIGNÉE (dans la phrase ou dans tes notes pour ce mode), quel que soit son nom. */
+        fun pour(id: String): Commande? {
+            if (id !in parId) return null
+            return when (id.substringBefore('.')) {
+                "switch", "input_boolean" -> Commande(id.substringBefore('.'), if (d.activer) "turn_on" else "turn_off", id, null)
+                "select", "input_select" -> (if (d.activer) options(id, "options").firstOrNull { contientMode(" " + normaliser(it) + " ") }
+                    else options(id, "options").firstOrNull { MODE_NORMAL.containsMatchIn(normaliser(it)) })?.let { Commande(id.substringBefore('.'), "select_option", id, JSONObject().put("option", it)) }
+                "climate" -> (if (d.activer) options(id, "preset_modes").firstOrNull { contientMode(" " + normaliser(it) + " ") } else options(id, "preset_modes").firstOrNull { MODE_NORMAL.containsMatchIn(normaliser(it)) })
+                    ?.let { Commande("climate", "set_preset_mode", id, JSONObject().put("preset_mode", it)) }
+                    ?: (if (d.activer) options(id, "fan_modes").firstOrNull { contientMode(" " + normaliser(it) + " ") } else null)
+                        ?.let { Commande("climate", "set_fan_mode", id, JSONObject().put("fan_mode", it)) }
+                "button", "input_button" -> if (d.activer) Commande(id.substringBefore('.'), "press", id, null) else null
+                "script" -> if (d.activer) Commande("script", "turn_on", id, null) else null
+                "scene" -> if (d.activer) Commande("scene", "turn_on", id, null) else null
+                else -> null
+            }
+        }
+        // 0. Entité écrite dans la phrase (« … mode nuit avec switch.xxx ») : c'est elle.
+        explicites.mapNotNull { pour(it) }.takeIf { it.isNotEmpty() }?.let { return it }
+        // 0 bis. Tes notes pour CE mode de CE poêle (« le mode nuit du poêle du salon, c'est select.xxx ») : elles priment.
+        val noteesMode = notes.filter { (_, extrait) -> contientMode(" " + normaliser(extrait) + " ") && (d.lieu.isEmpty() || lieuOk(" " + normaliser(extrait) + " ", d.lieu)) }
+            .mapNotNull { (id, _) -> if (id.startsWith("climate.") && options(id, "preset_modes").isEmpty() && options(id, "fan_modes").isEmpty()) null else pour(id) }
+        if (noteesMode.isNotEmpty() && (d.tous || noteesMode.size == 1)) return noteesMode
         val climats = paires.filter { it.first.startsWith("climate.") }
         // Poêles visés : celui du lieu (ou noté), ou tous pour « les poêles ».
         val visés: List<String?> = if (d.tous) climats.filter { (id, nom) -> POELE.containsMatchIn(texte(id, nom)) }.ifEmpty { climats }.map { it.first }.ifEmpty { listOf(null) }
@@ -290,6 +316,9 @@ object PoeleDirect {
             val preset = if (d.activer) presets.firstOrNull { contientMode(" " + normaliser(it) + " ") }
                 else presets.firstOrNull { MODE_NORMAL.containsMatchIn(normaliser(it)) }
             if (climat != null && preset != null) { res += Commande("climate", "set_preset_mode", climat, JSONObject().put("preset_mode", preset)); continue }
+            // 1 bis. Mode de ventilation / puissance de l'entité climate (« night », « nuit »…).
+            val fan = if (d.activer && climat != null) options(climat, "fan_modes").firstOrNull { contientMode(" " + normaliser(it) + " ") } else null
+            if (climat != null && fan != null) { res += Commande("climate", "set_fan_mode", climat, JSONObject().put("fan_mode", fan)); continue }
             // 2. Interrupteur / sélecteur de ce mode, au lieu demandé et rattaché à ce poêle.
             val jetons = climat?.substringAfter('.')?.split('_')?.filter { it.length >= 3 }.orEmpty()
             fun duPoele(id: String): Boolean {
@@ -343,8 +372,9 @@ object PoeleDirect {
         if (!Serveur.haConfigure(app)) return null
         val arr = JSONArray(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Serveur.ha(app, "GET", "/api/states") })
         val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
-        val notees = runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, "poele " + d.lieu.joinToString(" ") + " mode " + d.mode.first()) }.getOrDefault(emptyList()).map { it.first }
-        val cmds = commandesMode(toutes, d, notees) ?: run {
+        val notes = runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, "poele " + d.lieu.joinToString(" ") + " mode " + d.mode.first()) }.getOrDefault(emptyList())
+        val explicites = Regex("\\b(?:climate|switch|select|input_boolean|input_select|button|input_button|script|scene)\\.[a-z0-9_]+").findAll(texte.lowercase()).map { it.value }.toList()
+        val cmds = commandesMode(toutes, d, notes.map { it.first }, notes, explicites) ?: run {
             fr.dd.jarvis.voice.JournalVoix.noter("maison", "poêle : mode ${d.mode.first()} ${d.lieu} → aucune entité unique, le cerveau reprend")
             return null
         }
