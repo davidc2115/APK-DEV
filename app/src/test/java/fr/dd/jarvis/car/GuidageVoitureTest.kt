@@ -38,3 +38,27 @@ class CoupureVoitureTest {
         assertTrue(!fr.dd.jarvis.voice.VoskWake.contientMot(mots(Triple("jarvis", 0.95, 0.1)), 0.8))  // trop bref
     }
 }
+
+class MicroVoitureSensibleTest {
+    @Test fun porteSensibleEnVoiture() {
+        val normale = fr.dd.jarvis.voice.PorteVocale(); val voiture = fr.dd.jarvis.voice.PorteVocale().apply { sensible = true }
+        repeat(20) { normale.trame(60.0); voiture.trame(60.0) }               // habitacle calme
+        // Voix basse (≈ 110) : ignorée d'habitude, entendue en voiture.
+        assertTrue(normale.trame(110.0) == fr.dd.jarvis.voice.PorteVocale.Decision.IGNORER)
+        assertTrue(voiture.trame(110.0) == fr.dd.jarvis.voice.PorteVocale.Decision.OUVRIR)
+    }
+
+    @Test fun gainAutomatique() {
+        val g = fr.dd.jarvis.voice.GainAuto()
+        val faible = ShortArray(1600) { if (it % 2 == 0) 150 else -150 }
+        var sortie = faible
+        repeat(80) { sortie = g.appliquer(faible, faible.size) }
+        assertTrue(g.gain > 4.0)                                              // voix faible remontée
+        assertTrue(sortie.maxOf { kotlin.math.abs(it.toInt()) } in 700..1000)
+        val fort = ShortArray(1600) { if (it % 2 == 0) 30000 else -30000 }
+        val g2 = fr.dd.jarvis.voice.GainAuto()
+        repeat(80) { g2.appliquer(fort, fort.size) }
+        assertTrue(g2.gain < 1.05)                                            // jamais d'amplification d'un son fort
+        assertTrue(fr.dd.jarvis.voice.VoskWake.FENETRE_MUSIQUE == 30)
+    }
+}

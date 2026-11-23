@@ -161,6 +161,8 @@ class VoskWake(
     private fun seuil() = if (francais) when (exigence) { 1 -> 0.6; 2 -> 0.8; else -> 0.9 } else when (exigence) { 1 -> 0.88; 2 -> 0.93; else -> 0.97 }
 
     companion object {
+        /** Tranche d'écoute continue pendant la musique, en voiture : 3 s (30 trames de 0,1 s). */
+        internal const val FENETRE_MUSIQUE = 30
         /**
          * Grammaire du modèle français : « jarvis » au milieu des mots les plus courants et de ses quasi-homonymes
          * (« j'arrive », « service », « gervais », « marvin », « joris », « janvier »…). Un mot qui ressemble sans être
@@ -278,12 +280,21 @@ class VoskWake(
         boucle?.arreter(); boucle = null
     }
 
-    private fun verifier(j: String?) {
+    private fun verifier(j: String?, nImporteOu: Boolean = false) {
         if (fired || j == null) return
         try {
-            if (detecte(org.json.JSONObject(j).optJSONArray("result"))) { fired = true; JournalVoix.noter("Vosk", "« Jarvis » détecté${if (francais) "" else " (modèle anglais)"}"); onWake() }
+            val mots = org.json.JSONObject(j).optJSONArray("result")
+            if (if (nImporteOu) contientMot(mots, seuil()) else detecte(mots)) {
+                fired = true
+                JournalVoix.noter("Vosk", "« Jarvis » détecté${if (nImporteOu) " malgré la musique" else ""}${if (francais) "" else " (modèle anglais)"}")
+                onWake()
+            }
         } catch (_: Throwable) {}
     }
+
+    private fun nouveauRecognizer(): Recognizer? = runCatching {
+        Recognizer(model, 16000f, (if (francais) GRAMMAIRE_FR else GRAMMAIRE).joinToString(", ", "[", "]") { "\"$it\"" }).apply { setWords(true) }
+    }.getOrNull()
 
     /**
      * Micro lu par trames de 0,1 s ; tant que c'est le silence (ou le bruit de fond habituel), rien n'est envoyé au
@@ -313,26 +324,65 @@ class VoskWake(
             return true
         }
 
+        /**
+         * En voiture : micro plus sensible (porte plus basse + gain automatique : un « Jarvis » presque chuchoté passe) et,
+         * quand de la musique joue, écoute CONTINUE sans porte : la musique la gardait ouverte en permanence, la phrase
+         * reconnue ne finissait jamais et « Jarvis » n'était plus en tête → jamais détecté. Deux reconnaissances décalées
+         * de 1,5 s, remises à zéro toutes les 3 s, repèrent « Jarvis » n'importe où dans ce qu'elles entendent.
+         */
         private fun boucle(ar: android.media.AudioRecord, taille: Int) {
             val porte = PorteVocale()
             val avant = ArrayDeque<ShortArray>()
             val buf = ShortArray(taille)
+            val app = ctx.applicationContext as? fr.dd.jarvis.JarvisApp
+            val am = ctx.getSystemService(android.media.AudioManager::class.java)
+            val gain = GainAuto()
+            var voiture = false; var musique = false; var compte = 0
+            var rec2: Recognizer? = null
+            var trames1 = 0; var trames2 = -FENETRE_MUSIQUE / 2
             var panne = false
             try {
                 while (actif) {
                     val n = ar.read(buf, 0, taille)
                     if (n < 0) { panne = true; break }
                     if (n == 0) continue
-                    when (porte.trame(PorteVocale.rms(buf, n))) {
-                        PorteVocale.Decision.IGNORER -> { avant.addLast(buf.copyOf(n)); while (avant.size > PorteVocale.PRE_ROULEMENT) avant.removeFirst() }
+                    if (compte++ % 10 == 0) {
+                        voiture = app?.enVoiture == true
+                        porte.sensible = voiture
+                        val m = voiture && runCatching { am?.isMusicActive == true }.getOrDefault(false)
+                        if (m != musique) {
+                            musique = m
+                            JournalVoix.noter("Vosk", if (m) "voiture + musique : écoute continue, « Jarvis » repéré même pendant la musique" else "plus de musique : écoute normale")
+                            rec.reset(); rec2?.reset(); trames1 = 0; trames2 = -FENETRE_MUSIQUE / 2; avant.clear()
+                            if (m && rec2 == null) rec2 = nouveauRecognizer()
+                        }
+                    }
+                    val rms = PorteVocale.rms(buf, n)
+                    val trame = if (voiture) gain.appliquer(buf, n, rms) else buf
+                    if (musique) {
+                        // Écoute continue : chaque reconnaissance travaille sur des tranches de 3 s, la 2e décalée de 1,5 s.
+                        if (rec.acceptWaveForm(trame, n)) verifier(rec.result, nImporteOu = true)
+                        if (++trames1 >= FENETRE_MUSIQUE) { verifier(rec.finalResult, nImporteOu = true); rec.reset(); trames1 = 0 }
+                        rec2?.let { r2 ->
+                            if (trames2 < 0) trames2++
+                            else {
+                                if (r2.acceptWaveForm(trame, n)) verifier(r2.result, nImporteOu = true)
+                                if (++trames2 >= FENETRE_MUSIQUE) { verifier(r2.finalResult, nImporteOu = true); r2.reset(); trames2 = 0 }
+                            }
+                        }
+                        if (fired) break
+                        continue
+                    }
+                    when (porte.trame(rms)) {
+                        PorteVocale.Decision.IGNORER -> { avant.addLast(trame.copyOf(n)); while (avant.size > PorteVocale.PRE_ROULEMENT) avant.removeFirst() }
                         PorteVocale.Decision.OUVRIR -> {
                             avant.forEach { if (rec.acceptWaveForm(it, it.size)) verifier(rec.result) }
                             avant.clear()
-                            if (rec.acceptWaveForm(buf, n)) verifier(rec.result)
+                            if (rec.acceptWaveForm(trame, n)) verifier(rec.result)
                         }
-                        PorteVocale.Decision.CONTINUER -> if (rec.acceptWaveForm(buf, n)) verifier(rec.result)
+                        PorteVocale.Decision.CONTINUER -> if (rec.acceptWaveForm(trame, n)) verifier(rec.result)
                         PorteVocale.Decision.FERMER -> {
-                            rec.acceptWaveForm(buf, n)
+                            rec.acceptWaveForm(trame, n)
                             verifier(rec.finalResult)
                             rec.reset()
                         }
@@ -344,6 +394,7 @@ class VoskWake(
                 runCatching { ar.stop() }
                 runCatching { ar.release() }
                 runCatching { rec.close() }
+                runCatching { rec2?.close() }
             }
             if (panne && actif) onPanne()
         }
@@ -358,6 +409,25 @@ class VoskWake(
 
     // Le modèle est partagé (écoute des phrases) : il reste chargé.
     override fun release() { stop(); model = null }
+}
+
+/**
+ * Gain automatique du micro en voiture : le niveau des sons entendus est suivi et remonté vers un niveau confortable
+ * (×6 au plus, sans saturer) — un « Jarvis » dit doucement arrive au modèle aussi fort qu'une voix normale.
+ */
+internal class GainAuto(private val cible: Double = 2500.0, private val max: Double = 6.0) {
+    var niveau = 400.0
+        private set
+    var gain = 1.0
+        private set
+
+    fun appliquer(b: ShortArray, n: Int, rms: Double = PorteVocale.rms(b, n)): ShortArray {
+        if (rms > 30) niveau += (rms - niveau) * 0.05
+        val voulu = (cible / niveau.coerceAtLeast(60.0)).coerceIn(1.0, max)
+        gain += (voulu - gain) * 0.2
+        if (gain <= 1.01) return b
+        return ShortArray(n) { (b[it] * gain).coerceIn(-32768.0, 32767.0).toInt().toShort() }
+    }
 }
 
 /**
@@ -384,11 +454,13 @@ internal class PorteVocale {
         private set
     var ouverte = false
         private set
+    /** En voiture : s'ouvre sur un son plus faible (voix basse, presque chuchotée). */
+    var sensible = false
     private var restant = 0
     private var duree = 0
     private var somme = 0.0
 
-    fun seuil() = maxOf(plancher * 2.0, plancher + 100.0, 150.0)
+    fun seuil() = if (sensible) maxOf(plancher * 1.35, plancher + 40.0, 70.0) else maxOf(plancher * 2.0, plancher + 100.0, 150.0)
 
     fun trame(rms: Double): Decision {
         if (plancher < 0) plancher = rms.coerceIn(20.0, 2000.0)
