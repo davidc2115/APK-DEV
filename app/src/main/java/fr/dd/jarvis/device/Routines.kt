@@ -252,10 +252,13 @@ object Routines {
 
     /** Compte rendu d'une action en une ligne : ✅ / ❌ puis le résultat court. */
     internal fun ligne(action: String, resultat: String): String {
-        val premiere = resultat.lineSequence().map { it.replace(Regex("[#*_`>|]+"), "").trim() }.firstOrNull { it.isNotBlank() }.orEmpty().take(140)
-        val n = fr.dd.jarvis.societe.core.normaliser(premiere)
-        val echec = Regex("^(❌|⚠️|⛔)|(^|[^\\p{L}])([ÉéEe]chec|[Ii]mpossible|[Ii]ntrouvable|[Ee]rreur)").containsMatchIn(premiere) ||
-            Regex("\\b(n a pas pu|pas pu etre|ne confirme pas|non confirme|pas confirme|reste sur|reste a|toujours (sur|en|actif|allume)|echoue|refuse|bloque|n a pas (ete|change|suivi)|pas ete (active|desactive|applique|pris))").containsMatchIn(n)
+        // L'échec se lit sur TOUTE la première ligne (« L'ordre a été envoyé…, mais l'état de l'appareil ne confirme
+        // pas » était coupé à 140 caractères avant le « ne confirme pas », et affiché ✅) ; seul l'affichage est court.
+        val entiere = resultat.lineSequence().map { it.replace(Regex("[#*_`>|]+"), "").trim() }.firstOrNull { it.isNotBlank() }.orEmpty()
+        val premiere = if (entiere.length > 140) entiere.take(139).trimEnd() + "…" else entiere
+        val n = fr.dd.jarvis.societe.core.normaliser(entiere)
+        val echec = Regex("^(❌|⚠️|⛔)|(^|[^\\p{L}])([ÉéEe]chec|[Ii]mpossible|[Ii]ntrouvable|[Ee]rreur)").containsMatchIn(entiere) ||
+            Regex("\\b(n a pas pu|pas pu etre|ne confirme pas|non confirme|pas confirme|reste sur|reste a|toujours (sur|en|actif|allume)|echoue|refuse|bloque|n a pas (ete|change|suivi)|pas ete (active|desactive|applique|pris)|mais l etat (de l appareil |du poele |de l entite )?(ne |n |indique|reste|affiche|est toujours))").containsMatchIn(n)
         val texte = premiere.replace(Regex("^(✅|❌|⚠️)\\s*"), "").ifBlank { action }
         return (if (echec) "❌ " else "✅ ") + texte
     }

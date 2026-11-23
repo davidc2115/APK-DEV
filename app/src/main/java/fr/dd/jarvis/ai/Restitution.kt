@@ -120,9 +120,15 @@ object Restitution {
      * Une consigne qui concerne cette demande exige-t-elle d'AJOUTER quelque chose (« donne aussi la température
      * extérieure », « inclus la consigne ») ? Alors une réponse directe (réflexe, résultat d'outil brut) ne suffit pas :
      * la demande va au cerveau, qui applique la consigne avec ses outils.
+     * Une consigne qui désigne un appareil (« mode nuit : switch.… pour l'étage et aussi switch.… ») dit QUOI piloter,
+     * pas quoi ajouter à la réponse : elle ne coupe pas les commandes directes (qui la lisent elles-mêmes).
      */
     fun exigeUneSuite(memoire: Map<String, String>, demande: String): Boolean =
-        concernees(memoire, demande, "", formeSeulement = false, max = 10, vocal = CanalDemande.vocal).any { l -> normaliser(l).let { AJOUT.containsMatchIn(it) && !RETRAIT.containsMatchIn(it) } }
+        concernees(memoire, demande, "", formeSeulement = false, max = 10, vocal = CanalDemande.vocal)
+            .filterNot { ENTITE_HA.containsMatchIn(it) }
+            .any { l -> normaliser(l).let { AJOUT.containsMatchIn(it) && !RETRAIT.containsMatchIn(it) } }
+
+    private val ENTITE_HA = Regex("\\b(climate|switch|select|input_[a-z]+|light|cover|fan|button|script|scene|sensor|binary_sensor|media_player|number|automation|lock|vacuum|water_heater|humidifier|siren|alarm_control_panel)\\.[a-z0-9_]+")
 
     private val TABLEAU_MD = Regex("(?m)^\\s*\\|.*\\|\\s*$\\n^\\s*\\|?\\s*:?-{2,}")
 

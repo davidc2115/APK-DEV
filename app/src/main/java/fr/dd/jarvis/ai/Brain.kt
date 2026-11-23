@@ -311,7 +311,9 @@ class Brain(
         // Les trois profils sont persistés puis leurs planificateurs sont recalculés immédiatement.
         // Une consigne de l'utilisateur demande d'ajouter quelque chose à ce type de réponse : pas de réflexe brut, le
         // cerveau répond en appliquant la consigne.
-        val consigneAjout = !pourHermes && consigneExigeUneSuite(texteUser)
+        // Action d'une routine : son compte rendu tient en une ligne (✅ / ❌) — une consigne de réponse (« donne aussi… »)
+        // n'a rien à y ajouter, et l'envoyer au cerveau la rendait lente et approximative (poêles, téléphone).
+        val consigneAjout = !pourHermes && !reflexesSeuls && consigneExigeUneSuite(texteUser)
         if (consigneAjout) fr.dd.jarvis.voice.JournalVoix.noter("brain", "consigne d'ajout : réflexes directs ignorés")
         if (!pourHermes && !consigneAjout) {
             // « Que sais-tu faire ? », « liste tous tes outils », « que sais-tu faire avec les mails ? » : la liste

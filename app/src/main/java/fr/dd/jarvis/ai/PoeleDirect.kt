@@ -53,13 +53,29 @@ object PoeleDirect {
 
     private fun lieuOk(t: String, lieu: List<String>) = lieu.all { m -> (LIEUX[m] ?: listOf(m)).any { t.contains(" $it") } }
 
+    /** Mots qui désignent une pièce ou un niveau de la maison. */
+    private val PIECES = LIEUX.values.flatten().toSet() + setOf("cuisine", "chambre", "bureau", "garage", "veranda", "cave", "grenier",
+        "entree", "couloir", "buanderie", "bibliotheque", "living")
+
+    /**
+     * Le nom de l'entité ([t], issu de texte()) désigne une AUTRE pièce que celle demandée : « switch.poele_etage_… »
+     * pour le poêle du salon. Une telle entité n'est jamais prise (ni retenue) pour cette pièce, même si une consigne
+     * — parfois apprise de travers par l'IA — l'associe au salon.
+     */
+    internal fun lieuContredit(t: String, lieu: List<String>): Boolean {
+        val demandees = lieu.filter { it in PIECES }
+        if (demandees.isEmpty() || PIECES.none { t.contains(" $it ") }) return false
+        return demandees.none { m -> (LIEUX[m] ?: listOf(m)).any { t.contains(" $it ") } }
+    }
+
     /**
      * Entité à piloter parmi les états Home Assistant (entity_id, nom) : le climate du poêle (au lieu demandé), sinon son
      * interrupteur principal ; jamais un mode. [notees] : entités notées par l'utilisateur pour ce poêle (prioritaires).
      */
     internal fun choisir(etats: List<Pair<String, String>>, d: Demande, notees: List<String> = emptyList()): String? {
         val parId = etats.toMap()
-        notees.filter { id -> id in parId && (id.startsWith("climate.") || (id.startsWith("switch.") && !MODE.containsMatchIn(texte(id, parId.getValue(id))))) }
+        notees.filter { id -> id in parId && !lieuContredit(texte(id, parId.getValue(id)), d.lieu) &&
+                (id.startsWith("climate.") || (id.startsWith("switch.") && !MODE.containsMatchIn(texte(id, parId.getValue(id))))) }
             .let { l -> val c = l.filter { it.startsWith("climate.") }.ifEmpty { l }; if (c.size == 1) return c.single() }
         val climats = etats.filter { (id, _) -> id.startsWith("climate.") }
         val poeles = climats.filter { (id, nom) -> POELE.containsMatchIn(texte(id, nom)) || Regex("\\b(mcz|maestro|palazzetti|edilkamin|rika|extraflame|ravelli|micronova|fumis|cadel|laminox|piazzetta)\\b").containsMatchIn(texte(id, nom)) }
@@ -321,8 +337,10 @@ object PoeleDirect {
         explicites.mapNotNull { pour(it) }.takeIf { it.isNotEmpty() }?.let { return it }
         // 0 bis. Tes notes pour CE mode de CE poêle (« le mode nuit du poêle du salon, c'est select.xxx ») : elles priment.
         // Consigne qui parle de ce mode, et de cette pièce — dans sa phrase OU dans le nom de l'entité citée.
-        val noteesMode = notes.filter { (id, extrait) -> contientMode(" " + normaliser(extrait) + " ") &&
+        // Jamais une entité dont le NOM dit une autre pièce (consigne apprise de travers : « salon → switch.poele_etage_… »).
+        val noteesMode = notes.filter { (id, extrait) -> contientMode(" " + normaliser(extrait) + " ") && !lieuContredit(t(id), d.lieu) &&
             (d.lieu.isEmpty() || lieuOk(" " + normaliser(extrait) + " ", d.lieu) || (id in parId && lieuOk(t(id), d.lieu))) }
+            .distinctBy { it.first }
             .mapNotNull { (id, extrait) -> if (id.startsWith("climate.") && options(id, "preset_modes").isEmpty() && options(id, "fan_modes").isEmpty()) null else pour(id, extrait) }
         if (noteesMode.isNotEmpty() && (d.tous || noteesMode.size == 1)) return noteesMode
         // Une consigne qui cite les deux poêles (« mode nuit : switch.a pour l'étage, switch.b pour le rez-de-chaussée ») :
@@ -354,7 +372,8 @@ object PoeleDirect {
                     else POELE.containsMatchIn(x) || jetons.any { x.contains(" $it") } || marques.containsMatchIn(x)
                 return lieuOk && rattache
             }
-            val notee = notees.firstOrNull { id -> id in parId && (id.startsWith("switch.") || id.startsWith("input_boolean.")) && contientMode(t(id)) }
+            val notee = notees.firstOrNull { id -> id in parId && (id.startsWith("switch.") || id.startsWith("input_boolean.")) && contientMode(t(id)) &&
+                !lieuContredit(t(id), d.lieu) && (!d.tous || duPoele(id)) }
             val inters = (listOfNotNull(notee) + paires.map { it.first }.filter { id ->
                 (id.startsWith("switch.") || id.startsWith("input_boolean.")) && contientMode(t(id)) && duPoele(id)
             }).distinct()
@@ -409,10 +428,58 @@ object PoeleDirect {
         val service = args.optString("service").trim().ifBlank { return }
         val donnees = (args.opt("donnees") as? JSONObject)?.let { o -> o.keys().asSequence().filter { it != "entity_id" }.joinToString(", ") { "$it ${o.opt(it)}" } }
             ?: (args.opt("donnees") as? String)?.takeIf { it.isNotBlank() }.orEmpty()
+        // L'IA a parfois basculé le MAUVAIS poêle (ou les deux) : une entité dont le nom dit une autre pièce n'est pas
+        // retenue pour celle-ci (sinon la commande directe refaisait l'erreur à chaque routine).
+        val nom = runCatching { JSONObject(Serveur.ha(app, "GET", "/api/states/$id")).optJSONObject("attributes")?.optString("friendly_name") }.getOrNull().orEmpty()
+        if (lieuContredit(texte(id, nom), d.lieu)) {
+            fr.dd.jarvis.voice.JournalVoix.noter("maison", "consigne NON apprise : $id (« $nom ») n'est pas le poêle ${d.lieu.joinToString(" ")}")
+            return
+        }
         val texte = consigneApprise(d, service, id, donnees)
-        val r = app.memo.ajouterConsigne("maison", texte)
+        // Même mode, même sens, même poêle : la ligne apprise est remplacée — celles des autres poêles restent.
+        val cle = texte.substringBefore(" : service") + " :"
+        val r = app.memo.remplacerConsigne("maison", texte) { it.startsWith(cle) }
         fr.dd.jarvis.voice.JournalVoix.noter("maison", "consigne apprise du poêle : $texte ($r)")
     }
+
+    /** Ligne apprise par [retenir] : sens, mode, pièce (peut être vide), service, entité. */
+    private val APPRISE = Regex("^pour (activer|retirer) (?:le mode (\\S+)|les modes particuliers) (?:du poêle(?: (.+?))?|des poêles) : service (\\S+) sur ([a-z_]+\\.[a-z0-9_]+)")
+
+    /**
+     * Consignes apprises qui se contredisent elles-mêmes (« pour activer le mode nuit du poêle salon : … sur
+     * switch.poele_etage_… ») : retirées de la mémoire. [noms] : entity_id → nom affiché (états Home Assistant).
+     * Rend les lignes retirées.
+     */
+    internal fun appriseFausses(lignes: List<String>, noms: Map<String, String>): List<String> = lignes.filter { l ->
+        val m = APPRISE.find(l.trim()) ?: return@filter false
+        val lieu = m.groupValues[3].split(' ').map { normaliser(it) }.filter { it.isNotBlank() }
+        val id = m.groupValues[5]
+        lieuContredit(texte(id, noms[id].orEmpty()), lieu)
+    }
+
+    private fun nettoyerApprises(app: JarvisApp, toutes: List<JSONObject>) {
+        val lignes = runCatching { app.memo.consignesListe().filter { it.first == "maison" }.map { it.second } }.getOrDefault(emptyList())
+        if (lignes.isEmpty()) return
+        val noms = toutes.associate { it.optString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
+        appriseFausses(lignes, noms).forEach { l ->
+            if (runCatching { app.memo.retirerConsigne("maison", l) }.getOrDefault(false))
+                fr.dd.jarvis.voice.JournalVoix.noter("maison", "consigne apprise fausse retirée : $l")
+        }
+    }
+
+    /**
+     * Entités de poêle des modes JARVIS (Réglages › Modes) qui parlent de CE mode (« Mode nuit des poêles » : activation
+     * switch.…_natural_mode turn_on, désactivation turn_off) : (entity_id, extrait) comme une consigne.
+     */
+    internal fun notesDesModes(systemes: List<fr.dd.jarvis.securite.Systemes.Systeme>, d: ModeDemande): List<Pair<String, String>> =
+        systemes.filter { s ->
+            val x = " " + normaliser(s.nom + " " + s.description + " " + (s.phrasesActiver + s.phrasesDesactiver).joinToString(" ")) + " "
+            d.mode.any { x.contains(" $it ") }
+        }.flatMap { s ->
+            (s.activation + s.desactivation).filter { it.type == "ha" }.flatMap { e ->
+                e.entites.map { id -> id to "mode JARVIS « ${s.nom} » : mode ${d.mode.first()} des poêles, ${e.cible} sur $id" }
+            }
+        }.distinctBy { it.first }
 
     internal fun consigneApprise(d: ModeDemande, service: String, id: String, donnees: String): String {
         val mode = if (d.mode.size > 3) "les modes particuliers" else "le mode ${d.mode.first()}"
@@ -426,7 +493,13 @@ object PoeleDirect {
         if (!Serveur.haConfigure(app)) return null
         val arr = JSONArray(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Serveur.ha(app, "GET", "/api/states") })
         val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
-        val notes = runCatching { fr.dd.jarvis.device.Carnet.entitesNoteesToutes(app, "poele " + d.lieu.joinToString(" ") + " mode " + d.mode.first()) }.getOrDefault(emptyList())
+        nettoyerApprises(app, toutes)
+        val noms = toutes.associate { it.optString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
+        // Tes modes JARVIS qui pilotent ce mode des poêles (Réglages › Modes) comptent comme des consignes.
+        val desModes = runCatching { notesDesModes(fr.dd.jarvis.securite.Systemes.liste(app), d) }.getOrDefault(emptyList())
+            .filter { (id, _) -> id in noms && POELE.containsMatchIn(texte(id, noms.getValue(id))) }
+        val notes = (runCatching { fr.dd.jarvis.device.Carnet.entitesNoteesToutes(app, "poele " + d.lieu.joinToString(" ") + " mode " + d.mode.first()) }.getOrDefault(emptyList()) + desModes)
+            .distinctBy { it.first }
         val explicites = Regex("\\b(?:climate|switch|select|input_boolean|input_select|button|input_button|script|scene)\\.[a-z0-9_]+").findAll(texte.lowercase()).map { it.value }.toList()
         val cmds = commandesMode(toutes, d, notes.map { it.first }, notes, explicites) ?: run {
             // Pour comprendre la prochaine fois : ce que JARVIS a vu (interrupteurs / sélecteurs des poêles, consignes).

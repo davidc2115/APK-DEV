@@ -101,6 +101,15 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         const val FOLDER = "JARVIS"
         const val FILE = "Mémoire JARVIS.md"
 
+        private val PIECES = Regex("\\b(etage|haut|mezzanine|salon|sejour|living|rez|chaussee|rdc|bas|cuisine|chambre|bureau|garage|veranda|cave|grenier|entree|couloir|buanderie)\\b")
+
+        /** Les deux lignes nomment des pièces, et pas les mêmes (« … du poêle de l'étage » / « … du poêle du salon »). */
+        internal fun piecesDifferentes(a: String, b: String): Boolean {
+            val pa = PIECES.findAll(fr.dd.jarvis.societe.core.normaliser(a)).map { it.value }.toSet()
+            val pb = PIECES.findAll(fr.dd.jarvis.societe.core.normaliser(b)).map { it.value }.toSet()
+            return pa.isNotEmpty() && pb.isNotEmpty() && pa != pb
+        }
+
         /** Mots communs (≥ 4 lettres) / mots de la plus courte des deux phrases. */
         internal fun proximite(a: String, b: String): Double {
             fun mots(s: String) = fr.dd.jarvis.societe.core.normaliser(s).split(' ').filter { it.length >= 4 }.toSet()
@@ -235,13 +244,34 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val canal = fr.dd.jarvis.ai.CanalDemande.de(nouvelle)
         fun memeCanal(l: String) = fr.dd.jarvis.ai.CanalDemande.de(l) == canal
         if (lignes.any { memeCanal(it) && (fr.dd.jarvis.societe.core.normaliser(it) == n || fr.dd.jarvis.societe.core.normaliser(it).contains(n)) }) return "déjà enregistrée"
-        val proche = lignes.indexOfFirst { memeCanal(it) && proximite(it, nouvelle) >= 0.6 }
+        // Deux consignes qui ne parlent pas de la même pièce (poêle de l'étage / du salon) ne se remplacent jamais.
+        val proche = lignes.indexOfFirst { memeCanal(it) && proximite(it, nouvelle) >= 0.6 && !piecesDifferentes(it, nouvelle) }
         if (proche >= 0) lignes[proche] = nouvelle else lignes += nouvelle
         items[k] = lignes.joinToString("\n") { "- $it" }
         return persist()
     }
 
 
+
+    /**
+     * Enregistre [texte] en remplaçant la ligne qui vérifie [meme] (sinon l'ajoute) — SANS la fusion « consigne voisine »
+     * d'[ajouterConsigne] : deux consignes apprises presque identiques (mode nuit du poêle de l'étage / du salon) ne
+     * s'écrasent plus l'une l'autre.
+     */
+    @Synchronized
+    fun remplacerConsigne(sujet: String, texte: String, meme: (String) -> Boolean): String {
+        ensure()
+        val k = sujet.trim().lowercase().ifBlank { "general" }
+        val nouvelle = texte.trim().removePrefix("-").trim()
+        if (nouvelle.isBlank()) return "rien à enregistrer"
+        val lignes = items[k].orEmpty().lines().map { it.trim() }.filter { it.isNotBlank() }.map { it.removePrefix("-").trim() }.toMutableList()
+        if (lignes.any { it == nouvelle }) return "déjà enregistrée"
+        val i = lignes.indexOfFirst(meme)
+        if (i >= 0) lignes[i] = nouvelle else lignes += nouvelle
+        lignes.removeAll { it != nouvelle && meme(it) }
+        items[k] = lignes.joinToString("\n") { "- $it" }
+        return persist()
+    }
 
     @Synchronized
     fun remove(sujet: String): Boolean {

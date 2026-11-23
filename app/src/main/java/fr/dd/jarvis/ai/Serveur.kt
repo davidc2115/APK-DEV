@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 /** Serveur personnel : SSH (commandes, fichiers) et Home Assistant (API REST + fichiers de configuration YAML). */
 object Serveur {
     private val http = OkHttpClient.Builder()
+        .dns(DnsMemoire)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(40, TimeUnit.SECONDS)
         .callTimeout(45, TimeUnit.SECONDS)
@@ -645,7 +646,60 @@ object Serveur {
     }
 
     /** [frais] : relit toujours Home Assistant (attente d'une entité qui vient d'être créée, par exemple). */
+    /**
+     * DNS qui garde la dernière adresse trouvée : un raté passager de résolution (économiseur de batterie qui vient de
+     * s'activer pendant une routine, Wi-Fi qui se reconnecte) ne coupe plus Home Assistant — l'adresse connue sert.
+     */
+    internal object DnsMemoire : okhttp3.Dns {
+        private val connues = java.util.concurrent.ConcurrentHashMap<String, List<java.net.InetAddress>>()
+        override fun lookup(hostname: String): List<java.net.InetAddress> = try {
+            okhttp3.Dns.SYSTEM.lookup(hostname).also { if (it.isNotEmpty()) connues[hostname] = it }
+        } catch (e: java.net.UnknownHostException) {
+            connues[hostname]?.also { fr.dd.jarvis.voice.JournalVoix.noter("maison", "« $hostname » ne se résout pas pour l'instant : dernière adresse connue utilisée") } ?: throw e
+        }
+    }
+
+    /** Attentes entre deux essais quand le réseau rate (adresse introuvable, connexion refusée…) : ~4,5 s au total. */
+    private val REESSAIS_HA = longArrayOf(1_500, 3_000)
+
+    /**
+     * Erreur réseau passagère : la requête n'a pas atteint Home Assistant (adresse non résolue, connexion refusée ou
+     * impossible) — on peut la refaire sans risque. Un délai dépassé n'est refait que pour une lecture (un POST a pu
+     * partir).
+     */
+    internal fun passager(e: Throwable, methode: String): Boolean = when (e) {
+        is java.net.UnknownHostException, is java.net.ConnectException, is java.net.NoRouteToHostException -> true
+        is java.net.SocketTimeoutException -> methode != "POST"
+        else -> false
+    }
+
     fun ha(app: JarvisApp, methode: String, chemin: String, corps: JSONObject? = null, frais: Boolean = false): String {
+        var essai = 0
+        while (true) {
+            try {
+                return haUneFois(app, methode, chemin, corps, frais)
+            } catch (e: IllegalStateException) {
+                throw e
+            } catch (e: Exception) {
+                if (passager(e, methode) && essai < REESSAIS_HA.size) {
+                    fr.dd.jarvis.voice.JournalVoix.noter("maison", "Home Assistant : ${e.javaClass.simpleName} sur $methode ${chemin.take(60)} → nouvel essai dans ${REESSAIS_HA[essai] / 1000.0} s")
+                    Thread.sleep(REESSAIS_HA[essai++])
+                    continue
+                }
+                throw erreurHa(app, e)
+            }
+        }
+    }
+
+    private fun erreurHa(app: JarvisApp, e: Exception): IllegalStateException = when (e) {
+        is java.net.UnknownHostException -> IllegalStateException("Home Assistant : adresse introuvable (« ${app.store.haUrl.value} »), même après 3 essais. Si l'adresse est juste dans Réglages › Maison › Serveur, le réseau du téléphone était coupé à ce moment (économiseur de batterie, Wi-Fi qui se reconnecte) : réessaie dans quelques secondes.")
+        is java.net.ConnectException, is java.net.NoRouteToHostException -> IllegalStateException("Home Assistant : connexion refusée sur « ${base(app)} ». Soit Home Assistant est arrêté (vérifie avec serveur_diagnostic), soit le port/l'adresse est faux dans Réglages › Maison › Serveur, soit le téléphone n'est pas sur le même réseau (et l'accès distant n'est pas configuré).")
+        is java.net.SocketTimeoutException -> IllegalStateException("Home Assistant : pas de réponse (délai dépassé) sur « ${base(app)} ». Le serveur est peut-être éteint/inaccessible depuis ce réseau, ou surchargé.")
+        is javax.net.ssl.SSLException -> IllegalStateException("Home Assistant : erreur TLS/SSL sur « ${base(app)} ». Si l'adresse commence par https:// mais que Home Assistant n'a pas de certificat valide configuré, utilise http:// à la place (Réglages › Maison › Serveur).")
+        else -> IllegalStateException("Home Assistant : connexion impossible sur « ${base(app)} » (${e.javaClass.simpleName} : ${e.message}).")
+    }
+
+    private fun haUneFois(app: JarvisApp, methode: String, chemin: String, corps: JSONObject?, frais: Boolean): String {
         if (!haConfigure(app)) throw IllegalStateException("Home Assistant non configuré (Réglages › Maison › Serveur : adresse et jeton d'accès longue durée).")
         val (adresse, client) = acces(app)
         val listeEtats = methode != "POST" && chemin == "/api/states"
@@ -655,29 +709,15 @@ object Serveur {
         val generation = generationEtats.get()
         val b = Request.Builder().url(adresse + chemin).header("Authorization", "Bearer ${app.store.haToken.value.trim()}")
         if (methode == "POST") b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType())) else b.get()
-        try {
-            client.newCall(b.build()).execute().use { r ->
-                val t = r.body?.string().orEmpty()
-                if (methode == "POST") oublierEtatsHa()
-                else if (listeEtats && r.isSuccessful && generation == generationEtats.get()) etatsHa = EtatsHa(cle, t, System.currentTimeMillis())
-                if (r.code == 401) throw IllegalStateException("Home Assistant 401 : le jeton est invalide ou expiré. Dans Home Assistant, connecte-toi avec le compte qui possède les droits d'administration, puis crée un nouveau jeton d'accès longue durée dans ton profil et remplace-le dans JARVIS › Réglages › Maison › Serveur.")
-                if (r.code == 403) throw IllegalStateException("Home Assistant 403 — action interdite pour le compte associé au jeton. Ce n'est pas une permission Android/Shizuku : le jeton reprend les droits du compte Home Assistant qui l'a créé. Vérifie que ce compte peut piloter cet appareil et, si nécessaire, crée un nouveau jeton depuis un compte administrateur. Détail HA : ${t.take(500)}")
-                if (r.code == 404) throw IllegalStateException("Home Assistant 404 : service ou entité introuvable. Vérifie le domaine, le nom du service et l'identifiant exact de l'appareil. Détail HA : ${t.take(400)}")
-                if (!r.isSuccessful) throw IllegalStateException("Home Assistant ${r.code} : ${t.take(500)}")
-                return t
-            }
-        } catch (e: IllegalStateException) {
-            throw e
-        } catch (e: java.net.UnknownHostException) {
-            throw IllegalStateException("Home Assistant : adresse introuvable (« ${app.store.haUrl.value} »). Vérifie l'adresse dans Réglages › Maison › Serveur (faute de frappe, ou nom DNS qui ne résout plus).")
-        } catch (e: java.net.ConnectException) {
-            throw IllegalStateException("Home Assistant : connexion refusée sur « ${base(app)} ». Soit Home Assistant est arrêté (vérifie avec serveur_diagnostic), soit le port/l'adresse est faux dans Réglages › Maison › Serveur, soit le téléphone n'est pas sur le même réseau (et l'accès distant n'est pas configuré).")
-        } catch (e: java.net.SocketTimeoutException) {
-            throw IllegalStateException("Home Assistant : pas de réponse (délai dépassé) sur « ${base(app)} ». Le serveur est peut-être éteint/inaccessible depuis ce réseau, ou surchargé.")
-        } catch (e: javax.net.ssl.SSLException) {
-            throw IllegalStateException("Home Assistant : erreur TLS/SSL sur « ${base(app)} ». Si l'adresse commence par https:// mais que Home Assistant n'a pas de certificat valide configuré, utilise http:// à la place (Réglages › Maison › Serveur).")
-        } catch (e: Exception) {
-            throw IllegalStateException("Home Assistant : connexion impossible sur « ${base(app)} » (${e.javaClass.simpleName} : ${e.message}).")
+        client.newCall(b.build()).execute().use { r ->
+            val t = r.body?.string().orEmpty()
+            if (methode == "POST") oublierEtatsHa()
+            else if (listeEtats && r.isSuccessful && generation == generationEtats.get()) etatsHa = EtatsHa(cle, t, System.currentTimeMillis())
+            if (r.code == 401) throw IllegalStateException("Home Assistant 401 : le jeton est invalide ou expiré. Dans Home Assistant, connecte-toi avec le compte qui possède les droits d'administration, puis crée un nouveau jeton d'accès longue durée dans ton profil et remplace-le dans JARVIS › Réglages › Maison › Serveur.")
+            if (r.code == 403) throw IllegalStateException("Home Assistant 403 — action interdite pour le compte associé au jeton. Ce n'est pas une permission Android/Shizuku : le jeton reprend les droits du compte Home Assistant qui l'a créé. Vérifie que ce compte peut piloter cet appareil et, si nécessaire, crée un nouveau jeton depuis un compte administrateur. Détail HA : ${t.take(500)}")
+            if (r.code == 404) throw IllegalStateException("Home Assistant 404 : service ou entité introuvable. Vérifie le domaine, le nom du service et l'identifiant exact de l'appareil. Détail HA : ${t.take(400)}")
+            if (!r.isSuccessful) throw IllegalStateException("Home Assistant ${r.code} : ${t.take(500)}")
+            return t
         }
     }
 
