@@ -189,6 +189,11 @@ class Brain(
                 return fr.dd.jarvis.device.CommandeMedia.executer(app, a, app.enVoiture)
             }
         }
+        // « Liste les actions du mode lever » : la routine telle qu'elle est enregistrée (avant : cherchée parmi les modes
+        // de sécurité de JARVIS, « aucun mode nommé lever »).
+        if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->
+            fr.dd.jarvis.device.Routines.description(app, m.text)?.let { d -> onStatus("⚙️ Routine…"); return d }
+        }
         // Routine déclenchée par une phrase (« Jarvis, je pars ») : toutes ses actions d'un coup.
         if (!pourHermes) history.lastOrNull()?.takeIf { it.fromUser }?.let { m ->
             fr.dd.jarvis.device.Routines.parPhrase(app, m.text)?.let { r ->
@@ -817,7 +822,7 @@ class Brain(
                     // partait avec des arguments vides ou incomplets — commandes SSH tronquées).
                     if (args == null) ToolResult("❌ Arguments incomplets ou illisibles (réponse coupée) : l'outil n'a PAS été exécuté. Renvoie l'appel avec des arguments JSON complets.")
                     else if (name in retires) ToolResult(if (name.startsWith("ssh") || name == "serveur_diagnostic") "Pour Home Assistant, utilise l'API (ha_entites, ha_etat, ha_service, ha_config, ha_dashboard, ha_admin), pas le SSH." else "Outil indisponible ici.")
-                    else if (name == "ha_service" && PoeleDirect.modeNonDemande(args, texteUser) != null) ToolResult(PoeleDirect.modeNonDemande(args, texteUser)!!)
+                    else if (name == "ha_service" && PoeleDirect.modeNonDemande(app, args, texteUser) != null) ToolResult(PoeleDirect.modeNonDemande(app, args, texteUser)!!)
                     else if (name == "mode_sonore" && PoeleDirect.visePasLeTelephone(texteUser)) ToolResult(PoeleDirect.REFUS_MODE_TELEPHONE)
                     // Consigne de cette demande déjà enregistrée automatiquement (📌) : pas de doublon dans la mémoire.
                     else if (name == "memoire_ajouter" && !pourHermes && (consigneRetenue != null || consigneApprise != null) && args.optString("remplacer").trim().lowercase() !in setOf("oui", "true", "1"))

@@ -323,6 +323,9 @@ object PoeleDirect {
         val noteesMode = notes.filter { (_, extrait) -> contientMode(" " + normaliser(extrait) + " ") && (d.lieu.isEmpty() || lieuOk(" " + normaliser(extrait) + " ", d.lieu)) }
             .mapNotNull { (id, extrait) -> if (id.startsWith("climate.") && options(id, "preset_modes").isEmpty() && options(id, "fan_modes").isEmpty()) null else pour(id, extrait) }
         if (noteesMode.isNotEmpty() && (d.tous || noteesMode.size == 1)) return noteesMode
+        // Une consigne qui cite les deux poêles (« mode nuit : switch.a pour l'étage, switch.b pour le rez-de-chaussée ») :
+        // l'entité de la pièce demandée (son nom la dit).
+        if (noteesMode.size > 1 && d.lieu.isNotEmpty()) noteesMode.filter { lieuOk(t(it.id), d.lieu) }.takeIf { it.size == 1 }?.let { return it }
         val climats = paires.filter { it.first.startsWith("climate.") }
         // Poêles visés : celui du lieu (ou noté), ou tous pour « les poêles ».
         val visés: List<String?> = if (d.tous) climats.filter { (id, nom) -> POELE.containsMatchIn(texte(id, nom)) }.ifEmpty { climats }.map { it.first }.ifEmpty { listOf(null) }
@@ -605,6 +608,22 @@ object PoeleDirect {
      * silence, natural…) alors que la demande ne nomme pas ce mode → refusé, avec l'explication pour viser le poêle
      * lui-même. Null : l'appel peut partir.
      */
+    /**
+     * Même garde-fou, mais une entité que TES consignes associent au mode demandé (« le mode nuit du poêle de l'étage,
+     * c'est switch.poele_etage_natural_mode ») passe : c'est ton réglage, même si son nom parle d'un autre mode.
+     */
+    fun modeNonDemande(app: JarvisApp, args: JSONObject, demandeUtilisateur: String): String? {
+        val refus = modeNonDemande(args, demandeUtilisateur) ?: return null
+        val ids = args.optString("entity_id").split(",").map { it.trim() }.filter { it.isNotBlank() }
+        val notes = runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, demandeUtilisateur) }.getOrDefault(emptyList())
+        val demande = " " + normaliser(demandeUtilisateur) + " "
+        val modesDemandes = SYNONYMES_MODE.filter { g -> g.any { demande.contains(" $it ") } }.flatten()
+        val autorise = modesDemandes.isNotEmpty() && ids.all { id ->
+            notes.any { (e, extrait) -> e == id && modesDemandes.any { (" " + normaliser(extrait) + " ").contains(" $it ") } }
+        }
+        return if (autorise) null else refus
+    }
+
     fun modeNonDemande(args: JSONObject, demandeUtilisateur: String): String? {
         val domaine = args.optString("domaine").trim().lowercase()
         val ids = args.optString("entity_id").split(",").map { it.trim() }.filter { it.isNotBlank() }

@@ -122,6 +122,28 @@ object Routines {
 
     fun parPhrase(app: JarvisApp, texte: String): Routine? = if (texte.length > 80) null else liste(app).firstOrNull { correspond(it, texte) }
 
+    /** « Liste les actions du mode lever », « que fait la routine coucher ? », « montre le mode lever ». */
+    private val DESCRIPTION = Regex("^(?:(?:liste|lister|montre|montrer|affiche|afficher|donne|dis|detaille|detailler|decris|decrire|rappelle|lis|lire)(?: moi| nous)? |" +
+        "(?:quelles? sont|quels sont|c est quoi|qu est ce qu il y a dans|qu est ce que fait|que fait|que contient|qu y a t il dans|qu est ce que contient) )" +
+        "(?:(?:les |la |le |l )?(?:actions?|etapes?|contenu|details?|programme|configuration|reglages?)(?: de| du| des| d)? )?(?:la |le |ma |mon |l )?(?:routine |mode |scenario )(.+?)\\s*$")
+
+    /** Routine nommée dans [nom] (« lever », « mode lever »), active ou non. */
+    internal fun designee(l: List<Routine>, nom: String): Routine? {
+        val c = cle(nom).removePrefix("mode ").trim()
+        if (c.length < 3) return null
+        fun egal(x: String) = cle(x).removePrefix("mode ").trim() == c
+        return l.firstOrNull { egal(it.nom) } ?: l.firstOrNull { r -> r.phrases.any { egal(it) } }
+    }
+
+    /** Description d'une routine demandée (« liste les actions du mode lever »), ou null. */
+    internal fun description(l: List<Routine>, texte: String): String? {
+        val m = DESCRIPTION.find(norm(texte).replace(Regex("^(ok |hey |bon )?jarvis "), "")) ?: return null
+        val r = designee(l, m.groupValues[1]) ?: return null
+        return presenter(listOf(r)).replace("# ⚙️ Routines\n", "# ⚙️ Routine « ${r.nom} »\n")
+    }
+
+    fun description(app: JarvisApp, texte: String): String? = if (texte.length > 120) null else description(liste(app), texte)
+
     /** Routine désignée par son nom (« coucher », « mode coucher ») : repli de l'activation d'un mode. */
     fun parNom(app: JarvisApp, nom: String): Routine? = cle(nom).takeIf { it.length >= 3 }?.let { c ->
         liste(app).firstOrNull { it.active && (cle(it.nom) == c || it.phrases.any { p -> cle(p) == c }) }
@@ -186,7 +208,7 @@ object Routines {
         val brain = Brain(app.llm, tools ?: ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }
         val debut = System.currentTimeMillis()
         val lignes = mutableListOf<String>()
-        val actions = r.actions.map { it.trim() }.filter { it.isNotBlank() }
+        val actions = r.actions.map { it.trim().replace(Regex("^(?:[-•*·]+|\\d+[.)])\\s*"), "").trim() }.filter { it.isNotBlank() }
         enCoursJusqua = System.currentTimeMillis() + 10 * 60_000L
         try {
             var poeleAvant = false

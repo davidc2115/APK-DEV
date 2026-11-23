@@ -213,6 +213,11 @@ object Systemes {
         }
         val creer = Regex("^(installe|reinstalle|cree|creer|creons|mets en place|met en place|prepare|configure (un|une|le|la) nouve|fais moi|fabrique|ajoute un nouveau|nouveau)\\b").containsMatchIn(t) ||
             Regex("^(je veux|je voudrais|j aimerais|peux tu|tu peux) (installer|creer|mettre en place|un mode|le mode)").containsMatchIn(t)
+        // « Retire le mode nuit du poêle salon », « passe le téléphone en mode économie » : le mode d'un APPAREIL (ou du
+        // téléphone), pas un mode de JARVIS à modifier — sauf « dans le mode nuit, … » ou si l'appareil est dans son nom.
+        val appareil = (APPAREIL.findAll(t).map { it.value } + Regex("\\b(telephone|portable|smartphone)\\b").findAll(t).map { it.value }).toList()
+        if (appareil.isNotEmpty() && modele.isBlank() && !creer && !Regex("^dans (le |la |mon |ma )?(mode |systeme )").containsMatchIn(t) &&
+            appareil.none { a -> cite?.let { norm(it).contains(a.take(4)) } == true }) return null
         // « Active le mode téléphone sécurisé » alors qu'il n'est pas encore installé : on l'installe d'abord.
         val installerModele = modele.isNotBlank() && cite == null && Regex("^(active|lance|mets|passe|demarre|enclenche)\\b").containsMatchIn(t)
         if ((creer && (cite == null || modele.isNotBlank())) || installerModele) {
