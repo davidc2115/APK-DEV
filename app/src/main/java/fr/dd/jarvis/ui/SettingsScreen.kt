@@ -168,6 +168,15 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     }
                     HudButton("Actualiser") { tArr++ }
                 }
+                if (fr.dd.jarvis.device.Xiaomi.est()) {
+                    val popup = remember(tArr) { fr.dd.jarvis.device.Xiaomi.arrierePlan(ctx) }
+                    val verrou = remember(tArr) { fr.dd.jarvis.device.Xiaomi.ecranVerrouille(ctx) }
+                    Spacer(Modifier.height(6.dp))
+                    Text("Pour ouvrir Waze, la musique… en voiture ou écran éteint, HyperOS exige deux autorisations en plus de « par-dessus les autres applis » :", color = HudText, fontSize = 12.sp)
+                    StatusRow("Fenêtres pop-up en arrière-plan" + if (popup == null) " (état illisible, vérifie à la main)" else "", popup == true)
+                    StatusRow("Afficher sur l'écran de verrouillage" + if (verrou == null) " (état illisible, vérifie à la main)" else "", verrou == true)
+                    HudButton("Autres autorisations (Xiaomi)", Modifier.padding(top = 4.dp)) { fr.dd.jarvis.device.Xiaomi.ouvrirAutorisations(ctx) }
+                }
                 Text("Sur Xiaomi : active « Démarrage automatique », mets l'économie d'énergie sur « Aucune restriction », et verrouille JARVIS dans les applis récentes (appui long sur sa vignette → cadenas). Après un redémarrage du téléphone, Android interdit de rallumer le micro tout seul : une notification « Relancer l'écoute » apparaît, un toucher suffit. Définir JARVIS comme assistant par défaut (bouton au-dessus) lui permet aussi de rouvrir le micro plus facilement.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
             }
         },

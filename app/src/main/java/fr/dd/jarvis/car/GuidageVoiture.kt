@@ -56,6 +56,8 @@ object GuidageVoiture {
 
     fun coord(v: Double) = String.format(Locale.US, "%.6f", v)
 
+    private fun etat(b: Boolean?) = when (b) { true -> "oui"; false -> "NON"; null -> "inconnu" }
+
     /** URI geo: pour Android Auto : coordonnées si connues (guidage direct), sinon l'adresse. */
     fun geo(destination: String, point: Pair<Double, Double>?): String =
         if (point != null) "geo:${coord(point.first)},${coord(point.second)}" else "geo:0,0?q=" + requete(destination)
@@ -70,7 +72,9 @@ object GuidageVoiture {
         val echecs = mutableListOf<String>()
         journal.noter("voiture", "itinéraire demandé vers « $nom »" + (point?.let { " (${coord(it.first)}, ${coord(it.second)})" } ?: " (adresse non géolocalisée)") +
             " · JARVIS ouvert dans Android Auto : ${if (NavigationVoiture.contexte != null) "oui" else "non"}" +
-            " · lecture des notifications : ${if (fr.dd.jarvis.service.JarvisNotificationListener.active) "oui" else "NON"}")
+            " · lecture des notifications : ${if (fr.dd.jarvis.service.JarvisNotificationListener.active) "oui" else "NON"}" +
+            (if (fr.dd.jarvis.device.Xiaomi.est()) " · Xiaomi pop-up en arrière-plan : ${etat(fr.dd.jarvis.device.Xiaomi.arrierePlan(app))}" +
+                ", écran verrouillé : ${etat(fr.dd.jarvis.device.Xiaomi.ecranVerrouille(app))}" else ""))
 
         // 1. Android Auto lance lui-même son GPS (JARVIS ouvert dans Android Auto pendant le trajet).
         if (NavigationVoiture.contexte != null) {
@@ -94,7 +98,8 @@ object GuidageVoiture {
         val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.navigate(destination, "d", choix, point) }
         journal.noter("voiture", "téléphone : ${choix.ifBlank { "Google Maps" }} → ${r.take(120)}")
         if (r.startsWith("🧭")) {
-            when (attendre(t1)) {
+            // Waze démarré à froid met plusieurs secondes à calculer l'itinéraire.
+            when (attendre(t1, 10_000)) {
                 true -> { journal.noter("voiture", "guidage démarré par ${choix.ifBlank { "Google Maps" }} vers $nom"); return "🧭 Guidage lancé vers $nom avec ${choix.ifBlank { "Google Maps" }}, affiché dans Android Auto." }
                 null -> return "$r Je ne peux pas vérifier qu'il a démarré : autorise l'accès aux notifications à JARVIS pour que je le confirme."
                 false -> echecs += "${choix.ifBlank { "Google Maps" }} ne s'est pas ouvert (Android bloque les applis lancées en arrière-plan)"
@@ -104,9 +109,13 @@ object GuidageVoiture {
         // 3. Rien de vérifié : itinéraire prêt dans une notification à toucher, et réponse honnête.
         notifier(app, destination, point, choix)
         journal.noter("voiture", "guidage NON confirmé vers $nom : ${echecs.joinToString(" ; ")}")
+        val xiaomi = fr.dd.jarvis.device.Xiaomi.conseilLancement(app)
         return "⚠️ Je n'ai pas réussi à démarrer le guidage vers $nom : " + echecs.joinToString(" ; ") + ". " +
             "L'itinéraire est prêt dans une notification sur le téléphone, ou ouvre ${choix.ifBlank { "ton GPS" }} dans Android Auto. " +
-            "Pour que je le lance tout seul : ouvre JARVIS une fois dans Android Auto pendant le trajet, ou autorise « Afficher par-dessus les autres applis » pour JARVIS."
+            xiaomi.ifBlank {
+                "Pour que je le lance tout seul : autorise « Afficher par-dessus les autres applis » pour JARVIS" +
+                    (if (fr.dd.jarvis.service.JarvisAccessibilityService.instance == null) ", ou active son service d'accessibilité" else "") + "."
+            }
     }
 
     /** Notification « Itinéraire vers … » : un toucher ouvre le guidage (lancement autorisé par Android). */
