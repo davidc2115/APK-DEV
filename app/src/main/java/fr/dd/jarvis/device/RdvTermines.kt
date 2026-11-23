@@ -45,9 +45,25 @@ object RdvTermines {
 
     private val COULEURS = listOf("vert fonce", "bleu ciel", "rouge", "tomate", "rose", "flamant", "orange", "mandarine", "jaune", "banane", "vert", "sauge",
         "basilic", "turquoise", "paon", "bleu", "myrtille", "violet", "raisin", "lavande", "gris", "graphite", "noir", "blanc")
-    private val R_COULEUR = Regex("(?:\\ben|\\bcouleur|\\bde couleur)\\s+(${COULEURS.joinToString("|")})\\b")
+    private val ALT = COULEURS.joinToString("|")
+    /** « en jaune », « couleur jaune », « au jaune », « mets-le jaune », « passe-les orange », « terminé jaune »… */
+    private val R_COULEUR = Regex("(?:\\ben|\\bcouleur|\\bde couleur|\\bau|\\bdu|\\bavec(?: du| le| la)?|\\bmets?(?: le| la| les)?|\\bmettre(?: le| la| les)?|" +
+        "\\bpasse(?:r|s)?(?: le| la| les)?|\\bcolor\\w*(?: le| la| les)?(?: en)?|\\btermine(?:e|s|es)?|\\bfinie?s?|\\bfaite?s?)\\s+($ALT)\\b")
+    /** Couleur dite seule en fin de phrase : « …, jaune ». */
+    private val R_COULEUR_FIN = Regex("(?:^|[ ,])($ALT)\\s*$")
+    private val ANGLAIS = mapOf("yellow" to "jaune", "red" to "rouge", "green" to "vert", "dark green" to "vert fonce", "blue" to "bleu",
+        "light blue" to "bleu ciel", "sky blue" to "bleu ciel", "purple" to "violet", "violet" to "violet", "pink" to "rose", "orange" to "orange",
+        "grey" to "gris", "gray" to "gris", "black" to "noir", "white" to "blanc", "turquoise" to "turquoise", "lavender" to "lavande")
 
-    internal fun couleurDite(n: String): String? = R_COULEUR.find(n)?.groupValues?.get(1)
+    internal fun couleurDite(n: String): String? = R_COULEUR.find(n)?.groupValues?.get(1) ?: R_COULEUR_FIN.find(n.trim())?.groupValues?.get(1)
+
+    /** Nom de couleur reconnu (« Jaune », « yellow », « en jaune », « #F6BF26 ») ou null. */
+    internal fun couleurConnue(s: String?): String? {
+        val t = normaliser(s.orEmpty()).trim()
+        if (t.isBlank()) return null
+        if (s!!.trim().startsWith("#")) return s.trim()
+        return t.takeIf { it in COULEURS } ?: ANGLAIS[t] ?: couleurDite("en $t") ?: couleurDite(t)
+    }
     private fun affiche(c: String) = c.replace("vert fonce", "vert foncé")
 
     // ------------------------------------------------------------------ compréhension (sans IA)
@@ -74,7 +90,19 @@ object RdvTermines {
         // Impératif : « termine tous les rendez-vous d'hier », « clôture le rendez-vous Dupont ».
         Regex("\\b(?:termine|cloture|boucle|clos)\\s+(?:tous |toutes )?(?:les |mes |le |mon |ce |ces |la |ma )?(?:\\d+ )?(?:rendez vous|rdv|reunion|visite|consultation)s?\\b"),
     )
-    private val NEG = Regex("\\b(?:pas|plus|jamais) (?:encore )?(?:termine|fini|fait|acheve)e?s?\\b|\\bdemarque|\\b(?:enleve|retire|annule)r? (?:le |l etat )?(?:termine|fait)\\b|\\bremets? (?:le |la |mon |ma )?(?:rendez vous|rdv|reunion|visite) (?:en cours|a faire|comme avant)")
+    /**
+     * Retirer l'état terminé : « retire comme quoi le rendez-vous est terminé », « enlève la coche », « décoche-le »,
+     * « remets-le à faire », « il n'est plus terminé », « annule le rendez-vous terminé »…
+     */
+    private val NEG = listOf(
+        Regex("\\b(?:pas|plus|jamais|non) (?:encore |vraiment |du tout )?(?:termine|fini|fait|acheve)e?s?\\b"),
+        Regex("\\b(?:decoche|demarque|devalide)\\w*"),
+        Regex("\\b(?:enleve|retire|ote|annule|defai|supprime|efface)\\w*\\b.{0,60}\\b(?:comme quoi|l etat|le statut|le termine|le fini|le fait que|" +
+            "la coche|l encoche|le marquage|la marque|la mention|le check|marquee? comme|comme (?:termine|fini|fait)|coches?|encoches?|marquages?)"),
+        Regex("\\b(?:enleve|retire|ote|annule|defai)\\w*\\b.{0,40}\\b(?:rendez vous|rdv|reunion|visite)s? (?:termine|fini|marque|fait)e?s?\\b"),
+        Regex("\\b(?:remets?|remettre|repasse|repasser|reviens|revenir|rebascule|redevien\\w*)\\b.{0,60}\\b(?:a faire|en cours|non termine|pas termine|comme avant|en attente|normal|d origine|initial|a venir)\\b"),
+        Regex("\\b(?:comme|en) (?:a faire|non termine|pas termine)\\b"),
+    )
     private val QUESTION = Regex("^(?:est ce que|est ce qu|qu est ce|quand|pourquoi|comment|ou)\\b|\\b(?:se termine|se finit|finit a|termine a|termine vers|va (?:se )?terminer|a quelle heure|quelle heure|combien de temps|avant de|apres le|une fois (?:le|que))\\b")
     private val LISTER = Regex("\\b(?:quels?|quelles?|lesquels|lesquelles|liste|montre|combien)\\b.{0,40}\\b(?:rendez vous|rdv|reunions?|visites?)\\b.{0,40}\\b(?:termine|fini|fait)e?s?\\b|\\bmes (?:rendez vous|rdv) termines\\b")
     private val HEURE = Regex("\\b(?:de|a|pour|vers)? ?(\\d{1,2}) ?(?:h|heures?)(?: ?(\\d{2}))?\\b")
@@ -91,6 +119,9 @@ object RdvTermines {
         "premier", "premiere", "1er", "1ere", "deuxieme", "second", "seconde", "2e", "2eme", "troisieme", "3e", "3eme", "dernier", "derniere", "client", "cliente",
         "actuel", "cours", "qui", "que", "en", "vert", "fonce", "ciel", "par", "defaut", "toujours", "marques", "marquee", "marquees", "etat", "statut",
         "terminez", "cloturer", "boucler", "deux", "trois", "quatre", "cinq", "six", "ceux", "celles", "celui",
+        "retire", "retirer", "enleve", "enlever", "ote", "oter", "annule", "annuler", "supprime", "efface", "decoche", "decocher", "demarque",
+        "remets", "remettre", "repasse", "repasser", "quoi", "plus", "pas", "non", "faire", "coche", "encoche", "marquage", "mention",
+        "erreur", "etait", "avant", "normal", "attente", "venir", "origine", "les", "aussi", "mettre",
     ) + COULEURS.flatMap { it.split(' ') }
 
     /** « tous les rendez-vous », « les rendez-vous d'hier », « mes 3 rendez-vous », « … sont terminés » : tous ceux du jour visé. */
@@ -113,7 +144,7 @@ object RdvTermines {
             jour = date?.date, heure = h?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it in 0..23 }, minute = h?.groupValues?.get(2)?.toIntOrNull(),
             partie = partie,
             mots = sansHeure.split(' ').filter { it.length >= 3 && it !in VIDES && !it.all(Char::isDigit) },
-            chez = Regex("\\b(?:chez|avec) (?!moi\\b|nous\\b)").containsMatchIn(n),
+            chez = Regex("\\b(?:chez|avec) (?!moi\\b|nous\\b|la couleur\\b|du\\b|le terme\\b)").containsMatchIn(n),
             rang = RANGS.firstOrNull { (r, _) -> r.containsMatchIn(sansHeure) }?.second,
             tous = PLURIEL.any { it.containsMatchIn(n) },
         )
@@ -123,7 +154,7 @@ object RdvTermines {
         val o = texte.trim()
         if (o.isBlank() || o.length > 240) return null
         val n = DatesFr.normaliser(o).replace(Regex("^(?:(?:jarvis|ok|alors|bon|voila|bien)\\s+)+"), "")
-        if (!SUJET.containsMatchIn(n) || !Regex("termin|fini|fait|achev|clos|clotur|boucl|\\bfin\\b|comme marque").containsMatchIn(n)) return null
+        if (!SUJET.containsMatchIn(n) || !Regex("termin|fini|fait|achev|clos|clotur|boucl|\\bfin\\b|comme marque|a faire|coche|marquage|demarque").containsMatchIn(n)) return null
         // Réglages : « quand un rendez-vous est terminé, mets-le en gris », « la couleur seulement dans l'application ».
         val couleur = couleurDite(n)
         val google = when {
@@ -131,11 +162,16 @@ object RdvTermines {
             Regex("\\b(?:aussi|egalement) (?:dans|sur) google\\b|\\bsynchronise[rs]? (?:avec|dans|sur) google\\b").containsMatchIn(n) -> true
             else -> null
         }
-        val regle = Regex("\\b(?:quand|lorsque|des que|chaque fois que|a chaque fois qu?e?)\\b|\\b(?:par defaut|desormais|dorenavant|a l avenir|a partir de maintenant)\\b|\\bcouleur des (?:rendez vous|rdv)\\b|\\b(?:les|mes) (?:rendez vous|rdv) termines\\b")
+        // Règle pour l'avenir (« quand… », « désormais… », « pour les rendez-vous terminés… ») ; « mets mes rendez-vous
+        // terminés en jaune » sans mot de règle colore les rendez-vous eux-mêmes (avant : seul le réglage changeait).
+        val regle = Regex("\\b(?:quand|lorsque|des que|chaque fois que|a chaque fois qu?e?)\\b|\\b(?:par defaut|desormais|dorenavant|a l avenir|a partir de maintenant)\\b|\\bcouleur des (?:rendez vous|rdv)\\b|\\bpour (?:les|mes) (?:rendez vous|rdv) termines\\b")
+        val reglageGoogle = Regex("\\b(?:les|mes) (?:rendez vous|rdv) termines\\b")
         if ((couleur != null || google != null) && regle.containsMatchIn(n)) return Intention.Reglage(couleur, google)
-        if (LISTER.containsMatchIn(n)) return Intention.Lister(DatesFr.jour(n, aujourdhui, false)?.date)
+        if (google != null && reglageGoogle.containsMatchIn(n)) return Intention.Reglage(couleur, google)
+        // « mets mes rendez-vous terminés en jaune » est une action, pas une question.
+        if (couleur == null && LISTER.containsMatchIn(n)) return Intention.Lister(DatesFr.jour(n, aujourdhui, false)?.date)
         if (QUESTION.containsMatchIn(n)) return null
-        if (NEG.containsMatchIn(n)) return Intention.Reprendre(cible(o, aujourdhui))
+        if (NEG.any { it.containsMatchIn(n) }) return Intention.Reprendre(cible(o, aujourdhui))
         if (FINI.none { it.containsMatchIn(n) }) return null
         return Intention.Terminer(cible(o, aujourdhui), couleur)
     }
@@ -201,7 +237,9 @@ object RdvTermines {
     /** Marque [e] terminé : couleur demandée (sinon celle des rendez-vous terminés), sans rien écrire dans l'événement. */
     fun marquer(app: JarvisApp, e: EventInfo, couleur: String?): String {
         val st = app.store
-        val nom = couleur ?: st.rdvTermineCouleur.value.ifBlank { "vert" }
+        val demandee = couleurConnue(couleur)
+        val inconnue = couleur?.takeIf { it.isNotBlank() && demandee == null }
+        val nom = demandee ?: couleurConnue(st.rdvTermineCouleur.value) ?: "vert"
         val c = CalendarRepo.parseColor(nom) ?: CalendarRepo.parseColor("vert")!!
         val m = JSONObject().put("id", e.id).put("b", e.begin).put("t", e.title).put("c", c).put("nom", nom).put("ts", System.currentTimeMillis())
         // Déjà marqué terminé (nouvelle couleur) : la couleur d'origine reste celle d'avant le premier marquage.
@@ -228,7 +266,8 @@ object RdvTermines {
         val son = SilenceRdv.etat(app)?.takeIf { it.optLong("id") == e.id || m.optLong("exception") == it.optLong("id") }?.let {
             SilenceRdv.fin(app, null, manuel = true); " 🔔 Son rétabli."
         }.orEmpty()
-        return "✅ « ${e.title} » (${hm(e.begin, ZoneId.systemDefault())}) terminé — en ${affiche(nom)} $ou.$son"
+        return "✅ « ${e.title} » (${hm(e.begin, ZoneId.systemDefault())}) terminé — en ${affiche(nom)} $ou.$son" +
+            (inconnue?.let { " (couleur « $it » inconnue : couleur par défaut)" } ?: "")
     }
 
     /** Retire l'état terminé et rend au rendez-vous sa couleur d'avant. */
@@ -282,7 +321,7 @@ object RdvTermines {
             }
             is Intention.Reprendre -> when (val c = choisir(evenements(app, i.cible, aujourdhui), i.cible, maintenant, termines.keys, reprendre = true)) {
                 is Choix.Echec -> "📅 ${c.message}"
-                is Choix.Trouve -> c.l.joinToString("\n") { reprendre(app, it) }
+                is Choix.Trouve -> c.l.filter { cle(it) in termines }.ifEmpty { c.l }.joinToString("\n") { reprendre(app, it) }
             }
             else -> ""
         }

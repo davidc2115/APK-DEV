@@ -124,7 +124,8 @@ fun PlanningScreen(app: JarvisApp) {
 
     val termines = remember(store.rdvTermines.value) { fr.dd.jarvis.device.RdvTermines.lire(store.rdvTermines.value) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(day, range, refresh, store.hiddenCals.size) {
+    // Rendez-vous marqués terminés / repris depuis le chat ou la voix : la couleur (posée dans Google Agenda) est relue.
+    LaunchedEffect(day, range, refresh, store.hiddenCals.size, store.rdvTermines.value) {
         withContext(Dispatchers.IO) {
             cals = repo.calendars()
             events = repo.events(day, range)

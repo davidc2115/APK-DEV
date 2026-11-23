@@ -69,4 +69,29 @@ class RdvTerminesTest {
         assertNull(Carnet.intention("le rendez-vous avec Dupont est terminé, mets-le en gris"))
         assertNull(SilenceRdv.intention("le rendez-vous est terminé"))
     }
+
+    @Test fun couleurDemandeeComprise() {
+        fun c(t: String) = (RdvTermines.intention(t, auj) as? RdvTermines.Intention.Terminer)?.couleur
+        assertEquals("jaune", c("le rendez-vous est terminé, mets-le en jaune"))
+        assertEquals("jaune", c("rendez-vous terminé jaune"))
+        assertEquals("jaune", c("passe le rendez-vous comme terminé et mets-le jaune"))
+        assertEquals("jaune", c("le rendez-vous est terminé passe-le au jaune"))
+        assertEquals("orange", c("marque tous les rendez-vous de ce matin comme terminés avec la couleur orange"))
+        // Avant : simple réglage de la couleur par défaut, les rendez-vous restaient verts.
+        val tous = RdvTermines.intention("mets mes rendez-vous terminés en jaune", auj) as RdvTermines.Intention.Terminer
+        assertEquals("jaune", tous.couleur); assertTrue(tous.cible.tous)
+        assertEquals(RdvTermines.Intention.Reglage("gris", null), RdvTermines.intention("pour les rendez-vous terminés, mets-les en gris désormais", auj))
+        assertEquals("jaune", RdvTermines.couleurConnue("Yellow")); assertEquals("jaune", RdvTermines.couleurConnue(" Jaune "))
+        assertEquals("vert fonce", RdvTermines.couleurConnue("vert foncé")); assertNull(RdvTermines.couleurConnue("fuchsia-truc"))
+    }
+
+    @Test fun retirerEtatTermine() {
+        listOf("retire comme quoi le rendez-vous est terminé", "enlève le terminé du rendez-vous", "remets le rendez-vous à faire",
+            "repasse le rendez-vous en à faire", "décoche le rendez-vous terminé", "enlève la coche du rendez-vous",
+            "annule le rendez-vous terminé", "retire la marque terminé sur le rendez-vous de Dupont", "remets le rendez-vous comme non terminé",
+            "le rendez-vous n'est plus terminé").forEach {
+            assertTrue(it, RdvTermines.intention(it, auj) is RdvTermines.Intention.Reprendre)
+        }
+        assertEquals(listOf("dupont"), (RdvTermines.intention("retire la marque terminé sur le rendez-vous de Dupont", auj) as RdvTermines.Intention.Reprendre).cible.mots)
+    }
 }
