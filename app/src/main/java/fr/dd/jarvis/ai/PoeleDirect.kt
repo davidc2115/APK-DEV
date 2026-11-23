@@ -103,6 +103,243 @@ object PoeleDirect {
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { "🔥 " + Serveur.haService(app, domaine, service, id, donnees) }
     }
 
+    // ------------------------------------------------------------------ consigne : « règle le poêle du salon à 20 degrés »
+
+    /** [valeur] : consigne voulue (°C) ; sinon [ecart] : « monte d'un degré » (+1), « baisse de 2 degrés » (-2). */
+    data class Reglage(val valeur: Double?, val ecart: Double?, val lieu: List<String>, val tous: Boolean)
+
+    private val CHAUFFE = Regex("\\b(poeles?|poiles?|poils?|poel|granules?|pellets?|inserts?|stove|chauffages?|thermostats?|radiateurs?)\\b")
+    private val REGLER = Regex("\\b(regle|regler|reglez|reglez|mets|met|mettre|passe|passer|fixe|fixer|programme|change|changer|ajuste|ajuster|remets|remettre)\\b")
+    private val MONTER = Regex("\\b(monte|monter|remonte|remonter|augmente|augmenter|rehausse|pousse|chauffe plus)\\b")
+    private val BAISSER = Regex("\\b(baisse|baisser|diminue|diminuer|descends|descendre|redescends|reduis|reduire)\\b")
+    /** Programmation, mode, heure, question : laissés au cerveau. */
+    private val PAS_REGLAGE = Regex("\\b(demain|ce soir|cette nuit|dans|pendant|jusqu|quand|si|heures?|h|minutes?|min|mode|nuit|silence|eco|turbo|boost|puissance|" +
+        "ventil\\w*|programmation|chrono|est ce|combien|pourquoi|comment|quelle?s?|allume|allumer|rallume|eteins|eteindre)\\b")
+    private val NOMBRES = linkedMapOf("vingt neuf" to 29, "vingt huit" to 28, "vingt sept" to 27, "vingt six" to 26, "vingt cinq" to 25, "vingt quatre" to 24,
+        "vingt trois" to 23, "vingt deux" to 22, "vingt et un" to 21, "vingt et une" to 21, "dix neuf" to 19, "dix huit" to 18, "dix sept" to 17,
+        "seize" to 16, "quinze" to 15, "quatorze" to 14, "treize" to 13, "douze" to 12, "onze" to 11, "dix" to 10, "vingt" to 20, "trente" to 30,
+        "neuf" to 9, "huit" to 8, "sept" to 7, "six" to 6, "cinq" to 5, "quatre" to 4, "trois" to 3, "deux" to 2, "un" to 1, "une" to 1)
+    private val VIDES_REGLAGE = VIDES + setOf("regle", "regler", "mets", "met", "mettre", "passe", "passer", "fixe", "fixer", "programme", "change", "changer",
+        "ajuste", "ajuster", "remets", "remettre", "monte", "monter", "remonte", "augmente", "augmenter", "baisse", "baisser", "diminue", "diminuer",
+        "descends", "redescends", "reduis", "degre", "degres", "temperature", "consigne", "sa", "son", "un", "peu", "plus", "moins", "et", "demi", "demie",
+        "tous", "toutes", "deux", "chacun", "ensemble", "celui", "celle", "poele", "poeles", "chauffage", "chauffages", "thermostat", "radiateur", "radiateurs",
+        "pour", "c", "est", "fait", "faire", "reglage")
+
+    /** Lettres simples : minuscules sans accents, « 19,5 » gardé, ponctuation → espace. */
+    private fun simple(t: String) = java.text.Normalizer.normalize(t.lowercase(java.util.Locale.FRENCH), java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "").replace("°", " degres ").replace(Regex("(\\d)[.,](\\d)"), "$1#$2")
+        .replace(Regex("[^a-z0-9#]+"), " ").replace('#', '.').replace(Regex("\\s+"), " ").trim()
+
+    /** « vingt et un » → 21, « dix-neuf et demi » → 19.5 (la valeur et sa position dans le texte). */
+    private fun nombreEcrit(n: String): Pair<Double, IntRange>? {
+        for ((mot, v) in NOMBRES) {
+            val m = Regex("\\b$mot\\b(?! peu)( et demie?)?").find(n) ?: continue   // « un peu » n'est pas un nombre
+            return (v + if (m.groupValues[1].isNotBlank()) 0.5 else 0.0) to m.range
+        }
+        return null
+    }
+
+    /** Réglage de la température d'un poêle / chauffage (texte brut), ou null. */
+    fun reglage(texte: String): Reglage? {
+        val n = simple(texte)
+        if (n.split(' ').size > 16 || !CHAUFFE.containsMatchIn(n) || PAS_REGLAGE.containsMatchIn(n)) return null
+        val monter = MONTER.containsMatchIn(n); val baisser = BAISSER.containsMatchIn(n)
+        if (!REGLER.containsMatchIn(n) && !monter && !baisser && !Regex("\\b(temperature|consigne)\\b").containsMatchIn(n)) return null
+        val chiffre = Regex("\\b(\\d{1,2}(?:\\.\\d)?)\\b( et demie?)?").find(n)
+        val (v, ou) = chiffre?.let { m -> (m.groupValues[1].toDouble() + if (m.groupValues[2].isNotBlank()) 0.5 else 0.0) to m.range } ?: nombreEcrit(n) ?: (null to null)
+        val avant = if (ou != null) n.substring(0, ou.first) else n
+        // « monte le poêle de 2 degrés », « baisse d'un degré » : un écart ; « monte le poêle à 21 » : une valeur.
+        val relatif = (monter || baisser) && (ou == null || Regex("\\b(de|d)\\s*$").containsMatchIn(avant))
+        val reglage = when {
+            relatif -> {
+                val e = (v ?: if (Regex("\\bun peu\\b").containsMatchIn(n) || ou == null) 1.0 else return null)
+                if (e <= 0 || e > 5) return null
+                Reglage(null, if (baisser) -e else e, emptyList(), false)
+            }
+            v == null -> return null
+            v < 5 || v > 35 -> return null
+            else -> Reglage(v, null, emptyList(), false)
+        }
+        val tous = Regex("\\b(tous|toutes|les deux|les 2|chacun|ensemble|poeles|chauffages|radiateurs)\\b").containsMatchIn(n)
+        val reste = (if (ou != null) n.removeRange(ou) else n).split(' ')
+            .filter { it.length >= 2 && it !in VIDES_REGLAGE && !CHAUFFE.matches(it) && !it.any(Char::isDigit) && NOMBRES.keys.none { k -> k == it } }
+        if (reste.size > 3) return null
+        return reglage.copy(lieu = reste, tous = tous && reste.isEmpty())
+    }
+
+    /** Poêles (entités climate) visés par le réglage ; vide si introuvable, plusieurs pour « les poêles ». */
+    internal fun cibles(toutes: List<JSONObject>, r: Reglage, notees: List<String>): List<String> {
+        val paires = toutes.map { it.optString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
+        val climats = paires.filter { it.first.startsWith("climate.") }
+        if (r.tous) {
+            val poeles = climats.filter { (id, nom) -> POELE.containsMatchIn(texte(id, nom)) }.ifEmpty { climats }
+            return poeles.map { it.first }.sorted()
+        }
+        val id = choisir(paires, Demande(true, r.lieu), notees)
+        return listOfNotNull(id?.takeIf { it.startsWith("climate.") })
+    }
+
+    /** Consigne finale pour une entité : valeur demandée, ou consigne actuelle ± écart ; bornée et arrondie au pas du poêle. */
+    internal fun cible(r: Reglage, attributs: JSONObject?): Double? {
+        val a = attributs ?: JSONObject()
+        val brut = r.valeur ?: a.optDouble("temperature").takeIf { !it.isNaN() }?.plus(r.ecart ?: 0.0) ?: return null
+        val pas = a.optDouble("target_temp_step").takeIf { !it.isNaN() && it > 0 } ?: 0.5
+        val min = a.optDouble("min_temp").takeIf { !it.isNaN() } ?: 5.0
+        val max = a.optDouble("max_temp").takeIf { !it.isNaN() } ?: 35.0
+        return (Math.round(brut / pas) * pas).coerceIn(min, max)
+    }
+
+    /**
+     * Règle la consigne du poêle (Home Assistant, climate.set_temperature) et RELIT l'état : « réglé » seulement si le
+     * poêle affiche bien la nouvelle consigne. Avant, la phrase partait à l'IA, qui répondait « 20 degrés » sans rien
+     * régler. Null si ce n'est pas un réglage ou si Home Assistant n'est pas configuré (le cerveau reprend).
+     */
+    suspend fun executerReglage(app: JarvisApp, texte: String): String? {
+        val r = reglage(texte) ?: return null
+        if (!Serveur.haConfigure(app)) return null
+        val arr = JSONArray(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Serveur.ha(app, "GET", "/api/states") })
+        val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
+        val parId = toutes.associateBy { it.optString("entity_id") }
+        val notees = runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, "poele " + r.lieu.joinToString(" ")) }.getOrDefault(emptyList()).map { it.first }
+        val ids = cibles(toutes, r, notees)
+        if (ids.isEmpty()) {
+            val poeles = toutes.filter { it.optString("entity_id").startsWith("climate.") }
+                .map { it.optJSONObject("attributes")?.optString("friendly_name").orEmpty().ifBlank { it.optString("entity_id") } }
+            fr.dd.jarvis.voice.JournalVoix.noter("maison", "poêle : réglage ${r.valeur ?: r.ecart} → aucun poêle unique pour ${r.lieu}")
+            return if (poeles.size > 1) "🔥 Quel poêle régler : ${poeles.joinToString(" ou ")} ? (ou « les deux »)" else null
+        }
+        val lignes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            ids.map { id ->
+                val o = parId[id]
+                val nom = o?.optJSONObject("attributes")?.optString("friendly_name").orEmpty().ifBlank { id }
+                val t = cible(r, o?.optJSONObject("attributes")) ?: return@map "⚠️ $nom : consigne actuelle inconnue, dis la température voulue (« à 20 degrés »)."
+                fr.dd.jarvis.voice.JournalVoix.noter("maison", "poêle : climate.set_temperature $t → $id")
+                val res = runCatching { Serveur.haService(app, "climate", "set_temperature", id, JSONObject().put("temperature", t)) }
+                    .getOrElse { e -> return@map "❌ $nom : Home Assistant n'a pas accepté le réglage (${e.message ?: e.javaClass.simpleName})." }
+                val apres = runCatching { JSONObject(Serveur.ha(app, "GET", "/api/states/$id")) }.getOrNull() ?: o
+                val etat = apres?.optString("state").orEmpty()
+                val mesure = apres?.optJSONObject("attributes")?.optDouble("current_temperature")?.takeIf { !it.isNaN() }
+                val eteint = etat == "off"
+                when {
+                    etat == "unavailable" -> "⚠️ $nom est indisponible dans Home Assistant : consigne non prise."
+                    res.startsWith("✅") -> "🔥 $nom réglé à ${nombre(t)} °C" + (mesure?.let { " (il fait ${nombre(it)} °C)" } ?: "") +
+                        (if (eteint) ". Il est éteint : dis « allume le poêle » pour le démarrer." else ".")
+                    else -> "⚠️ $nom : consigne ${nombre(t)} °C envoyée, mais il affiche encore " +
+                        (apres?.optJSONObject("attributes")?.optDouble("temperature")?.takeIf { !it.isNaN() }?.let { "${nombre(it)} °C" } ?: "une autre consigne") +
+                        " — il ne l'a pas prise (hors ligne, ou réglage refusé par le poêle)."
+                }
+            }
+        }
+        return lignes.joinToString("\n")
+    }
+
+    // ------------------------------------------------------------------ modes : « mets le poêle du salon en mode nuit »
+
+    data class ModeDemande(val mode: Set<String>, val activer: Boolean, val lieu: List<String>, val tous: Boolean)
+
+    private val MODE_ON = Regex("\\b(mets|met|mettre|remets|passe|passer|repasse|active|activer|allume|allumer|lance|enclenche|bascule|basculer)\\b")
+    private val MODE_OFF = Regex("\\b(desactive|desactiver|enleve|enlever|retire|retirer|coupe|couper|eteins|eteindre|arrete|arreter|sors|sortir|quitte|quitter|stoppe)\\b")
+    private val MODE_NORMAL = Regex("\\b(normal|normale|standard|aucun|none|off|desactive|manuel|manual)\\b")
+    private val VIDES_MODE = VIDES + setOf("mode", "mets", "met", "mettre", "remets", "passe", "passer", "repasse", "active", "activer", "allume", "allumer",
+        "lance", "enclenche", "bascule", "basculer", "desactive", "desactiver", "enleve", "enlever", "retire", "retirer", "coupe", "couper", "eteins",
+        "eteindre", "arrete", "arreter", "sors", "sortir", "quitte", "quitter", "stoppe", "tous", "toutes", "deux", "chacun", "ensemble", "poeles")
+
+    /** Mode d'un poêle à activer / retirer (texte brut), ou null. */
+    fun modeDemande(texte: String): ModeDemande? {
+        val n = simple(texte)
+        if (n.split(' ').size > 14 || !POELE.containsMatchIn(n)) return null
+        if (Regex("\\d|\\b(degres?|temperature|demain|ce soir|dans|pendant|jusqu|quand|si|est ce|combien|pourquoi|quel|quelle)\\b").containsMatchIn(n)) return null
+        val groupe = SYNONYMES_MODE.firstOrNull { g -> g.any { Regex("\\b$it\\b").containsMatchIn(n) } } ?: return null
+        val off = MODE_OFF.containsMatchIn(n)
+        if (!off && !MODE_ON.containsMatchIn(n)) return null
+        val tous = Regex("\\b(tous|toutes|les deux|les 2|chacun|ensemble|poeles)\\b").containsMatchIn(n)
+        val lieu = n.split(' ').filter { it.length >= 2 && it !in VIDES_MODE && !POELE.matches(it) && it !in groupe }
+        if (lieu.size > 3) return null
+        return ModeDemande(groupe, !off, lieu, tous && lieu.isEmpty())
+    }
+
+    /** Une commande Home Assistant : (domaine, service, entité, données). */
+    data class Commande(val domaine: String, val service: String, val id: String, val donnees: JSONObject?)
+
+    /**
+     * Commandes pour le mode demandé, poêle par poêle : préréglage de son entité climate (preset_modes), sinon son
+     * interrupteur ou sélecteur de ce mode (au bon endroit). Null si introuvable ou ambigu (le cerveau reprend).
+     */
+    internal fun commandesMode(toutes: List<JSONObject>, d: ModeDemande, notees: List<String> = emptyList()): List<Commande>? {
+        val parId = toutes.associateBy { it.optString("entity_id") }
+        val paires = toutes.map { it.optString("entity_id") to it.optJSONObject("attributes")?.optString("friendly_name").orEmpty() }
+        fun t(id: String) = texte(id, parId[id]?.optJSONObject("attributes")?.optString("friendly_name").orEmpty())
+        fun contientMode(x: String) = d.mode.any { x.contains(" $it") }
+        val climats = paires.filter { it.first.startsWith("climate.") }
+        // Poêles visés : celui du lieu (ou noté), ou tous pour « les poêles ».
+        val visés: List<String?> = if (d.tous) climats.filter { (id, nom) -> POELE.containsMatchIn(texte(id, nom)) }.ifEmpty { climats }.map { it.first }.ifEmpty { listOf(null) }
+            else listOf(choisir(paires, Demande(true, d.lieu), notees))
+        val res = mutableListOf<Commande>()
+        for (climat in visés) {
+            // 1. Préréglage de l'entité climate (« night », « eco »…).
+            val presets = climat?.let { parId[it]?.optJSONObject("attributes")?.optJSONArray("preset_modes") }?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+            val preset = if (d.activer) presets.firstOrNull { contientMode(" " + normaliser(it) + " ") }
+                else presets.firstOrNull { MODE_NORMAL.containsMatchIn(normaliser(it)) }
+            if (climat != null && preset != null) { res += Commande("climate", "set_preset_mode", climat, JSONObject().put("preset_mode", preset)); continue }
+            // 2. Interrupteur / sélecteur de ce mode, au lieu demandé et rattaché à ce poêle.
+            val jetons = climat?.substringAfter('.')?.split('_')?.filter { it.length >= 3 }.orEmpty()
+            fun duPoele(id: String): Boolean {
+                val x = t(id)
+                val lieuOk = if (d.lieu.isEmpty()) true else lieuOk(x, d.lieu)
+                val rattache = POELE.containsMatchIn(x) || jetons.any { x.contains(" $it") } ||
+                    Regex("\\b(mcz|maestro|palazzetti|edilkamin|rika|extraflame|ravelli|micronova|fumis|cadel|laminox|piazzetta)\\b").containsMatchIn(x)
+                return lieuOk && rattache
+            }
+            val notee = notees.firstOrNull { id -> id in parId && (id.startsWith("switch.") || id.startsWith("input_boolean.")) && contientMode(t(id)) }
+            val inters = (listOfNotNull(notee) + paires.map { it.first }.filter { id ->
+                (id.startsWith("switch.") || id.startsWith("input_boolean.")) && contientMode(t(id)) && duPoele(id)
+            }).distinct()
+            if (inters.size == 1 && (notee != null || d.tous || d.lieu.isNotEmpty() || climats.size <= 1)) {
+                val dom = inters.single().substringBefore('.')
+                res += Commande(dom, if (d.activer) "turn_on" else "turn_off", inters.single(), null); continue
+            }
+            val selects = paires.map { it.first }.filter { id -> (id.startsWith("select.") || id.startsWith("input_select.")) && duPoele(id) }
+                .mapNotNull { id ->
+                    val options = parId[id]?.optJSONObject("attributes")?.optJSONArray("options")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+                    val option = if (d.activer) options.firstOrNull { contientMode(" " + normaliser(it) + " ") } else options.firstOrNull { MODE_NORMAL.containsMatchIn(normaliser(it)) }
+                    option?.let { id to it }
+                }
+            if (selects.size == 1 && (d.tous || d.lieu.isNotEmpty() || climats.size <= 1)) {
+                val (id, option) = selects.single()
+                res += Commande(id.substringBefore('.'), "select_option", id, JSONObject().put("option", option)); continue
+            }
+            return null
+        }
+        return res.ifEmpty { null }
+    }
+
+    /** « Mets le poêle du salon en mode nuit » : exécuté puis relu dans Home Assistant ; null si introuvable (le cerveau reprend). */
+    suspend fun executerMode(app: JarvisApp, texte: String): String? {
+        val d = modeDemande(texte) ?: return null
+        if (!Serveur.haConfigure(app)) return null
+        val arr = JSONArray(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Serveur.ha(app, "GET", "/api/states") })
+        val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
+        val notees = runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, "poele " + d.lieu.joinToString(" ") + " mode " + d.mode.first()) }.getOrDefault(emptyList()).map { it.first }
+        val cmds = commandesMode(toutes, d, notees) ?: run {
+            fr.dd.jarvis.voice.JournalVoix.noter("maison", "poêle : mode ${d.mode.first()} ${d.lieu} → aucune entité unique, le cerveau reprend")
+            return null
+        }
+        val nomMode = d.mode.first().let { if (it == "eco") "éco" else it }
+        val lignes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            cmds.map { c ->
+                fr.dd.jarvis.voice.JournalVoix.noter("maison", "poêle : ${c.domaine}.${c.service} → ${c.id}")
+                val nom = toutes.firstOrNull { it.optString("entity_id") == c.id }?.optJSONObject("attributes")?.optString("friendly_name").orEmpty().ifBlank { c.id }
+                val r = runCatching { Serveur.haService(app, c.domaine, c.service, c.id, c.donnees?.let { JSONObject(it.toString()) }) }.getOrElse { "❌ ${it.message}" }
+                when {
+                    r.startsWith("✅") -> "🔥 $nom : mode $nomMode ${if (d.activer) "activé" else "retiré"}."
+                    r.contains("INDISPONIBLE") -> "⚠️ $nom est indisponible dans Home Assistant : mode $nomMode non appliqué."
+                    else -> "⚠️ $nom : mode $nomMode demandé, mais Home Assistant ne le confirme pas (l'appareil n'a peut-être pas suivi)."
+                }
+            }
+        }
+        return lignes.joinToString("\n")
+    }
+
     private val APPAREIL_MAISON = Regex("\\b(poeles?|poiles?|poils?|granules?|pellets?|inserts?|chauffage|radiateurs?|thermostat|clim|climatisation|pac|vmc|ventilation|ventilateurs?|aspirateur|robot|lave linge|lave vaisselle|seche linge|four|hotte|chaudiere|chauffe eau|deshumidificateur|purificateur|home assistant)\\b")
     private val TELEPHONE = Regex("\\b(telephone|portable|smartphone|mobile|tel|sonnerie|vibreur|ne pas deranger|npd)\\b")
 

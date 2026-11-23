@@ -137,6 +137,7 @@ object Routines {
     internal fun consigne(r: Routine, contexte: String = ""): String =
         "Routine « ${r.nom} »" + (if (contexte.isNotBlank()) " ($contexte)" else "") +
             " : exécute ces actions dans l'ordre avec tes outils, sans redemander de confirmation (sauf action sensible), " +
+            "sans jamais administrer, recharger ni redémarrer Home Assistant ou le serveur, " +
             "puis réponds par un compte rendu très court, une ligne par action commençant par ✅ ou ❌ :\n" +
             r.actions.mapIndexed { i, a -> "${i + 1}. $a" }.joinToString("\n")
 
@@ -149,7 +150,7 @@ object Routines {
     suspend fun executer(app: JarvisApp, r: Routine, contexte: String = "", tools: ToolBox? = null): String {
         marquer(app, r)
         if (r.actions.isEmpty()) return "La routine « ${r.nom} » n'a aucune action : ajoute-en dans Réglages › Agents › Routines."
-        val brain = Brain(app.llm, tools ?: ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }
+        val brain = Brain(app.llm, tools ?: ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.apply { enRoutine = true }
         val debut = System.currentTimeMillis()
         val lignes = mutableListOf<String>()
         val pourIA = mutableListOf<String>()
