@@ -66,57 +66,118 @@ object MusiqueBibliotheque {
 
     private fun cliquer(n: AccessibilityNodeInfo?): Boolean = cliquable(n)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
 
+    private fun titre(c: MediaController?): String? = c?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { it.isNotBlank() }
+    private fun joue(c: MediaController?) = c?.playbackState?.state == PlaybackState.STATE_PLAYING
+
+    /** JARVIS va lancer de la musique : il rend le focus audio de la conversation et revérifiera la lecture à la fin. */
+    private fun preparerLecture(paquet: String) {
+        LectureGarantie.noter(paquet)
+        fr.dd.jarvis.voice.VoiceManager.laisserPlaceMusique()
+    }
+
     /**
-     * Envoie PLAY à la vraie session multimédia puis attend sa confirmation.
+     * Démarre la lecture de ce qui vient d'être ouvert (playlist, album…) et attend la confirmation du lecteur.
      * Le simple fait d'ouvrir une playlist ou son écran n'est jamais considéré comme une lecture démarrée.
+     * Pas en lecture au bout de 4 s : les méthodes de relance du téléphone (lecture, touche lecture, pause puis lecture,
+     * bouton de l'appli) — avant, la même commande « lecture » répétée 20 fois, ignorée par un lecteur dont la demande
+     * de focus audio avait échoué pendant que JARVIS parlait.
      */
     suspend fun demarrerLecture(ctx: Context, paquet: String, aleatoire: Boolean = false, repetition: String = "aucune"): Boolean {
+        preparerLecture(paquet)
+        val avant = titre(controleur(ctx, paquet))
         // Ne jamais cliquer sur le bouton « Aléatoire » pour démarrer : dans YT Music il peut basculer
         // un état déjà actif et produire exactement l'inverse du mode demandé. Le mode est envoyé à la session.
         // Correspondance exacte : « Lecture » ne doit surtout pas correspondre à « Lecture aléatoire ».
         val bouton = attendre(paquet, BOUTONS_LECTURE, 2200, exact = true)
         if (bouton != null) cliquer(bouton)
         var modeEnvoye = false
-        var debutBuffering = 0L
-        var relanceApresBuffering = false
-        repeat(20) {
+        val fin = System.currentTimeMillis() + 4000
+        while (System.currentTimeMillis() < fin) {
             val c = controleur(ctx, paquet)
             if (c != null) {
-                if (!modeEnvoye) {
-                    appliquerMode(ctx, c, aleatoire, repetition)
-                    modeEnvoye = true
-                }
-                val etat = c.playbackState?.state
-                if (etat == PlaybackState.STATE_BUFFERING) {
-                    if (debutBuffering == 0L) debutBuffering = System.currentTimeMillis()
-                    // Certains lecteurs restent bloqués en BUFFERING après une première commande PLAY.
-                    // Une seule relance après 4 s débloque parfois la session sans envoyer PLAY en boucle.
-                    if (!relanceApresBuffering && System.currentTimeMillis() - debutBuffering >= 4000L) {
-                        runCatching { c.transportControls.play() }
-                        relanceApresBuffering = true
-                    }
-                } else {
-                    debutBuffering = 0L
-                    if (etat != PlaybackState.STATE_PLAYING) runCatching { c.transportControls.play() }
-                }
-                delay(500)
-                // BUFFERING prouve seulement que le lecteur prépare le flux, pas que la lecture a réellement démarré.
-                // On attend jusqu'à 10 s l'état PLAYING avant d'annoncer le succès à l'utilisateur.
-                val confirme = controleur(ctx, paquet)?.playbackState?.state
-                if (confirme == PlaybackState.STATE_PLAYING) return true
-            } else {
-                debutBuffering = 0L
-                // Sans accès aux sessions, un libellé Pause visible est le seul indice UI acceptable.
-                if (attendre(paquet, listOf("Pause", "Mettre en pause", "Pause la lecture"), 180, exact = false) != null) return true
-                delay(300)
-            }
+                if (!modeEnvoye && titre(c) != null) { appliquerMode(ctx, c, aleatoire, repetition); modeEnvoye = true }
+                if (joue(c)) return true
+            } else if (attendre(paquet, listOf("Pause", "Mettre en pause", "Pause la lecture"), 180, exact = false) != null) return true
+            delay(400)
         }
-        return false
+        val c = controleur(ctx, paquet) ?: return false
+        if (!modeEnvoye) appliquerMode(ctx, c, aleatoire, repetition)
+        // Ni bouton Lecture ni nouveau morceau : « lecture » relancerait l'ANCIEN morceau → pas de fausse réussite.
+        if (bouton == null && titre(c) == avant) return false
+        val app = ctx.applicationContext as? fr.dd.jarvis.JarvisApp ?: return false
+        return app.phone.forcerLecture(paquet, "bibliothèque")
+    }
+
+    enum class Lancement { LECTURE, OUVERT, ECHEC }
+
+    /**
+     * Liste « J'aime » (titres aimés, playlist « LM » du compte de l'appli) : ouverte par lien, sans parcourir l'écran —
+     * marche aussi téléphone verrouillé. Vérifie que la liste a VRAIMENT été chargée (le morceau change) : avant, un
+     * lien ignoré laissait « lecture » relancer l'ancien morceau, annoncé comme ta liste J'aime. Si le lien de lecture
+     * ne charge rien, page de la playlist + bouton « Lecture ». En aléatoire, passe au titre suivant pour ne pas
+     * toujours commencer par le même.
+     */
+    suspend fun jouerJaime(ctx: Context, paquet: String, aleatoire: Boolean, repetition: String): Lancement {
+        val c0 = controleur(ctx, paquet)
+        val avant = titre(c0)
+        preparerLecture(paquet)
+        val liens = listOf("https://music.youtube.com/watch?list=LM", "https://music.youtube.com/playlist?list=LM")
+        var charge: MediaController? = null
+        for ((i, lien) in liens.withIndex()) {
+            if (!YtMusique.ouvrirLien(ctx, paquet, lien)) continue
+            var bouton = i == 0
+            val fin = System.currentTimeMillis() + (if (i == 0) 7000 else 9000)
+            while (System.currentTimeMillis() < fin) {
+                delay(400)
+                // Page de la playlist : bouton « Lecture » (jamais « Aléatoire » : le mode est envoyé à la session).
+                if (!bouton) racine(paquet)?.let { r -> trouver(r, BOUTONS_LECTURE)?.let { b -> cliquer(b); bouton = true } }
+                val c = controleur(ctx, paquet) ?: continue
+                val t = titre(c) ?: continue
+                // Nouveau morceau, ou file d'attente nommée « J'aime » (si le premier titre aimé est celui qui jouait déjà).
+                val file = normaliser(c.queueTitle?.toString().orEmpty())
+                if (t != avant || file.contains("j aime") || file.contains("liked") || file.contains("titres aimes")) { charge = c; break }
+            }
+            if (charge != null) break
+            fr.dd.jarvis.voice.JournalVoix.noter("musique", "J'aime : le lien ${if (i == 0) "de lecture" else "de la playlist"} n'a pas chargé la liste")
+        }
+        val c = charge ?: run { LectureGarantie.oublier(); return Lancement.ECHEC }
+        appliquerMode(ctx, c, aleatoire, repetition)
+        if (aleatoire) { delay(300); runCatching { c.transportControls.skipToNext() } }
+        repeat(6) { if (joue(controleur(ctx, paquet))) return Lancement.LECTURE; delay(350) }
+        val app = ctx.applicationContext as? fr.dd.jarvis.JarvisApp ?: return Lancement.OUVERT
+        return if (app.phone.forcerLecture(paquet, "J'aime")) Lancement.LECTURE else Lancement.OUVERT
+    }
+
+    // ------------------------------------------------------------------ playlists personnelles déjà vues
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("musique_bibliotheque", Context.MODE_PRIVATE)
+
+    /** Retient les noms des playlists de ta bibliothèque (lues à l'écran) : « mets la playlist sport » ira chez toi. */
+    fun memoriserPlaylists(ctx: Context, noms: Collection<String>) {
+        if (noms.isEmpty()) return
+        val deja = prefs(ctx).getStringSet("playlists", emptySet()).orEmpty()
+        val tout = (deja + noms.map { it.trim() }.filter { it.length > 1 }).take(300).toSet()
+        prefs(ctx).edit().putStringSet("playlists", tout).apply()
+    }
+
+    /** Nom exact d'une playlist de ta bibliothèque qui correspond à [demande] (« la playlist Sport » → « Sport »), ou null. */
+    fun playlistConnue(ctx: Context, demande: String): String? {
+        val connues = prefs(ctx).getStringSet("playlists", emptySet()).orEmpty()
+        return playlistParmi(connues, demande)
+    }
+
+    internal fun playlistParmi(connues: Collection<String>, demande: String): String? {
+        val q = normaliser(demande).replace(Regex("^(?:(?:la|ma|mes|les) )?(?:playlist |liste )?"), "").trim()
+        if (q.length < 2) return null
+        return connues.firstOrNull { normaliser(it) == q }
     }
 
     /** Ouvre l'appli sur la bibliothèque, filtre [section] sélectionné. Renvoie une erreur lisible, ou null si c'est bon. */
     private suspend fun ouvrirSection(ctx: Context, paquet: String, section: String): String? {
         if (service() == null) return "Il faut le service d'accessibilité de JARVIS pour lire ta bibliothèque (Réglages › Téléphone › Contrôle)."
+        // Playlists, albums… ne se trouvent qu'en parcourant l'appli à l'écran (YT Music ne les donne qu'à son compte connecté).
+        val verrouille = runCatching { (ctx.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager).isKeyguardLocked }.getOrDefault(false)
+        if (verrouille) return "Téléphone verrouillé : pour ta bibliothèque (playlists, albums…), JARVIS doit parcourir l'appli à l'écran. Déverrouille-le puis redemande. (Tes titres J'aime, eux, se lancent même verrouillé.)"
         val lancement = ctx.packageManager.getLaunchIntentForPackage(paquet) ?: return "Appli de musique introuvable."
         ctx.startActivity(lancement.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         val onglet = attendre(paquet, ONGLET_BIBLIO, 8000) ?: return "Onglet « Bibliothèque » introuvable dans l'appli."
@@ -165,6 +226,7 @@ object MusiqueBibliotheque {
         ouvrirSection(ctx, paquet, section)?.let { return emptyList<Element>() to it }
         delay(600)
         val l = lireListe(paquet, pages)
+        if (section == "playlists") memoriserPlaylists(ctx, l.map { it.titre })
         return l to (if (l.isEmpty()) "Rien de lisible dans « $section » (bibliothèque vide, ou compte non connecté dans l'appli)." else null)
     }
 
@@ -185,6 +247,8 @@ object MusiqueBibliotheque {
             delay(700)
         }
         if (cible == null) return "❌ « $nom » introuvable dans ta bibliothèque (${section})."
+        val nomReel = (cible.text ?: cible.contentDescription)?.toString()?.trim()?.takeIf { it.isNotBlank() } ?: nom
+        if (section == "playlists") memoriserPlaylists(ctx, listOf(nomReel))
         if (!cliquer(cible)) return "❌ Impossible d'ouvrir « $nom »."
         delay(900)
         return if (demarrerLecture(ctx, paquet, aleatoire, repetition)) {

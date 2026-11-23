@@ -823,7 +823,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 val microMot = fr.dd.jarvis.voice.VoskWake.microActuel
                 val microDemande = fr.dd.jarvis.voice.MicroJarvis.dernier
                 Text("🎙️ Quel micro ?\n" +
-                    "• Mot « Jarvis » : ${microMot ?: "micro du téléphone (écoute arrêtée en ce moment)"}. Il écoute en continu ; Android ne prête le micro de la voiture à aucune appli en écoute permanente (il faudrait passer la voiture en mode « appel » et couper la musique sans arrêt). En voiture, l'écoute devient continue, avec gain ×10 et réduction du bruit.\n" +
+                    "• Mot « Jarvis » : ${microMot ?: "micro du téléphone (écoute arrêtée en ce moment)"}. Il écoute en continu ; Android ne prête le micro de la voiture à aucune appli en écoute permanente (il faudrait passer la voiture en mode « appel » et couper la musique sans arrêt). Sur le téléphone : gain automatique ×5 et seuil abaissé ; en voiture : écoute continue, gain ×10 et réduction du bruit.\n" +
                     "• Ta demande, après le bip : micro de la voiture quand JARVIS est ouvert sur l'écran Android Auto (sinon micro du téléphone)" +
                     (microDemande?.let { ". Dernière demande écoutée par le $it." } ?: ".") + "\n" +
                     "Conseil : téléphone sur un support, bas du téléphone (son micro) dégagé — pas dans une poche ni un vide-poche.",

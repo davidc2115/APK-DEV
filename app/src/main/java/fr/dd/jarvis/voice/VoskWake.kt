@@ -160,7 +160,7 @@ class VoskWake(
     private val francais = VoskModel.francais(ctx)
     /** En voiture (écoute continue, gain fort) : seuil un peu plus bas — un « Jarvis » dit doucement passe. */
     @Volatile private var voitureActive = false
-    private fun seuil() = if (francais) when (exigence) { 1 -> if (voitureActive) 0.5 else 0.6; 2 -> if (voitureActive) 0.72 else 0.8; else -> 0.9 }
+    private fun seuil() = if (francais) when (exigence) { 1 -> if (voitureActive) 0.5 else 0.55; 2 -> if (voitureActive) 0.72 else 0.78; else -> 0.9 }
         else when (exigence) { 1 -> 0.88; 2 -> 0.93; else -> 0.97 }
 
     companion object {
@@ -359,11 +359,12 @@ class VoskWake(
          * n'importe où dans ce qu'elles entendent.
          */
         private fun boucle(ar: android.media.AudioRecord, taille: Int) {
-            val porte = PorteVocale()
+            val porte = PorteVocale().apply { sensible = true }
             val avant = ArrayDeque<ShortArray>()
             val buf = ShortArray(taille)
             val app = ctx.applicationContext as? fr.dd.jarvis.JarvisApp
             val gain = GainAuto(cible = 3000.0, max = 10.0)
+            val gainTel = GainAuto(cible = 2500.0, max = 5.0)
             var voiture = false; var musique = false; var compte = 0
             var rec2: Recognizer? = null
             var trames1 = 0; var trames2 = -FENETRE_MUSIQUE / 2
@@ -376,7 +377,8 @@ class VoskWake(
                     if (compte++ % 10 == 0) {
                         voiture = app?.enVoiture == true
                         voitureActive = voiture
-                        porte.sensible = voiture
+                        // Téléphone aussi : porte qui s'ouvre sur une voix basse (avant : seulement en voiture).
+                        porte.sensible = true
                         // En voiture : écoute CONTINUE, avec ou sans musique — le bruit de la route gardait la porte ouverte
                         // (phrase jamais terminée, « Jarvis » plus en tête) ou la fermait sur une voix basse.
                         val m = voiture
@@ -388,7 +390,8 @@ class VoskWake(
                         }
                     }
                     val rms = PorteVocale.rms(buf, n)
-                    val trame = if (voiture) gain.appliquer(buf, n, rms) else buf
+                    // Gain automatique partout (×5 au plus sur le téléphone, ×10 en voiture) : « Jarvis » dit doucement ou de loin.
+                    val trame = if (voiture) gain.appliquer(buf, n, rms) else gainTel.appliquer(buf, n, rms)
                     if (musique) {
                         // Écoute continue : chaque reconnaissance travaille sur des tranches de 3 s, la 2e décalée de 1,5 s.
                         if (rec.acceptWaveForm(trame, n)) verifier(rec.result, nImporteOu = true)
@@ -459,7 +462,12 @@ internal class GainAuto(private val cible: Double = 2500.0, private val max: Dou
         val voulu = (cible / niveau.coerceAtLeast(60.0)).coerceIn(1.0, max)
         gain += (voulu - gain) * 0.2
         if (gain <= 1.01) return b
-        return ShortArray(n) { (b[it] * gain).coerceIn(-32768.0, 32767.0).toInt().toShort() }
+        // Limiteur : une voix forte juste après un silence n'est pas écrêtée (le gain s'adapte en ~0,5 s seulement).
+        var crete = 1
+        for (i in 0 until n) { val v = kotlin.math.abs(b[i].toInt()); if (v > crete) crete = v }
+        val g = minOf(gain, 30_000.0 / crete)
+        if (g <= 1.01) return b
+        return ShortArray(n) { (b[it] * g).coerceIn(-32768.0, 32767.0).toInt().toShort() }
     }
 }
 

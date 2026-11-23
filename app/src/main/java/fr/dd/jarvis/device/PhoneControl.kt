@@ -353,6 +353,14 @@ class PhoneControl(private val ctx: Context) {
         // démarrer. Sa réponse baissera la musique au lieu de l'arrêter, et la lecture est revérifiée en fin de conversation.
         LectureGarantie.noter(pkg)
         fr.dd.jarvis.voice.VoiceManager.laisserPlaceMusique()
+        // Android Auto / téléphone verrouillé : l'appli ouverte par lien reste DERRIÈRE l'écran de verrouillage et Android
+        // lui refuse alors le son (lecture qui ne démarre pas — alors que tout marche téléphone en main). On demande
+        // d'abord au lecteur lui-même, par sa session, comme le fait Android Auto (« Ok Google, mets … ») ; le lien ne
+        // sert que si sa session ne répond pas.
+        val voiture = (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.enVoiture == true
+        val horsEcran = voiture || !ecranAllume()
+        if (horsEcran && !radio && choisi.type in setOf(YtMusique.Type.TITRE, YtMusique.Type.VIDEO))
+            parSession(pkg, choisi, avant, voiture)?.let { return it }
         if (!YtMusique.ouvrir(ctx, pkg, choisi, radio)) return null
         var c: android.media.session.MediaController? = null
         var modeEnvoye = false
@@ -369,8 +377,9 @@ class PhoneControl(private val ctx: Context) {
             val maintenant = System.currentTimeMillis()
             c = session(pkg)
             if (c == null) {
-                // Toujours pas de lecteur au bout de 4 s : touche « lecture » (va à l'appli qui vient de s'ouvrir).
-                if (!toucheEnvoyee && maintenant - debut > 4000) { toucheEnvoyee = true; mediaKey("play"); essais += "touche média" }
+                // Toujours pas de lecteur au bout de 4 s : touche « lecture » (va à l'appli qui vient de s'ouvrir). Pas en
+                // Android Auto : la touche irait à la carte JARVIS de la voiture, qui ouvrirait le micro.
+                if (!toucheEnvoyee && !voiture && maintenant - debut > 4000) { toucheEnvoyee = true; mediaKey("play"); essais += "touche média" }
                 continue
             }
             if (!modeEnvoye) {
@@ -400,6 +409,45 @@ class PhoneControl(private val ctx: Context) {
         val artiste = choisi.sousTitre.substringBefore(" • ").trim()
         val morceau = listOf(choisi.titre, artiste).filter { it.isNotBlank() }.joinToString(" — ")
         return if (joueBien) morceau else "$morceau (lecture non confirmée)"
+    }
+
+    /**
+     * Lecture demandée au lecteur par SA session (Android Auto, écran verrouillé) : lien du morceau, sinon recherche
+     * « titre artiste ». Réponse « Titre — Artiste » si le bon morceau joue, null pour passer au lien.
+     */
+    private fun parSession(pkg: String, choisi: YtMusique.Resultat, avant: String?, voiture: Boolean): String? {
+        val c0 = session(pkg) ?: run { fr.dd.jarvis.voice.JournalVoix.noter("musique", "pas de session du lecteur : ouverture par lien"); return null }
+        val actions = c0.playbackState?.actions ?: 0L
+        val parUri = actions and android.media.session.PlaybackState.ACTION_PLAY_FROM_URI != 0L
+        val lien = choisi.lien(false)
+        val recherche = listOf(choisi.titre, choisi.sousTitre.substringBefore(" • ").substringBefore(" · ")).filter { it.isNotBlank() }.joinToString(" ")
+        val methode = runCatching {
+            if (parUri && lien != null) { c0.transportControls.playFromUri(android.net.Uri.parse(lien), android.os.Bundle()); "lien par la session" }
+            else { c0.transportControls.playFromSearch(recherche, android.os.Bundle()); "recherche par la session" }
+        }.getOrElse { fr.dd.jarvis.voice.JournalVoix.noter("musique", "session du lecteur : commande refusée (${it.message})"); return null }
+        // Rien de chargé au bout de 2,5 s : la session ignore la commande → lien sans attendre davantage.
+        var fin = System.currentTimeMillis() + 2500
+        val limite = System.currentTimeMillis() + 9000
+        var relance = 0
+        var bonDepuis = 0L
+        while (System.currentTimeMillis() < minOf(fin, limite)) {
+            Thread.sleep(400)
+            val c = session(pkg) ?: continue
+            val t = titreDe(c)
+            val bon = t != null && t != avant && correspond(c, choisi.titre)
+            if (bon && bonDepuis == 0L) { bonDepuis = System.currentTimeMillis(); fin = bonDepuis + 6000 }
+            else if (t != avant && t != null && fin - System.currentTimeMillis() < 2500) fin = System.currentTimeMillis() + 2500   // ça charge
+            if (bon && joue(c)) {
+                fr.dd.jarvis.voice.JournalVoix.noter("musique", "« ${choisi.titre} » en lecture ($methode, ${if (voiture) "Android Auto" else "écran verrouillé"})")
+                YtMusique.retenir(listOf(choisi))
+                return listOfNotNull(c.metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE), c.metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST))
+                    .filter { it.isNotBlank() }.joinToString(" — ").ifBlank { choisi.titre }
+            }
+            // Bon morceau chargé mais en pause : les méthodes de relance, une toutes les 1,5 s.
+            if (bon && relance < 3 && System.currentTimeMillis() - bonDepuis > 1500L * (relance + 1)) { relancerLecture(c, pkg, relance); relance++ }
+        }
+        fr.dd.jarvis.voice.JournalVoix.noter("musique", "session du lecteur ($methode, actions ${java.lang.Long.toHexString(actions)}) : « ${choisi.titre} » pas lancé → ouverture par lien")
+        return null
     }
 
     /**

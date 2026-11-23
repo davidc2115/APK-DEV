@@ -1015,6 +1015,14 @@ class ToolBox(
                 val pkgChoisi = dispo[appli] ?: appli
                 if (toujours && appli.isNotBlank()) app.store.setAppPref("musique", pkgChoisi)
                 val requete = a.optString("requete")
+                // Ta bibliothèque YT Music (« mes titres J'aime », « ma playlist sport », ou une playlist déjà vue chez toi) :
+                // lancée depuis ton compte, pas cherchée dans le catalogue public (qui trouvait une chanson « J'aime »).
+                val ytm = fr.dd.jarvis.device.YtMusique.paquet(app) != null &&
+                    (fr.dd.jarvis.device.YtMusique.estYtm(pkgChoisi) || Regex("(?i)yt music|youtube music|morphe").containsMatchIn(appli))
+                val biblio = if (!ytm) null else DemandeBibliotheque.analyser(CommandesDirectes.plat(requete).trim().replace(Regex("\\s+"), " "))
+                    ?: fr.dd.jarvis.device.MusiqueBibliotheque.playlistConnue(app, requete)?.let { DemandeBibliotheque.Demande("playlists", it) }
+                if (biblio != null) return musique.execute("musique_bibliotheque", JSONObject().put("section", biblio.section).put("nom", biblio.nom)
+                    .put("mode", a.optString("mode").ifBlank { biblio.mode }))
                 val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(requete, pkgChoisi) }
                 // Lecture non confirmée : Jarvis prend l'écran, termine dans l'appli (recherche, bon résultat, lecture) et vérifie.
                 // Jamais si la musique joue déjà (le pilotage pouvait appuyer sur le bouton et la METTRE EN PAUSE), ni en

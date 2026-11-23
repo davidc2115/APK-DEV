@@ -51,6 +51,29 @@ class VoiceManager(private val ctx: Context) {
         fun occupeQuelquePart(): Boolean = synchronized(instances) { instances.toList() }.any { it.sessionActive || it.occupee() }
 
         /**
+         * Ce qui est dit est déjà une commande complète, exécutée sans IA (contrôle de la musique, commandes directes) :
+         * l'écoute peut se terminer plus tôt. Jamais une phrase visiblement inachevée (« … vers », « … de »).
+         */
+        fun commandeComplete(texte: String): Boolean {
+            val t = texte.trim()
+            // Le modèle hors-ligne écrit « quelle heure est il » sans trait d'union : inversion, donc phrase complète.
+            val inversion = t.replace(Regex("(?i)\\b(est|fait|a|va|vas|sont|ont|peux|veux|fais|as|es|faut|reste)( t)? (il|elle|on|tu|vous|ils|elles)$"), "$1-$3")
+            if (t.split(' ').count { it.isNotBlank() } < 1 || suiteProbable(inversion)) return false
+            return runCatching {
+                if (fr.dd.jarvis.device.CommandeMedia.intention(t) { true } != null) return true
+                val i = fr.dd.jarvis.ai.CommandesDirectes.intention(t) ?: return false
+                // Seulement les commandes qu'une suite ne changerait pas : un SMS, un rappel, une adresse ou un titre
+                // peuvent continuer après une courte hésitation.
+                i.local != null || i.outil in COMMANDES_COURTES || (i.outil == "musique_bibliotheque" && i.args.optString("section") == "jaime")
+            }.getOrDefault(false)
+        }
+        private val COMMANDES_COURTES = setOf("get_planning", "lire_notifications", "lire_sms", "meteo", "morning_briefing", "taches_lister", "chronometre")
+
+        /** Contrôle simple de la musique (« pause », « suivant », « plus fort ») : le texte hors-ligne suffit, sans Whisper. */
+        internal fun commandeSimple(texte: String): Boolean =
+            runCatching { fr.dd.jarvis.device.CommandeMedia.intention(texte.trim()) { true } != null }.getOrDefault(false)
+
+        /**
          * Moteur de reconnaissance à utiliser : jamais celui de JARVIS. Quand JARVIS est l'assistant par défaut, Android
          * désigne son moteur « factice » comme reconnaissance du système : chaque écoute échouait, était relancée
          * (bips, délais) puis basculait sur la reconnaissance locale. On vise directement celui de Google.
@@ -721,7 +744,10 @@ class VoiceManager(private val ctx: Context) {
         val a = appli()
         // Réécoute automatique et AUCUN mot sûr pour le modèle hors-ligne : ce n'est pas toi près du téléphone mais la
         // télé ou des gens autour. Rien n'est envoyé à Whisper ; l'écoute continue ou se referme comme un silence.
-        if (relanceAuto && f.voskActif && f.motsSurs == 0) {
+        // En voiture : pas de télé, et le téléphone est loin de ta bouche (support) — ta voix y paraît « lointaine » : ce
+        // filtre-là t'ignorait.
+        val voiture = a?.enVoiture == true
+        if (relanceAuto && !voiture && f.voskActif && f.motsSurs == 0) {
             JournalVoix.noter(nom, "voix lointaine ignorée (télé, autres personnes)${if (f.texteLocal.isNotBlank()) " : « ${f.texteLocal.take(60)} »" else ""}")
             livrerJarvis("", "voix lointaine", true, fond = true)
             return
@@ -733,7 +759,11 @@ class VoiceManager(private val ctx: Context) {
             // Moins de ¼ s de vraie voix (claquement, toux, bruit) : pas d'appel à Whisper, qui « entend » alors des
             // phrases toutes faites (« Merci. », sous-titres…) — dont « merci », qui fermerait la conversation.
             val motsLocaux = f.texteLocal.split(Regex("\\s+")).count { it.isNotBlank() }
-            if (a != null && a.llm.groq.disponible() && (f.voixMs >= 250 || motsLocaux >= 2)) {
+            // Commande simple bien entendue hors-ligne (tous les mots sûrs) : exécutée tout de suite, sans l'aller-retour
+            // Whisper (~0,5 à 1,5 s).
+            val rapide = f.voskActif && motsLocaux in 1..6 && f.motsSurs >= motsLocaux && commandeSimple(f.texteLocal)
+            if (rapide) { texte = f.texteLocal; source = "hors-ligne, commande simple sans Whisper" }
+            else if (a != null && a.llm.groq.disponible() && (f.voixMs >= 250 || motsLocaux >= 2)) {
                 val debut = System.currentTimeMillis()
                 try {
                     val brut = kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeout(10_000) { a.llm.groq.transcrire(fr.dd.jarvis.car.Pcm.wav(f.pcm), prompt = INDICE_WHISPER) } }
@@ -756,7 +786,8 @@ class VoiceManager(private val ctx: Context) {
                     JournalVoix.noter(nom, "Whisper indisponible (${(e.message ?: e.javaClass.simpleName).take(90)}) : texte hors-ligne")
                 }
             }
-            if (!whisperOk) texte = if (f.voixMs >= 250 || motsLocaux >= 2) f.texteLocal else ""
+            if (rapide) Unit
+            else if (!whisperOk) texte = if (f.voixMs >= 250 || motsLocaux >= 2) f.texteLocal else ""
             else if (f.voskActif) {
                 // Recoupement avec le texte hors-ligne (qui n'entend bien que la voix proche du téléphone) : mauvaise
                 // langue, voix d'une autre personne ou de la télé, phrases de la télé collées à ta demande.
@@ -766,7 +797,7 @@ class VoiceManager(private val ctx: Context) {
                 // Réécoute automatique : rien de compris par le modèle hors-ligne mais toute une phrase pour Whisper =
                 // quelqu'un d'autre parlait (télé, personnes autour) ; pas toi qui t'adresses à JARVIS.
                 val motsW = texte.split(Regex("\\s+")).count { it.length >= 2 }
-                if (relanceAuto && motsLocaux <= 1 && motsW >= 4) {
+                if (relanceAuto && !voiture && motsLocaux <= 1 && motsW >= 4) {
                     JournalVoix.noter(nom, "voix lointaine ignorée (télé, autres personnes) : « ${texte.take(90)} »")
                     main.post { if (moi == jeton) livrerJarvis("", "voix lointaine", true, fond = true) }
                     return@Thread

@@ -195,7 +195,14 @@ class MicroJarvis(private val ctx: Context) {
         val buf = ShortArray(TRAME)
         val octets = ByteArray(TRAME * 2)
         val lot = ByteArrayOutputStream()      // 100 ms envoyées d'un coup au modèle
-        val porte = PorteParole(silenceFin = (pauseMs / 20).coerceIn(40, 200))
+        val porte = PorteParole(silenceFin = (pauseMs / 20).coerceIn(40, 200), minimum = 90.0)
+        // Voix basse ou lointaine (téléphone sur son support en voiture) : remontée automatiquement (×4 au plus, sans
+        // écrêter une voix forte) avant le modèle et Whisper.
+        val gain = GainAuto(cible = 2500.0, max = 4.0)
+        // Fin de phrase plus rapide quand ce qui est dit est déjà une commande complète (« pause », « mets mes titres
+        // J'aime », « lance la navigation vers Dijon ») : 0,8 s de silence au lieu de la pause choisie (2 s par défaut).
+        var texteJuge = ""
+        var commande = false
         // Le texte du modèle arrive ~0,3 s après la voix : la pause comptée sur les mots est raccourcie d'autant.
         val mots = EcouteParMots(pauseTrames = ((pauseMs - 300) / 20).coerceIn(35, 200))
         val avecModele = VoskModel.francais(ctx)
@@ -257,6 +264,7 @@ class MicroJarvis(private val ctx: Context) {
                 if (n == 0) continue
                 // Fin de la voix de JARVIS encore dans le haut-parleur / l'autoradio : ces premières trames sont ignorées.
                 if (System.currentTimeMillis() - debut < ignorerMs) continue
+                gain.appliquer(buf, n).let { g -> if (g !== buf) System.arraycopy(g, 0, buf, 0, n) }
                 for (i in 0 until n) { val v = buf[i].toInt(); octets[2 * i] = (v and 0xFF).toByte(); octets[2 * i + 1] = (v shr 8).toByte() }
                 tout.write(octets, 0, n * 2)
                 val rms = PorteVocale.rms(buf, n)
@@ -287,8 +295,10 @@ class MicroJarvis(private val ctx: Context) {
                     // …et dès que TA voix s'est tue pendant la pause choisie (niveau sonore jugé par rapport à ta voix),
                     // sans attendre que le modèle ait fini de réviser son texte : c'était ~1 à 2 s de trop.
                     val finVoix = porte.trame(rms)
+                    if (affiche != texteJuge) { texteJuge = affiche; commande = VoiceManager.commandeComplete(affiche) }
                     termine = mots.trame(affiche, trames) ||
-                        (mots.parle && porte.parle && finVoix && trames - mots.derniereActivite >= 25 && !VoiceManager.suiteProbable(affiche))
+                        (mots.parle && porte.parle && finVoix && trames - mots.derniereActivite >= 25 && !VoiceManager.suiteProbable(affiche)) ||
+                        (commande && mots.parle && porte.silenceTrames >= 40 && trames - mots.derniereActivite >= 40)
                 } else if (avecModele && System.currentTimeMillis() - debut < 4000) {
                     // Modèle encore en chargement (première écoute) : on enregistre, la décision viendra des mots.
                     porte.trame(rms); termine = false
@@ -386,6 +396,8 @@ internal class PorteParole(private val silenceFin: Int, private val minimum: Dou
     private val recent = BooleanArray(10)
     private var n = 0
     private var silence = 0
+    /** Trames de silence depuis la dernière trame de voix. */
+    val silenceTrames get() = silence
     private var crete = 0.0
     private var fondFige = 0.0
     var parle = false

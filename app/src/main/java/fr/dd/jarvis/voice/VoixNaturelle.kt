@@ -154,6 +154,46 @@ object VoixNaturelle {
 
     private class Echec(val code: Int, message: String) : Exception(message)
 
+    /**
+     * Phrases courtes déjà dites (« C'est fait. », « Je t'écoute », un titre, un trajet…) : gardées sur le téléphone et
+     * redites aussitôt, sans attendre Gemini (1 à 3 s par phrase). Même voix et même style seulement.
+     */
+    private object Memoire {
+        private const val MAX_CARACTERES = 140
+        private const val MAX_FICHIERS = 300
+        private val vive = object : LinkedHashMap<String, Audio>(32, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Audio>?) = size > 40
+        }
+        private fun cle(voix: String, style: String, texte: String): String = java.security.MessageDigest.getInstance("SHA-1")
+            .digest("$voix|$style|${texte.trim()}".toByteArray()).joinToString("") { "%02x".format(it) }
+        private fun dossier(app: JarvisApp) = java.io.File(app.cacheDir, "voix_naturelle").apply { mkdirs() }
+
+        fun lire(app: JarvisApp, voix: String, style: String, texte: String): Audio? {
+            if (texte.length > MAX_CARACTERES) return null
+            val k = cle(voix, style, texte)
+            synchronized(vive) { vive[k] }?.let { return it }
+            return runCatching {
+                val f = java.io.File(dossier(app), "$k.pcm").takeIf { it.isFile && it.length() > 8 } ?: return null
+                java.io.DataInputStream(f.inputStream().buffered()).use { e ->
+                    val freq = e.readInt(); val canaux = e.readInt()
+                    Audio(e.readBytes(), freq, canaux)
+                }.also { a -> synchronized(vive) { vive[k] = a }; f.setLastModified(System.currentTimeMillis()) }
+            }.getOrNull()
+        }
+
+        fun ecrire(app: JarvisApp, voix: String, style: String, texte: String, a: Audio) {
+            if (texte.length > MAX_CARACTERES || a.pcm.isEmpty()) return
+            val k = cle(voix, style, texte)
+            synchronized(vive) { vive[k] = a }
+            runCatching {
+                val d = dossier(app)
+                java.io.DataOutputStream(java.io.File(d, "$k.pcm").outputStream().buffered()).use { s -> s.writeInt(a.frequence); s.writeInt(a.canaux); s.write(a.pcm) }
+                val fichiers = d.listFiles().orEmpty()
+                if (fichiers.size > MAX_FICHIERS) fichiers.sortedBy { it.lastModified() }.take(fichiers.size - MAX_FICHIERS).forEach { it.delete() }
+            }
+        }
+    }
+
     /** Synthèse d'une phrase (bloquant, hors fil principal). Null = utiliser la voix Android. */
     fun synthese(app: JarvisApp, texte: String): Audio? {
         if (!active(app) || texte.isBlank()) return null
@@ -161,6 +201,16 @@ object VoixNaturelle {
         val p = personnage(app)
         val voix = p.voix
         val style = style(app, p)
+        Memoire.lire(app, voix, style, texte)?.let { return it }
+        val debut = System.currentTimeMillis()
+        return syntheseReseau(app, texte, cles, voix, style)?.also { a ->
+            Memoire.ecrire(app, voix, style, texte, a)
+            val ms = System.currentTimeMillis() - debut
+            if (ms > 1500) JournalVoix.noter("voix", "voix Gemini lente : $ms ms pour « ${texte.take(40)} »")
+        }
+    }
+
+    private fun syntheseReseau(app: JarvisApp, texte: String, cles: List<String>, voix: String, style: String): Audio? {
         val modeles = (listOfNotNull(modeleQuiMarche) + MODELES).distinct()
         var quota = false; var dernier = ""
         for (m in modeles) {

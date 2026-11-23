@@ -144,17 +144,14 @@ class MusicTools(private val app: JarvisApp) {
                 val aleatoire = mode == "aleatoire"
                 val repetition = when (mode) { "repeter_titre" -> "titre"; "repeter_playlist" -> "playlist"; else -> "aucune" }
                 if (section == "jaime") {
-                    if (!fr.dd.jarvis.device.YtMusique.ouvrirLien(app, p, "https://music.youtube.com/watch?list=LM")) "❌ Impossible d'ouvrir tes titres J'aime."
-                    else {
-                        kotlinx.coroutines.delay(1400)
-                        val demarree = fr.dd.jarvis.device.MusiqueBibliotheque.demarrerLecture(app, p, aleatoire, repetition)
-                        fr.dd.jarvis.device.RetourJarvisMusique.afficher(app)
-                        if (demarree) {
-                            // Consigne : seulement « Titre — Artiste » du morceau réellement lancé.
-                            morceauEnCours(p) ?: "Titres J'aime en lecture."
-                        } else {
-                            "📂 Ta liste « J'aime » est ouverte dans ${nomAppli(p)}, mais le lecteur n'a pas confirmé le démarrage. Vérifie le bouton Lecture dans l'application."
-                        }
+                    val r = fr.dd.jarvis.device.MusiqueBibliotheque.jouerJaime(app, p, aleatoire, repetition)
+                    fr.dd.jarvis.device.RetourJarvisMusique.afficher(app)
+                    when (r) {
+                        // Consigne : seulement « Titre — Artiste » du morceau réellement lancé.
+                        fr.dd.jarvis.device.MusiqueBibliotheque.Lancement.LECTURE -> morceauEnCours(p) ?: "Titres J'aime en lecture."
+                        // Liste chargée mais en pause : JARVIS relance encore la lecture quand il a fini de parler.
+                        fr.dd.jarvis.device.MusiqueBibliotheque.Lancement.OUVERT -> "Titres J'aime chargés (lecture non confirmée)"
+                        fr.dd.jarvis.device.MusiqueBibliotheque.Lancement.ECHEC -> "❌ ${nomAppli(p)} n'a pas chargé tes titres J'aime (compte non connecté dans l'appli, ou appli bloquée en arrière-plan)."
                     }
                 } else if (nom.isBlank()) {
                     val (l, err) = fr.dd.jarvis.device.MusiqueBibliotheque.lister(app, p, section)

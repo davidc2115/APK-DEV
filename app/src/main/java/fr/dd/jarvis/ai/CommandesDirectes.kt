@@ -257,6 +257,7 @@ object CommandesDirectes {
         if (R_BRIEFING.matches(p)) return Intention("morning_briefing", JSONObject(), "☀️ Point du jour…")
         if (R_TACHES.matches(p)) return Intention("taches_lister", JSONObject(), "✅ Tâches…")
         navigation(o, p)?.let { return it }
+        bibliotheque(p)?.let { return it }
         musique(o, p)?.let { return it }
         ouvrir(o, p)?.let { return it }
         return null
@@ -414,6 +415,16 @@ object CommandesDirectes {
             else -> dest
         }
         return Intention("naviguer", JSONObject().put("destination", lieu).put("appli", appli), "🧭 Navigation…")
+    }
+
+    private val R_BIBLIO = motif("(?:(?:me|m|nous) )?(?:joue|jouer|mets|met|mettre|lance|lancer|ecoute|ecouter|passe|passer|fais moi ecouter|demarre|demarrer|lis|lire)(?: moi| nous)? " +
+        "(.+?)(?: (?:sur|dans|avec) (?:youtube music|yt music|ytm|morphe|youtube))?")
+
+    /** « Mets mes titres J'aime », « joue ma playlist sport » : TA bibliothèque YT Music, pas le catalogue public. */
+    private fun bibliotheque(p: String): Intention? {
+        val m = R_BIBLIO.matchEntire(p) ?: return null
+        val d = DemandeBibliotheque.analyser(m.n(1)) ?: return null
+        return Intention("musique_bibliotheque", JSONObject().put("section", d.section).put("nom", d.nom).put("mode", d.mode), "🎵 Ta bibliothèque…")
     }
 
     private fun musique(o: String, p: String): Intention? {
