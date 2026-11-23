@@ -110,6 +110,26 @@ class CommandesDirectesTest {
         i("lance un itinéraire jusqu'à Chalon-sur-Saône")!!.let { assertEquals("Chalon-sur-Saône", it.args.getString("destination")) }
         assertNull(i("itinéraire de ma tournée de demain"))
         assertNull(i("combien de temps de trajet jusqu'à Dijon"))
+        // Tournures parlées : guidage lancé directement (avant : cerveau IA, qui demandait « oui ou non »).
+        fun dest(t: String) = i(t)?.takeIf { it.outil == "naviguer" }?.args?.getString("destination")
+        assertEquals("Dijon", dest("est-ce que tu peux lancer la navigation vers Dijon"))
+        assertEquals("Beaune", dest("tu peux me lancer l'itinéraire jusqu'à Beaune"))
+        assertEquals("Semur", dest("lance-moi la navigation vers Semur"))
+        assertEquals("la gare de Dijon", dest("tu peux m'emmener à la gare de Dijon"))
+        assertEquals("Dijon", dest("je veux aller à Dijon"))
+        assertEquals("Dijon", dest("lance la navigation pour aller à Dijon"))
+        assertEquals("Dijon", dest("fais-moi l'itinéraire pour Dijon"))
+        assertEquals("Dijon", dest("trajet pour Dijon"))
+        assertEquals("Dijon", dest("direction Dijon"))
+        assertEquals("Dijon", dest("Jarvis lance la navigation vers Dijon s'il te plaît"))
+        assertEquals("21 rue de Massingy, 21350 Vitteaux", dest("lance la navigation vers 21 rue de Massingy, 21350 Vitteaux"))
+        assertEquals("Saint-Martin-et-Puisaye", dest("lance la navigation vers Saint-Martin-et-Puisaye"))
+        assertEquals("maison", dest("je voudrais rentrer à la maison"))
+        assertEquals("maison", dest("navigation vers chez moi"))
+        i("lance la navigation avec Waze vers Dijon")!!.let { assertEquals("Dijon", it.args.getString("destination")); assertEquals("Waze", it.args.getString("appli")) }
+        assertNull(dest("je veux aller au lit"))
+        assertNull(dest("je veux aller dormir"))
+        assertNull(dest("itinéraire vers Dijon et Beaune"))
         i("joue Daft Punk sur Spotify")!!.let { assertEquals("jouer_musique", it.outil); assertEquals("Daft Punk", it.args.getString("requete")); assertEquals("Spotify", it.args.getString("appli")) }
         i("mets la playlist sport")!!.let { assertEquals("playlist sport", it.args.getString("requete")) }
         assertNull(i("mets du chauffage"))

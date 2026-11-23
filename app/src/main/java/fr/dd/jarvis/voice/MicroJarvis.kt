@@ -47,6 +47,8 @@ class MicroJarvis(private val ctx: Context) {
     }
 
     companion object {
+        /** Micro qui a écouté la dernière demande (affiché dans Réglages › Écoute). */
+        @Volatile var dernier: String? = null
         const val TAUX = 16000
         private const val TRAME = 320            // 20 ms
         /** Niveau RMS (PCM 16 bits) → échelle « dB » des reconnaisseurs Android (≈ -2 à 10) pour l'animation. */
@@ -78,12 +80,17 @@ class MicroJarvis(private val ctx: Context) {
             Thread({
                 val e = runCatching { ouvrirVoiture(voiture) }.getOrNull() ?: ouvrirTelephone(null)
                 if (e == null) r.fin(Fin.Erreur("aucun micro disponible"))
-                else { source = e.nom; boucle(e, attenteMs, pauseMs, r, ignorerMs) }
+                else {
+                    source = e.nom; dernier = e.nom
+                    // Honnête : l'autoradio n'a rien donné → c'est bien le téléphone qui écoute cette demande.
+                    if (e !is EntreeVoiture) JournalVoix.noter("micro", "micro de la voiture muet ou refusé : demande écoutée par le ${e.nom}")
+                    boucle(e, attenteMs, pauseMs, r, ignorerMs)
+                }
             }, "jarvis-micro").apply { isDaemon = true; start() }
             return true
         }
         val e = ouvrirTelephone(entree) ?: return false
-        source = e.nom
+        source = e.nom; dernier = e.nom
         chargerModele()
         Thread({ boucle(e, attenteMs, pauseMs, r, ignorerMs) }, "jarvis-micro").apply { isDaemon = true; start() }
         return true

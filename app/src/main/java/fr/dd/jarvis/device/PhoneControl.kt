@@ -259,6 +259,8 @@ class PhoneControl(private val ctx: Context) {
         // Morphe / YouTube Music : JARVIS cherche lui-même dans le catalogue et fait lire LE bon résultat par son lien
         // (rapide et exact, sans piloter l'écran). En cas d'échec (pas de réseau, aucun résultat), méthode classique.
         if (YtMusique.estYtm(pkg)) jouerYtm(pkg, requete, YtMusique.NOM)?.let { return it }
+        LectureGarantie.noter(pkg)
+        fr.dd.jarvis.voice.VoiceManager.laisserPlaceMusique()
         val sessionAvant = session(pkg)
         val titreAvant = sessionAvant?.let { titreDe(it) }
         var etat = "aucune"
@@ -294,6 +296,8 @@ class PhoneControl(private val ctx: Context) {
             "deezer.android.app" -> { q -> "deezer://search/" + Uri.encode(q) }
             else -> null
         }
+        // Rien de confirmé : on ne relancera pas « lecture » en fin de conversation (ce serait l'ANCIEN morceau).
+        LectureGarantie.oublier()
         if (rechercheUrl != null) {
             // D'abord en forçant le paquet (ouvre directement dans l'appli) ; si ce paquet précis ne déclare pas ce lien exact
             // (ActivityNotFoundException → start() renvoie une erreur), on retente sans forcer le paquet plutôt que d'abandonner,
@@ -345,6 +349,10 @@ class PhoneControl(private val ctx: Context) {
         }
         val choisi = (resultat ?: YtMusique.meilleur(requete, liste) ?: return null).let { YtMusique.completer(it) }
         val avant = session(pkg)?.let { titreDe(it) }
+        // JARVIS rend le focus audio de la conversation AVANT d'ouvrir le lien : le lecteur doit pouvoir le prendre pour
+        // démarrer. Sa réponse baissera la musique au lieu de l'arrêter, et la lecture est revérifiée en fin de conversation.
+        LectureGarantie.noter(pkg)
+        fr.dd.jarvis.voice.VoiceManager.laisserPlaceMusique()
         if (!YtMusique.ouvrir(ctx, pkg, choisi, radio)) return null
         var c: android.media.session.MediaController? = null
         var modeEnvoye = false
@@ -354,13 +362,15 @@ class PhoneControl(private val ctx: Context) {
         var relances = 0
         var dernierPlay = 0L
         var toucheEnvoyee = false
+        var lienRouvert = false
+        val essais = mutableListOf<String>()
         while (System.currentTimeMillis() < fin) {
-            Thread.sleep(500)
+            Thread.sleep(400)
             val maintenant = System.currentTimeMillis()
             c = session(pkg)
             if (c == null) {
                 // Toujours pas de lecteur au bout de 4 s : touche « lecture » (va à l'appli qui vient de s'ouvrir).
-                if (!toucheEnvoyee && maintenant - debut > 4000) { toucheEnvoyee = true; mediaKey("play") }
+                if (!toucheEnvoyee && maintenant - debut > 4000) { toucheEnvoyee = true; mediaKey("play"); essais += "touche média" }
                 continue
             }
             if (!modeEnvoye) {
@@ -371,20 +381,19 @@ class PhoneControl(private val ctx: Context) {
             val change = titre != null && titre != avant
             val bon = change || correspond(c, choisi.titre)
             if (joue(c) && bon) break
-            // Le morceau demandé est chargé mais en pause (lien ouvert sans lecture automatique) : « lecture », redemandé
-            // jusqu'à 3 fois — avant : une seule tentative, et seulement si le titre avait déjà changé → musique ouverte
-            // mais jamais lancée.
-            if (!joue(c) && maintenant - debut > 1500 && maintenant - dernierPlay > 2000 && relances < 3) {
-                if (bon) { runCatching { c.transportControls.play() }; relances++; dernierPlay = maintenant }
-                else if (maintenant - debut > 6000) {
-                    // Toujours l'ancien morceau au bout de 6 s : le lien est rouvert une fois puis « lecture ».
-                    if (relances == 0) YtMusique.ouvrir(ctx, pkg, choisi, radio)
-                    runCatching { c.transportControls.play() }; relances++; dernierPlay = maintenant
-                }
+            // Toujours l'ancien morceau au bout de 6 s : le lien est rouvert une fois.
+            if (!bon && !lienRouvert && maintenant - debut > 6000) { lienRouvert = true; YtMusique.ouvrir(ctx, pkg, choisi, radio); essais += "lien rouvert"; dernierPlay = maintenant; continue }
+            // Le morceau demandé est chargé mais en pause : une méthode DIFFÉRENTE à chaque essai (avant : trois fois la
+            // même commande « play », que le lecteur ignorait quand sa première demande de focus audio avait échoué).
+            if (!joue(c) && (bon || lienRouvert) && maintenant - debut > 1500 && maintenant - dernierPlay > 1800 && relances < 4) {
+                essais += relancerLecture(c, pkg, relances)
+                relances++; dernierPlay = maintenant
             }
         }
         val joueBien = c != null && joue(c)
-        if (!joueBien) fr.dd.jarvis.voice.JournalVoix.noter("musique", "« ${choisi.titre} » ouvert mais pas en lecture (session ${if (c == null) "absente" else "en pause"}, $relances relance(s))")
+        fr.dd.jarvis.voice.JournalVoix.noter("musique", "« ${choisi.titre} » " + (if (joueBien) "en lecture" else "ouvert mais PAS en lecture (session ${if (c == null) "absente" else "en pause"})") +
+            " · essais : ${essais.joinToString(", ").ifBlank { "aucun (lecture automatique)" }} · écran ${if (ecranAllume()) "allumé" else "éteint/verrouillé"}")
+        if (!joueBien) LectureGarantie.surveiller(ctx)
         YtMusique.retenir(listOf(choisi))
         // Réponse volontairement minimale : l'utilisateur veut uniquement le titre et l'artiste,
         // pas le nom de l'application, le mode de lecture ni une liste de résultats secondaires.
@@ -392,6 +401,59 @@ class PhoneControl(private val ctx: Context) {
         val morceau = listOf(choisi.titre, artiste).filter { it.isNotBlank() }.joinToString(" — ")
         return if (joueBien) morceau else "$morceau (lecture non confirmée)"
     }
+
+    /**
+     * Un essai pour faire jouer [c] (lecteur en pause sur le bon morceau), méthode [n] :
+     *  0. commande « lecture » de sa session ;
+     *  1. touche média LECTURE envoyée à SA session (compte comme un appui sur un bouton : Android autorise alors le
+     *     lecteur à démarrer son service de lecture, même en arrière-plan) ;
+     *  2. pause puis lecture : un lecteur dont la demande de focus audio a échoué (JARVIS parlait / écoutait) ne la refait
+     *     qu'à un vrai changement d'état ;
+     *  3. le bouton « Lecture » de l'appli, s'il est à l'écran (service d'accessibilité).
+     */
+    private fun relancerLecture(c: android.media.session.MediaController, pkg: String, n: Int): String = when (n) {
+        0 -> { runCatching { c.transportControls.play() }; "lecture" }
+        1 -> {
+            runCatching {
+                c.dispatchMediaButtonEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY))
+                c.dispatchMediaButtonEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY))
+            }
+            "touche lecture"
+        }
+        2 -> { runCatching { c.transportControls.pause(); Thread.sleep(350); c.transportControls.play() }; "pause puis lecture" }
+        else -> {
+            val ok = runCatching { JarvisAccessibilityService.instance?.cliquerLecture(pkg) == true }.getOrDefault(false)
+            if (!ok) runCatching { c.transportControls.play() }
+            if (ok) "bouton Lecture de l'appli" else "lecture (bouton de l'appli introuvable)"
+        }
+    }
+
+    /**
+     * Fait jouer la musique de [pkg] (lancée par JARVIS) si elle est en pause : toutes les méthodes, l'une après l'autre,
+     * jusqu'à ce que le lecteur confirme. Vrai si elle joue.
+     */
+    fun forcerLecture(pkg: String, contexte: String): Boolean {
+        val c0 = session(pkg)
+        if (c0 == null) { fr.dd.jarvis.voice.JournalVoix.noter("musique", "$contexte : plus de lecteur actif (${pkg.substringAfterLast('.')})"); return false }
+        if (joue(c0)) { fr.dd.jarvis.voice.JournalVoix.noter("musique", "$contexte : la musique joue bien"); return true }
+        val essais = mutableListOf<String>()
+        for (n in 0..3) {
+            val c = session(pkg) ?: break
+            if (joue(c)) break
+            essais += relancerLecture(c, pkg, n)
+            val limite = System.currentTimeMillis() + 1800
+            while (System.currentTimeMillis() < limite) { Thread.sleep(250); if (session(pkg)?.let { joue(it) } == true) break }
+            if (session(pkg)?.let { joue(it) } == true) break
+        }
+        val ok = session(pkg)?.let { joue(it) } == true
+        fr.dd.jarvis.voice.JournalVoix.noter("musique", "$contexte : musique en pause → ${essais.joinToString(", ")} → ${if (ok) "lecture repartie" else "TOUJOURS en pause"}")
+        return ok
+    }
+
+    private fun ecranAllume(): Boolean = runCatching {
+        (ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isInteractive &&
+            !(ctx.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager).isKeyguardLocked
+    }.getOrDefault(false)
 
     /** Titre en cours de lecture dans [pkg] (paquet ou nom d'appli), ou null si rien ne joue. */
     fun lectureEnCours(pkg: String): String? = runCatching {

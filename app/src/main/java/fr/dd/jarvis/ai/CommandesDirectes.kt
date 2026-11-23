@@ -177,10 +177,23 @@ object CommandesDirectes {
         "(?:mets|met|cree|ajoute|programme|fais)(?: moi)? un rappel|un rappel|rappel) (.+)")
     // « lance l'itinéraire jusqu'à Dijon », « démarre le trajet vers Lyon », « itinéraire vers Beaune » : avant, sans le mot
     // « navigation », la demande partait au cerveau, qui calculait le trajet (outil itineraire) sans lancer le guidage.
-    private val R_NAV = motif("(?:emmene moi|emmene nous|amene moi|ramene moi|ramene nous|conduis moi|guide moi|guide nous|lance la navigation|demarre la navigation|lance le gps|navigation|navigue|" +
-        "(?:lance|relance|demarre|commence|active|mets|ouvre) (?:l |le |un |mon |la )?(?:itineraire|trajet|guidage|gps|route|navigation)|" +
-        "itineraire(?= (?:vers|jusqu a|jusqu au|jusque|pour|direction|a|au) )|trajet(?= (?:vers|jusqu a|jusqu au|jusque|direction) )|" +
-        "(?:lance|ouvre|demarre) (?:waze|google maps|maps))(?: (?:a|au|aux|vers|jusqu a|jusqu au|jusque|pour|en|direction|sur))* (.+)")
+    // Aussi les tournures parlées : « tu peux me lancer la navigation vers… », « lance-moi l'itinéraire… », « je veux aller
+    // à… », « fais-moi le trajet pour… », « direction Dijon » — avant, elles partaient au cerveau (IA), qui pouvait demander
+    // une confirmation ou piloter l'écran de Waze au lieu de lancer le guidage.
+    private const val NAV_VERBE = "(?:lance|lancer|relance|relancer|demarre|demarrer|commence|commencer|active|activer|mets|mettre|met|ouvre|ouvrir|" +
+        "fais|faire|calcule|calculer|programme|programmer|prepare|preparer|trouve|trouver|donne|donner)"
+    private val R_NAV = motif("(?:(?:m |me |nous )?(?:emmene|emmener|amene|amener|ramene|ramener|conduis|conduire|guide|guider)(?: moi| nous)?|" +
+        "(?:je veux|je voudrais|j aimerais|je dois|on doit|on veut|on voudrait|il faut que j aille|il faut qu on aille) (?:aller|me rendre|nous rendre|rentrer)(?= (?:a|au|aux|vers|jusqu|jusque|en) )|" +
+        "lance la navigation|demarre la navigation|lance le gps|navigation|navigue|naviguer|" +
+        "(?:m |me |nous )?$NAV_VERBE(?: moi| nous)? (?:l |le |un |une |mon |ma |la )?(?:itineraire|trajet|guidage|gps|route|navigation|chemin)|" +
+        "itineraire(?= (?:vers|jusqu a|jusqu au|jusque|pour|direction|a|au) )|trajet(?= (?:vers|jusqu a|jusqu au|jusque|direction|pour) )|direction(?= [a-z0-9])|" +
+        "(?:lance|lancer|ouvre|ouvrir|demarre|demarrer) (?:waze|google maps|maps))(?: (?:a|au|aux|vers|jusqu a|jusqu au|jusque|pour|en|direction|sur))* (.+)")
+    /** Début de destination à retirer : « avec Waze vers… », « pour aller à… », « jusqu'au… ». */
+    private val NAV_DEBUT = Regex("^(?:(?:avec|sur|par|dans)\\s+(?:waze|google\\s+maps|maps)\\s+|(?:pour\\s+)?(?:aller|me\\s+rendre|nous\\s+rendre|rentrer|y\\s+aller)\\s+|" +
+        "(?:a|au|aux|vers|jusqu\\s+a|jusqu\\s+au|jusqu\\s+aux|jusque|en|direction)\\s+)+")
+    private val NAV_POLI_FIN = Regex("(?:[\\s,]+(?:s\\s+il\\s+te\\s+plait|s\\s+il\\s+vous\\s+plait|stp|svp|merci|jarvis|vite|tout\\s+de\\s+suite|maintenant))+[\\s.!]*$")
+    /** Ce qui n'est pas une destination (« je veux aller au lit »). */
+    private val NAV_PAS_UN_LIEU = Regex("^(?:le |la |les |l |au |aux )?(?:lit|dodo|toilettes?|wc|douche|bain|sieste|vacances|manger|dormir|pisser|pipi)$")
     private const val APPLIS_MUSIQUE = "spotify|deezer|youtube music|yt music|apple music|amazon music|youtube"
     private val R_JOUE = listOf(
         motif("(?:joue|jouer|mets|met|lance|ecoute|ecouter|passe|fais moi ecouter)(?: moi)? (?:la chanson|le morceau|le titre|les chansons de|la musique de|de la musique de|des chansons de|du rap de) (.+?)(?: (?:sur|dans|avec) ($APPLIS_MUSIQUE))?"),
@@ -379,15 +392,28 @@ object CommandesDirectes {
 
     private fun navigation(o: String, p: String): Intention? {
         val m = R_NAV.matchEntire(p) ?: return null
-        val n = m.n(1)
-        if (n.split(' ').size > 8 || Regex("\\b(rendez vous|rdv|prochain|chantier|client|installation|et|puis|tournee|agenda|planning|demain|combien|temps|distance|duree)\\b").containsMatchIn(n)) return null
+        var dest = m.de(o, 1) ?: return null
+        // « avec Waze vers Dijon », « pour aller à Dijon » : le début qui n'est pas la destination (mêmes positions dans le
+        // texte d'origine et dans sa version sans accents).
+        NAV_DEBUT.find(plat(dest))?.let { d -> dest = dest.substring(d.range.last + 1).trim() }
+        dest = dest.replace(Regex("(?i)\\s+(?:avec|sur|par|dans)\\s+(?:waze|google maps|maps)$"), "").trim()
+        // « … s'il te plaît », « … merci Jarvis » en fin de phrase : pas dans l'adresse.
+        NAV_POLI_FIN.find(plat(dest))?.let { f -> dest = dest.substring(0, f.range.first).trim().trimEnd(',', '.', '!', ' ') }
+        val n = serre(plat(dest))
+        if (n.isBlank() || n.split(' ').size > 8 || NAV_PAS_UN_LIEU.matches(n) ||
+            Regex("\\b(rendez vous|rdv|prochain|chantier|client|installation|puis|ensuite|tournee|agenda|planning|demain|combien|temps|distance|duree)\\b").containsMatchIn(n)) return null
+        // « Dijon et Beaune », « … et appelle Paul » : deux demandes — mais « Saint-Martin-et-Puisaye » est un seul lieu.
+        if (Regex("(?i)(?<![\\p{L}-])et(?![\\p{L}-])").containsMatchIn(dest)) return null
         // « Chez Martin » : client ou contact à retrouver d'abord — le cerveau s'en charge.
         if (Regex("\\bchez (?!moi\\b)").containsMatchIn(serre(p))) return null
-        var dest = m.de(o, 1) ?: return null
-        dest = dest.replace(Regex("(?i)\\s+(?:avec|sur|par|dans)\\s+(?:waze|google maps|maps)$"), "").trim()
         val appli = when { Regex("\\bwaze\\b").containsMatchIn(p) -> "Waze"; Regex("\\b(google maps|maps)\\b").containsMatchIn(p) -> "Google Maps"; else -> "" }
         if (dest.isBlank()) return null
-        return Intention("naviguer", JSONObject().put("destination", if (serre(plat(dest)) == "chez moi") "maison" else dest).put("appli", appli), "🧭 Navigation…")
+        val lieu = when {
+            Regex("^(?:(?:la|ma|notre) )?(?:maison|domicile)$|^chez (?:moi|nous)$").matches(n) -> "maison"
+            Regex("^(?:(?:le|mon) )?(?:travail|boulot|bureau)$").matches(n) -> "travail"
+            else -> dest
+        }
+        return Intention("naviguer", JSONObject().put("destination", lieu).put("appli", appli), "🧭 Navigation…")
     }
 
     private fun musique(o: String, p: String): Intention? {

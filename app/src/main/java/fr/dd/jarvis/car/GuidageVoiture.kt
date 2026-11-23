@@ -39,6 +39,13 @@ object GuidageVoiture {
     /** Fenêtre de Waze / Maps ouverte sur le téléphone (appelé par le service d'accessibilité). */
     fun noterFenetre(pkg: String) { if (pkg in PAQUETS) fenetres[pkg] = System.currentTimeMillis() }
 
+    /** Waze / Maps affiché il y a moins de [ms]. */
+    fun fenetreRecente(ms: Long = 120_000): Boolean = fenetres.values.any { System.currentTimeMillis() - it < ms }
+
+    /** Bouton de départ du guidage (« Y aller », « Démarrer »…) : appuyer dessus est sans risque, aucune confirmation. */
+    private val BOUTON_DEPART = Regex("(?i)^\\s*(y aller|go|démarrer|demarrer|partir|c'est parti|lancer|lancer le guidage|commencer|start|démarrer la navigation|demarrer la navigation|aller)\\s*[!.]?\\s*$")
+    fun boutonDepart(texte: String): Boolean = BOUTON_DEPART.matches(texte)
+
     /** Voix de guidage en cours (Waze / Maps annonce le départ) : lecture audio « navigation » active. */
     fun guidageVocal(ctx: Context): Boolean = runCatching {
         ctx.getSystemService(AudioManager::class.java).activePlaybackConfigurations

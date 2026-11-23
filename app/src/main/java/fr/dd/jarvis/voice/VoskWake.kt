@@ -158,11 +158,27 @@ class VoskWake(
     @Volatile override var exigence: Int = 1
     /** Modèle français (sinon l'ancien anglais) : grammaire et seuils propres à chacun. */
     private val francais = VoskModel.francais(ctx)
-    private fun seuil() = if (francais) when (exigence) { 1 -> 0.6; 2 -> 0.8; else -> 0.9 } else when (exigence) { 1 -> 0.88; 2 -> 0.93; else -> 0.97 }
+    /** En voiture (écoute continue, gain fort) : seuil un peu plus bas — un « Jarvis » dit doucement passe. */
+    @Volatile private var voitureActive = false
+    private fun seuil() = if (francais) when (exigence) { 1 -> if (voitureActive) 0.5 else 0.6; 2 -> if (voitureActive) 0.72 else 0.8; else -> 0.9 }
+        else when (exigence) { 1 -> 0.88; 2 -> 0.93; else -> 0.97 }
 
     companion object {
         /** Tranche d'écoute continue pendant la musique, en voiture : 3 s (30 trames de 0,1 s). */
         internal const val FENETRE_MUSIQUE = 30
+
+        /** Micro qui écoute « Jarvis » en ce moment (affiché dans Réglages › Écoute), null si aucune écoute. */
+        @Volatile var microActuel: String? = null
+            private set
+
+        /** Nom lisible d'un micro Android. */
+        internal fun nomMicro(type: Int, produit: String?): String = when (type) {
+            android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC -> "micro du téléphone"
+            android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "micro Bluetooth (${produit.orEmpty().ifBlank { "casque / voiture" }})"
+            android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET -> "micro du casque filaire"
+            android.media.AudioDeviceInfo.TYPE_USB_DEVICE, android.media.AudioDeviceInfo.TYPE_USB_HEADSET -> "micro USB (${produit.orEmpty()})"
+            else -> "micro ${produit.orEmpty().ifBlank { "inconnu" }} (type $type)"
+        }
         /**
          * Grammaire du modèle français : « jarvis » au milieu des mots les plus courants et de ses quasi-homonymes
          * (« j'arrive », « service », « gervais », « marvin », « joris », « janvier »…). Un mot qui ressemble sans être
@@ -305,6 +321,7 @@ class VoskWake(
         @Volatile private var actif = true
         private var fil: Thread? = null
         private var micro: android.media.AudioRecord? = null
+        private var reducteur: android.media.audiofx.NoiseSuppressor? = null
 
         @android.annotation.SuppressLint("MissingPermission")
         fun demarrer(): Boolean {
@@ -317,7 +334,17 @@ class VoskWake(
             if (ar.state != android.media.AudioRecord.STATE_INITIALIZED) { ar.release(); return false }
             try { ar.startRecording() } catch (_: Throwable) { ar.release(); return false }
             if (ar.recordingState != android.media.AudioRecord.RECORDSTATE_RECORDING) { ar.release(); return false }
-            runCatching { ar.routedDevice?.let { d -> JournalVoix.noter("Vosk", "écoute de « Jarvis » sur ${d.productName} (type ${d.type})") } }
+            val voiture = (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.enVoiture == true
+            // En voiture : réduction du bruit de la route (souffle, moteur) du téléphone, quand il en a une.
+            if (voiture) runCatching {
+                if (android.media.audiofx.NoiseSuppressor.isAvailable()) reducteur = android.media.audiofx.NoiseSuppressor.create(ar.audioSessionId)?.apply { enabled = true }
+            }
+            runCatching {
+                val d = ar.routedDevice
+                microActuel = if (d != null) nomMicro(d.type, d.productName?.toString()) else "micro du téléphone"
+                JournalVoix.noter("Vosk", "écoute de « Jarvis » sur le $microActuel" + (if (voiture) " · voiture : écoute continue, gain ×10 max" +
+                    (if (reducteur != null) ", réduction du bruit active" else "") else ""))
+            }
             micro = ar
             vivantes.incrementAndGet()
             fil = Thread({ try { boucle(ar, taille) } finally { vivantes.decrementAndGet() } }, "jarvis-ecoute").apply { isDaemon = true; start() }
@@ -325,18 +352,18 @@ class VoskWake(
         }
 
         /**
-         * En voiture : micro plus sensible (porte plus basse + gain automatique : un « Jarvis » presque chuchoté passe) et,
-         * quand de la musique joue, écoute CONTINUE sans porte : la musique la gardait ouverte en permanence, la phrase
-         * reconnue ne finissait jamais et « Jarvis » n'était plus en tête → jamais détecté. Deux reconnaissances décalées
-         * de 1,5 s, remises à zéro toutes les 3 s, repèrent « Jarvis » n'importe où dans ce qu'elles entendent.
+         * En voiture : micro plus sensible (gain automatique ×10 au plus, réduction du bruit, seuil plus bas : un « Jarvis »
+         * presque chuchoté passe) et écoute CONTINUE sans porte, musique ou pas : la musique et le bruit de la route la
+         * gardaient ouverte en permanence, la phrase reconnue ne finissait jamais et « Jarvis » n'était plus en tête →
+         * jamais détecté. Deux reconnaissances décalées de 1,5 s, remises à zéro toutes les 3 s, repèrent « Jarvis »
+         * n'importe où dans ce qu'elles entendent.
          */
         private fun boucle(ar: android.media.AudioRecord, taille: Int) {
             val porte = PorteVocale()
             val avant = ArrayDeque<ShortArray>()
             val buf = ShortArray(taille)
             val app = ctx.applicationContext as? fr.dd.jarvis.JarvisApp
-            val am = ctx.getSystemService(android.media.AudioManager::class.java)
-            val gain = GainAuto()
+            val gain = GainAuto(cible = 3000.0, max = 10.0)
             var voiture = false; var musique = false; var compte = 0
             var rec2: Recognizer? = null
             var trames1 = 0; var trames2 = -FENETRE_MUSIQUE / 2
@@ -348,11 +375,14 @@ class VoskWake(
                     if (n == 0) continue
                     if (compte++ % 10 == 0) {
                         voiture = app?.enVoiture == true
+                        voitureActive = voiture
                         porte.sensible = voiture
-                        val m = voiture && runCatching { am?.isMusicActive == true }.getOrDefault(false)
+                        // En voiture : écoute CONTINUE, avec ou sans musique — le bruit de la route gardait la porte ouverte
+                        // (phrase jamais terminée, « Jarvis » plus en tête) ou la fermait sur une voix basse.
+                        val m = voiture
                         if (m != musique) {
                             musique = m
-                            JournalVoix.noter("Vosk", if (m) "voiture + musique : écoute continue, « Jarvis » repéré même pendant la musique" else "plus de musique : écoute normale")
+                            JournalVoix.noter("Vosk", if (m) "voiture : écoute continue (musique ou bruit de la route), « Jarvis » repéré n'importe où dans la phrase" else "hors voiture : écoute normale")
                             rec.reset(); rec2?.reset(); trames1 = 0; trames2 = -FENETRE_MUSIQUE / 2; avant.clear()
                             if (m && rec2 == null) rec2 = nouveauRecognizer()
                         }
@@ -391,6 +421,9 @@ class VoskWake(
                 }
             } catch (_: Throwable) { panne = actif }
             finally {
+                runCatching { reducteur?.release() }
+                reducteur = null
+                microActuel = null
                 runCatching { ar.stop() }
                 runCatching { ar.release() }
                 runCatching { rec.close() }

@@ -702,7 +702,9 @@ class JarvisService : Service() {
                 // Le traitement (cerveau + actions + enregistrement) est terminé ici. Ne garde pas busy à true
                 // pendant la seule lecture TTS : une nouvelle demande Android Auto peut interrompre cette lecture.
                 // Le callback TTS garde uniquement la responsabilité de rouvrir le micro après la réponse.
-                relancer = awake && (voice?.sortieExterne() != true || reply.trimEnd().endsWith("?"))
+                // Musique tout juste lancée : pas de micro rouvert derrière (il la remettait en pause), sauf question.
+                relancer = awake && (voice?.sortieExterne() != true || reply.trimEnd().endsWith("?")) &&
+                    (!fr.dd.jarvis.device.LectureGarantie.recente(30_000) || reply.trimEnd().endsWith("?"))
                 // Échange abandonné entre-temps (déverrouillage prioritaire) : ne pas libérer le busy du déverrouillage.
                 if (gen != generation) {
                     flux?.arreter(sansSuite = true)
@@ -819,6 +821,9 @@ class JarvisService : Service() {
     private var confirmQuestion = ""
 
     private suspend fun voiceConfirm(question: String): Boolean {
+        // Journal : quelle action a demandé « oui ou non » (pour retrouver celles qui ne devraient pas le demander).
+        val outil = kotlin.coroutines.coroutineContext[fr.dd.jarvis.device.Autorisations.OutilEnCours]?.nom
+        journal("confirmation demandée" + (outil?.let { " par l'outil $it" } ?: "") + " : " + question.replace('\n', ' ').take(160))
         val d = CompletableDeferred<Boolean>()
         confirm = d
         confirmQuestion = question

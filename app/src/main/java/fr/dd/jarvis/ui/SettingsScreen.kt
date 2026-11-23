@@ -819,6 +819,16 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 }
                 Text("Essai. JARVIS n'étant qu'une appli média dans Android Auto, la voiture ne lui prête pas son micro. Activé : la voiture passe en mode « appel » pendant la conversation (micro et haut-parleurs de la voiture), mais certains autoradios affichent alors leur écran d'appel à la place du lecteur JARVIS. Sans cet essai : micro du téléphone, ou bouton 🔍/🎤 du lecteur JARVIS (l'Assistant écoute avec le micro de la voiture et transmet ta demande à JARVIS).", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(6.dp))
+                // Quel micro écoute vraiment (relu à l'ouverture de l'écran) : plus de doute en voiture.
+                val microMot = fr.dd.jarvis.voice.VoskWake.microActuel
+                val microDemande = fr.dd.jarvis.voice.MicroJarvis.dernier
+                Text("🎙️ Quel micro ?\n" +
+                    "• Mot « Jarvis » : ${microMot ?: "micro du téléphone (écoute arrêtée en ce moment)"}. Il écoute en continu ; Android ne prête le micro de la voiture à aucune appli en écoute permanente (il faudrait passer la voiture en mode « appel » et couper la musique sans arrêt). En voiture, l'écoute devient continue, avec gain ×10 et réduction du bruit.\n" +
+                    "• Ta demande, après le bip : micro de la voiture quand JARVIS est ouvert sur l'écran Android Auto (sinon micro du téléphone)" +
+                    (microDemande?.let { ". Dernière demande écoutée par le $it." } ?: ".") + "\n" +
+                    "Conseil : téléphone sur un support, bas du téléphone (son micro) dégagé — pas dans une poche ni un vide-poche.",
+                    color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(6.dp))
                 Text("Après « Jarvis », tu enchaînes les demandes sans répéter le mot. Quand JARVIS a répondu et que tu ne dis plus rien pendant ce délai, la conversation se referme d'elle-même (petit bip descendant). « Merci » ou « c'est tout » la termine aussi.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -114,6 +114,8 @@ object CommandeMedia {
 
     /** Exécute la commande ; réponse courte (lue à voix haute). [voiture] : jamais de touche média de repli. */
     fun executer(ctx: Context, a: Action, voiture: Boolean = false): String {
+        // « Pause » : la musique lancée par JARVIS ne doit plus être relancée en fin de conversation.
+        if (a == Action.PAUSE) LectureGarantie.oublier()
         if (a == Action.VOLUME_UP || a == Action.VOLUME_DOWN) {
             val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             repeat(2) { am.adjustStreamVolume(AudioManager.STREAM_MUSIC, if (a == Action.VOLUME_UP) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI) }

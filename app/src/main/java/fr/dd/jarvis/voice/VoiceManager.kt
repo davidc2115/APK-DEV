@@ -38,6 +38,19 @@ class VoiceManager(private val ctx: Context) {
         private val instances = java.util.Collections.newSetFromMap(java.util.WeakHashMap<VoiceManager, Boolean>())
 
         /**
+         * JARVIS lance de la musique : il rend le focus audio de la conversation (le lecteur doit pouvoir le prendre pour
+         * démarrer) et ne relancera pas l'ancienne musique qu'il avait mise en pause au début de l'échange.
+         */
+        fun laisserPlaceMusique() {
+            fr.dd.jarvis.service.JarvisNotificationListener.oublierPauseVoix()
+            synchronized(instances) { instances.toList() }.forEach { v -> v.main.post { v.rendreFocusSession() } }
+            JournalVoix.noter("musique", "focus audio de la conversation rendu au lecteur")
+        }
+
+        /** Une voix de JARVIS parle, écoute ou tient une conversation (pour ne pas relancer la musique en plein échange). */
+        fun occupeQuelquePart(): Boolean = synchronized(instances) { instances.toList() }.any { it.sessionActive || it.occupee() }
+
+        /**
          * Moteur de reconnaissance à utiliser : jamais celui de JARVIS. Quand JARVIS est l'assistant par défaut, Android
          * désigne son moteur « factice » comme reconnaissance du système : chaque écoute échouait, était relancée
          * (bips, délais) puis basculait sur la reconnaissance locale. On vise directement celui de Google.
@@ -982,6 +995,15 @@ class VoiceManager(private val ctx: Context) {
             // Laisse le micro et la voix se libérer, sinon la musique repart puis se recoupe.
             main.postDelayed({ if (!sessionActive) fr.dd.jarvis.service.JarvisNotificationListener.reprendreMediaApresVoix() }, 700)
         }
+        // Musique lancée pendant cette conversation : elle doit jouer maintenant que JARVIS se tait (sinon « lecture »).
+        main.postDelayed({ if (!sessionActive && !occupee()) fr.dd.jarvis.device.LectureGarantie.verifier(ctx) }, 1500)
+    }
+
+    /** Rend le focus audio pris pour la conversation (sans la terminer). */
+    private fun rendreFocusSession() {
+        runCatching { focusSession?.let { am.abandonAudioFocusRequest(it) } }
+        focusSession = null
+        mediaPauseeSession = false
     }
 
     /** Vrai si le son sort vers un appareil externe sans annulation d'écho fiable (Bluetooth, autoradio, Android Auto). */
@@ -1160,11 +1182,14 @@ class VoiceManager(private val ctx: Context) {
                 am.abandonAudioFocus(focusListener)
                 focusLegacy = false
             }
-            val demande = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+            // Musique tout juste lancée par JARVIS : sa réponse la BAISSE seulement. L'arrêter le temps de la phrase la
+            // laissait souvent en pause pour de bon (lecteur qui venait de s'ouvrir et ne reprenait pas).
+            val musique = fr.dd.jarvis.device.LectureGarantie.recente()
+            val demande = AudioFocusRequest.Builder(if (musique) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK else AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
                 .setAudioAttributes(attrs)
                 .setOnAudioFocusChangeListener(focusListener, main)
                 .setAcceptsDelayedFocusGain(false)
-                .setWillPauseWhenDucked(true)
+                .setWillPauseWhenDucked(!musique)
                 .build()
             focus = demande
             val resultat = am.requestAudioFocus(demande)
@@ -1346,15 +1371,18 @@ class VoiceManager(private val ctx: Context) {
             // Sur l'autoradio / un casque Bluetooth, le micro entend la voix de Jarvis sans annulation d'écho : la « coupure
             // en reprenant la parole » se déclencherait sur sa propre voix. Elle reste active sur le téléphone seul.
             externe = sortieBluetooth()
-            coupe = bargeIn && micOk() && !externe
-            coupeVoiture = bargeIn && micOk() && externe && appli()?.enVoiture == true && VoskModel.ready(ctx)
+            // Musique tout juste lancée : elle continue (baissée) pendant la réponse — pas de coupure par la voix ni de mode
+            // appel, sinon la musique elle-même interromprait JARVIS.
+            val musique = fr.dd.jarvis.device.LectureGarantie.recente()
+            coupe = bargeIn && micOk() && !externe && !musique
+            coupeVoiture = bargeIn && micOk() && externe && appli()?.enVoiture == true && VoskModel.ready(ctx) && !musique
             val appel = coupe && duplex && hautParleurSeul() && entrerModeAppel()
             // En Bluetooth/A2DP et Android Auto, l'usage MEDIA garantit le routage vers l'autoradio.
             // Micro du casque Bluetooth en service : la voix passe par la même liaison mains-libres (l'A2DP y est suspendu).
             attrsVoix = when { appel -> attrAppel; microBluetoothPret() -> attrAppel; externe -> attrBluetooth; else -> attrAssistant }
-            if (!appel && am.mode == AudioManager.MODE_NORMAL && !sessionActive) demanderFocusReponse(attrsVoix)
+            if (!appel && am.mode == AudioManager.MODE_NORMAL && (!sessionActive || musique)) demanderFocusReponse(attrsVoix)
             // Hors session : focus + vraie commande PAUSE pour les lecteurs qui ignorent le focus, reprise après la réponse.
-            mediaPauseeParJarvis = !sessionActive && externe && fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
+            mediaPauseeParJarvis = !sessionActive && externe && !musique && fr.dd.jarvis.service.JarvisNotificationListener.pauseMediaPourVoix(ctx)
             runCatching { tts?.setAudioAttributes(attrsVoix) }
             volume = (ctx.applicationContext as? fr.dd.jarvis.JarvisApp)?.let { runCatching { fr.dd.jarvis.device.Contexte.volumeVoix(it) }.getOrDefault(1f) } ?: 1f
             // Voix Android changée dans les réglages : appliquée sans redémarrer.

@@ -16,6 +16,8 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     companion object {
         @Volatile var instance: JarvisAccessibilityService? = null
+        /** Description du bouton « Lecture » d'un lecteur (phrase entière : « Lecture aléatoire », « Pause » exclus). */
+        internal val BOUTON_LECTURE = Regex("(?i)(lire|lecture|play|reprendre|reprendre la lecture|resume|lancer la lecture|lire la vid[ée]o|play video)")
         private val uiEvents = ArrayDeque<String>()
         @Volatile private var uiEventSequence: Long = 0L
         private val uiEventsLock = Any()
@@ -230,6 +232,24 @@ class JarvisAccessibilityService : AccessibilityService() {
             sb.append('\n')
         }
         for (i in 0 until n.childCount) collect(n.getChild(i), sb)
+    }
+
+    /**
+     * Appuie sur le bouton « Lecture » du lecteur [paquet] s'il est affiché (description exacte : « Lire », « Lecture »,
+     * « Play »…). Jamais un bouton « Pause » ni « Lecture aléatoire » : la lecture ne peut pas être arrêtée par erreur.
+     */
+    fun cliquerLecture(paquet: String): Boolean {
+        val racines = (runCatching { windows.mapNotNull { it.root } }.getOrDefault(emptyList()) + listOfNotNull(runCatching { rootInActiveWindow }.getOrNull()))
+            .filter { it.packageName?.toString() == paquet }
+        for (r in racines) {
+            val n = chercher(r) { x -> x.isVisibleToUser && BOUTON_LECTURE.matches((x.contentDescription ?: "").toString().trim()) } ?: continue
+            var cur: AccessibilityNodeInfo? = n
+            while (cur != null) {
+                if (cur.isClickable) return cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                cur = cur.parent
+            }
+        }
+        return false
     }
 
     fun clickText(text: String): Boolean {
