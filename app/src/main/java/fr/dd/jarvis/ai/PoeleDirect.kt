@@ -51,6 +51,9 @@ object PoeleDirect {
 
     private fun texte(id: String, nom: String) = " " + normaliser(id.substringAfter('.').replace('_', ' ') + " " + nom) + " "
 
+    /** Texte d'une entité (identifiant + nom affiché) tel que les pièces y sont cherchées. */
+    internal fun texteEntite(id: String, nom: String) = texte(id, nom)
+
     private fun lieuOk(t: String, lieu: List<String>) = lieu.all { m -> (LIEUX[m] ?: listOf(m)).any { t.contains(" $it") } }
 
     /** Mots qui désignent une pièce ou un niveau de la maison. */

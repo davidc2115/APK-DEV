@@ -104,3 +104,37 @@ class PoeleLieuTest {
         assertTrue(Restitution.exigeUneSuite(mapOf("maison" to "- quand tu passes les poêles en mode nuit, donne aussi la température du poêle"), demande))
     }
 }
+
+/** Les prochaines consignes : ni écrasées par une voisine, ni enregistrées avec un appareil faux sans le dire. */
+class ConsignesFuturesTest {
+    private val ETAGE = "switch.poele_etage_natural_mode"
+    private val RDC = "switch.poele_rez_de_chaussee_natural_mode"
+
+    @Test fun memeSujetSeulementSiCestLaMemeChose() {
+        // Deux poêles, deux pièces : gardées toutes les deux.
+        assertFalse(Memo.memeSujet("pour le mode nuit du poêle de l'étage, utilise $ETAGE", "pour le mode nuit du poêle du salon, utilise $RDC"))
+        // Activer / retirer le même mode du même poêle : gardées toutes les deux.
+        assertFalse(Memo.memeSujet("pour le mode nuit du poêle du salon, allume $RDC", "pour retirer le mode nuit du poêle du salon, éteins $RDC"))
+        // Deux modes différents.
+        assertFalse(Memo.memeSujet("pour le mode nuit du poêle du salon utilise $RDC", "pour le mode silence du poêle du salon utilise $RDC"))
+        // Deux appareils différents de la même pièce.
+        assertFalse(Memo.memeSujet("la lumière du salon c'est light.salon", "le volet du salon c'est cover.salon"))
+        // Correction de la même consigne : remplacée.
+        assertTrue(Memo.memeSujet("la lumière du salon c'est light.plafonnier", "non, la lumière du salon c'est light.suspension"))
+        assertTrue(Memo.memeSujet("Donne seulement le titre et l'artiste", "Donne-moi seulement le titre et l'artiste du morceau"))
+    }
+
+    private val etats = mapOf(ETAGE to "-poele etage Natural Mode", RDC to "-poele rez de chaussée Natural Mode", "climate.poele_etage" to "Poêle étage")
+
+    @Test fun appareilVerifieALEnregistrement() {
+        VerifConsigne.remarques("pour le mode nuit du poêle du salon utilise switch.poele_salon_natural_mode", etats).single().let {
+            assertTrue(it, it.contains("n'existe pas") && it.contains(RDC))
+        }
+        VerifConsigne.remarques("pour le mode nuit du poêle du salon utilise $ETAGE", etats).single().let {
+            assertTrue(it, it.contains("autre pièce"))
+        }
+        assertTrue(VerifConsigne.remarques("mode nuit : $ETAGE pour l'étage et $RDC pour le salon", etats).isEmpty())
+        assertTrue(VerifConsigne.remarques("pour retirer le mode nuit du poêle de l'étage, éteins $ETAGE", etats).isEmpty())
+        assertTrue(VerifConsigne.remarques("réponds toujours en tableau", etats).isEmpty())
+    }
+}

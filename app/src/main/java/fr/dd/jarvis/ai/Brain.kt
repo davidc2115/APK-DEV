@@ -139,12 +139,14 @@ class Brain(
             // La consigne dite dans cette demande est confirmée : l'utilisateur sait qu'elle est retenue (et comment l'annuler).
             val c = consigneRetenue ?: apprentissage?.let { a -> kotlinx.coroutines.withTimeoutOrNull(400) { a.await() } }
             consigneRetenue = null
-            if (c != null) return finale.trimEnd() + "\n\n" + confirmation(c)
+            // Un appareil de la consigne est inconnu de Home Assistant ou porte le nom d'une autre pièce : dit tout de suite.
+            if (c != null) return finale.trimEnd() + "\n\n" + confirmation(c) + (VerifConsigne.avertissement(app, c.texte)?.let { "\n$it" } ?: "")
             // Analyse encore en cours (réponse très rapide) : la confirmation arrivera juste après, en message séparé.
             if (apprentissage != null && !apprentissage.isCompleted) fond.launch {
                 val tard = runCatching { apprentissage.await() }.getOrNull() ?: return@launch
                 kotlinx.coroutines.delay(1_500)
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { app.chatAjouter(ChatMsg(false, confirmation(tard))) }
+                val avert = VerifConsigne.avertissement(app, tard.texte)?.let { "\n$it" } ?: ""
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { app.chatAjouter(ChatMsg(false, confirmation(tard) + avert)) }
             }
             return finale
         } finally {

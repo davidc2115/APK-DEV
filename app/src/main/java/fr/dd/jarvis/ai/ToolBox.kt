@@ -374,11 +374,11 @@ class ToolBox(
             mapOf("action" to prop("voir | lieu | surnom | fait | oublier"), "nom" to prop("lieu : domicile, travail ou autre nom ; surnom : le surnom ; fait : la clé ; oublier : ce qu'il faut oublier."),
                 "valeur" to prop("lieu : adresse ; surnom : ce qu'il désigne (nom exact) ; fait : la valeur."),
                 "domaine" to prop("surnom : discord_serveur | discord_salon | contact | appareil | lieu | autre."))))
-        put(tool("memoire_ajouter", "Enregistre une consigne durable de l'utilisateur dans la note Obsidian « Mémoire JARVIS ». La consigne est AJOUTÉE à sa rubrique (les autres consignes du sujet sont gardées ; une consigne presque identique est mise à jour). remplacer=oui seulement si l'utilisateur demande de remplacer toutes les consignes du sujet.",
+        put(tool("memoire_ajouter", "Enregistre une consigne durable de l'utilisateur dans la note Obsidian « Mémoire JARVIS ». La consigne est AJOUTÉE à sa rubrique (les autres consignes du sujet sont gardées ; une consigne sur exactement la même chose — même appareil, même pièce, même mode, même sens — est mise à jour). Pour un appareil, écris son identifiant Home Assistant exact (ex. switch.poele_etage_natural_mode) ET sa pièce, une consigne par appareil. remplacer=oui quand l'utilisateur corrige une consigne : celles qui parlent de la même chose sont remplacées, les autres restent.",
             mapOf(
                 "sujet" to prop("contacts | briefing | planning | mails | societe | musique | localisation | reponses | general. Choisis la rubrique la plus proche ; pour une préférence transversale, utilise general."),
                 "texte" to prop("La consigne complète, formulée clairement (structure, rubriques, calendrier à utiliser, exemples)."),
-                "remplacer" to prop("« oui » pour remplacer toutes les consignes du sujet (rare) ; sinon ajout.")
+                "remplacer" to prop("« oui » pour remplacer les consignes qui parlent de la même chose (correction) ; sinon ajout.")
             ), listOf("sujet", "texte")))
         put(tool("note_prendre", "Ajoute une note au CARNET DE NOTES de l'utilisateur (« prends note », « note que », « mets ça dans mes notes »). La note est ajoutée à sa rubrique (jamais remplacée), datée et recopiée dans Obsidian (JARVIS/Notes). Prendre note n'est JAMAIS une action : n'appelle ni Home Assistant ni une autre application pour une demande de note, même si elle parle du poêle, de la télé ou d'un réglage.",
             mapOf(
@@ -1374,8 +1374,10 @@ class ToolBox(
         }, direct = true)
         "tache_terminer" -> ToolResult(app.tasks.complete(a.optString("id")))
         "memoire_ajouter" -> ToolResult("✅ Consigne « ${a.optString("sujet")} » enregistrée (" +
-            (if (a.optString("remplacer").trim().lowercase() in setOf("oui", "true", "1")) app.memo.set(a.optString("sujet"), a.optString("texte"))
+            (if (a.optString("remplacer").trim().lowercase() in setOf("oui", "true", "1")) app.memo.remplacerSujet(a.optString("sujet"), a.optString("texte"))
              else app.memo.ajouterConsigne(a.optString("sujet"), a.optString("texte"))) + ")." +
+            // Appareil désigné : vérifié dans Home Assistant (identifiant inconnu, ou nom d'une autre pièce) — à dire à l'utilisateur.
+            (VerifConsigne.avertissement(app, a.optString("texte"))?.let { "\n$it\nDis-le à l'utilisateur et demande-lui l'identifiant exact." } ?: "") +
             runCatching { fr.dd.jarvis.device.Faits.apprendre(app, a.optString("sujet") + " : " + a.optString("texte")) }.getOrDefault(emptyList()).let { r -> if (r.isEmpty()) "" else "\nMémoire fiable : " + r.joinToString(" ; ") })
         "memoire_apprendre" -> ToolResult(app.memo.apprendre(a.optString("sujet"), a.optString("preference"), a.optString("preuve")))
         "memoire_apprentissages" -> ToolResult(app.memo.apprentissagesEnCours(), direct = true)

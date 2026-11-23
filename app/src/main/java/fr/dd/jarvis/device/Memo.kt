@@ -110,6 +110,27 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
             return pa.isNotEmpty() && pb.isNotEmpty() && pa != pb
         }
 
+        private val ENTITE = Regex("\\b(climate|switch|select|input_[a-z]+|light|cover|fan|button|script|scene|sensor|binary_sensor|media_player|number|automation|lock|vacuum|water_heater|humidifier|siren|alarm_control_panel)\\.[a-z0-9_]+")
+        private val ARRET = Regex("\\b(retir\\w*|enlev\\w*|desactiv\\w*|eteins|eteindre|eteint|couper|coupe|arret\\w*|fin|ferm\\w*|sors|sortir|quitt\\w*|stop\\w*|normal|normale|off)\\b")
+        private val MODES = Regex("\\b(nuit|night|silence|silencieux|eco|economie|confort|comfort|turbo|boost|natural|naturel|vacances|antigel|cinema|absence|jour|performance|equilibre)\\b")
+        private val APPAREILS = Regex("\\b(poeles?|lumieres?|lampes?|volets?|stores?|chauffage|radiateurs?|clim|climatisation|teles?|television|enceintes?|prises?|portail|alarme|cameras?|aspirateur|telephone|portable|musique|agenda|planning|mails?|meteo)\\b")
+
+        /**
+         * Deux consignes parlent-elles de la même chose (la nouvelle peut alors remplacer l'ancienne) ? Mots proches —
+         * comptés SANS les identifiants Home Assistant, qui faisaient se ressembler toutes les consignes d'appareils —, et
+         * ni pièce, ni mode, ni appareil, ni sens (activer / retirer) différents.
+         */
+        internal fun memeSujet(a: String, b: String): Boolean {
+            if (proximite(ENTITE.replace(a.lowercase(), " "), ENTITE.replace(b.lowercase(), " ")) < 0.6) return false
+            val na = fr.dd.jarvis.societe.core.normaliser(a); val nb = fr.dd.jarvis.societe.core.normaliser(b)
+            fun differents(r: Regex): Boolean {
+                val x = r.findAll(na).map { it.value.trimEnd('s') }.toSet(); val y = r.findAll(nb).map { it.value.trimEnd('s') }.toSet()
+                return x.isNotEmpty() && y.isNotEmpty() && x != y
+            }
+            if (piecesDifferentes(a, b) || differents(MODES) || differents(APPAREILS)) return false
+            return ARRET.containsMatchIn(na) == ARRET.containsMatchIn(nb)
+        }
+
         /** Mots communs (≥ 4 lettres) / mots de la plus courte des deux phrases. */
         internal fun proximite(a: String, b: String): Double {
             fun mots(s: String) = fr.dd.jarvis.societe.core.normaliser(s).split(' ').filter { it.length >= 4 }.toSet()
@@ -244,8 +265,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val canal = fr.dd.jarvis.ai.CanalDemande.de(nouvelle)
         fun memeCanal(l: String) = fr.dd.jarvis.ai.CanalDemande.de(l) == canal
         if (lignes.any { memeCanal(it) && (fr.dd.jarvis.societe.core.normaliser(it) == n || fr.dd.jarvis.societe.core.normaliser(it).contains(n)) }) return "déjà enregistrée"
-        // Deux consignes qui ne parlent pas de la même pièce (poêle de l'étage / du salon) ne se remplacent jamais.
-        val proche = lignes.indexOfFirst { memeCanal(it) && proximite(it, nouvelle) >= 0.6 && !piecesDifferentes(it, nouvelle) }
+        // Une consigne voisine n'est mise à jour que si elle parle VRAIMENT de la même chose (voir [memeSujet]) : celle du
+        // poêle de l'étage n'écrase plus celle du salon, ni « retirer le mode nuit » celle qui l'active.
+        val proche = lignes.indexOfFirst { memeCanal(it) && memeSujet(it, nouvelle) }
         if (proche >= 0) lignes[proche] = nouvelle else lignes += nouvelle
         items[k] = lignes.joinToString("\n") { "- $it" }
         return persist()
@@ -258,6 +280,27 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      * d'[ajouterConsigne] : deux consignes apprises presque identiques (mode nuit du poêle de l'étage / du salon) ne
      * s'écrasent plus l'une l'autre.
      */
+    /**
+     * « Remplace ma consigne sur… » : retire les consignes de la rubrique qui parlent de la même chose ([memeSujet]) et
+     * enregistre la nouvelle — les autres consignes de la rubrique sont GARDÉES (avant, toute la rubrique « maison »
+     * était effacée, consignes des poêles comprises).
+     */
+    @Synchronized
+    fun remplacerSujet(sujet: String, texte: String): String {
+        ensure()
+        val k = sujet.trim().lowercase().ifBlank { "general" }
+        val nouvelle = texte.trim().removePrefix("-").trim()
+        if (nouvelle.isBlank()) return "rien à enregistrer"
+        val lignes = items[k].orEmpty().lines().map { it.trim() }.filter { it.isNotBlank() }.map { it.removePrefix("-").trim() }
+        val canal = fr.dd.jarvis.ai.CanalDemande.de(nouvelle)
+        val n = fr.dd.jarvis.societe.core.normaliser(nouvelle)
+        val gardees = lignes.filterNot { l -> fr.dd.jarvis.ai.CanalDemande.de(l) == canal && (fr.dd.jarvis.societe.core.normaliser(l) == n || memeSujet(l, nouvelle)) }
+        items[k] = (gardees + nouvelle).joinToString("\n") { "- $it" }
+        val r = persist()
+        val retirees = lignes.size - gardees.size
+        return if (retirees > 0) "$r ; $retirees consigne(s) sur le même sujet remplacée(s), les ${gardees.size} autre(s) gardée(s)" else r
+    }
+
     @Synchronized
     fun remplacerConsigne(sujet: String, texte: String, meme: (String) -> Boolean): String {
         ensure()
