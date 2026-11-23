@@ -232,6 +232,8 @@ Règles :
         confirmer: suspend (String) -> Boolean = { false }, verifier: (suspend () -> String?)? = null
     ): String = withContext(Dispatchers.IO) {
         pourquoiIndisponible(app).takeIf { it.isNotBlank() }?.let { return@withContext it }
+        // Objectif déjà atteint (ex. la musique joue) : ne rien toucher — un appui de trop pouvait tout défaire.
+        verifier?.let { v -> runCatching { v() }.getOrNull()?.let { return@withContext it } }
         val historique = mutableListOf<String>()
         var derniereImage: Bitmap? = null
         var verificationsRatees = 0

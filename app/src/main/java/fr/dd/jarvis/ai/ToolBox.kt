@@ -1017,15 +1017,21 @@ class ToolBox(
                 val requete = a.optString("requete")
                 val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.playMusic(requete, pkgChoisi) }
                 // Lecture non confirmée : Jarvis prend l'écran, termine dans l'appli (recherche, bon résultat, lecture) et vérifie.
-                if (requete.isNotBlank() && !r.contains("est en cours de lecture") && !r.startsWith("🎵 En lecture") && fr.dd.jarvis.device.PiloteEcran.disponible(app) &&
-                    !r.contains("n'est pas installée") && !r.contains("Accès aux notifications")) {
+                // Jamais si la musique joue déjà (le pilotage pouvait appuyer sur le bouton et la METTRE EN PAUSE), ni en
+                // voiture / écran verrouillé (rien à voir ni toucher) : la réponse de lecture vérifiée suffit alors.
+                val dejaEnLecture = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    kotlinx.coroutines.delay(400); app.phone.lectureEnCours(pkgChoisi)
+                }
+                val ecranUtilisable = !app.enVoiture && runCatching { !(app.getSystemService(android.app.KeyguardManager::class.java)).isKeyguardLocked }.getOrDefault(false)
+                if (requete.isNotBlank() && dejaEnLecture == null && ecranUtilisable && !r.contains("est en cours de lecture") && !r.startsWith("🎵 En lecture") &&
+                    fr.dd.jarvis.device.PiloteEcran.disponible(app) && !r.contains("n'est pas installée") && !r.contains("Accès aux notifications")) {
                     val nom = app.phone.musicApps().entries.firstOrNull { it.value == pkgChoisi || it.key == pkgChoisi }?.key ?: pkgChoisi
                     val pilote = fr.dd.jarvis.device.PiloteEcran.piloter(app,
                         "Dans l'application $nom, lance la lecture de « $requete » : ouvre l'application si elle n'est pas affichée, utilise la recherche si besoin, appuie sur le résultat qui correspond le mieux puis sur lecture. Termine quand la lecture a visiblement démarré (bouton pause, bon titre).",
                         confirmer = { q -> confirm(q, true) },
                         verifier = { app.phone.lectureEnCours(pkgChoisi)?.let { t -> "🎵 Lecture confirmée par le lecteur : $t" } })
                     ToolResult("$r\n\n👁️ Je termine moi-même dans l'application :\n$pilote", direct = true)
-                } else ToolResult(r, direct = true)
+                } else ToolResult(if (dejaEnLecture != null && r.contains("non confirmée")) "🎵 $dejaEnLecture" else r, direct = true)
             }
         }
         "mode_sonore" -> ToolResult(fr.dd.jarvis.device.ModeSonore.appliquer(app, a.optString("mode").trim().lowercase().let { m ->

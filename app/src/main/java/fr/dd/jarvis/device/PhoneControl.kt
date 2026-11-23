@@ -348,22 +348,43 @@ class PhoneControl(private val ctx: Context) {
         if (!YtMusique.ouvrir(ctx, pkg, choisi, radio)) return null
         var c: android.media.session.MediaController? = null
         var modeEnvoye = false
-        val fin = System.currentTimeMillis() + 9000
-        var relance = false
+        val debut = System.currentTimeMillis()
+        // Appli démarrée à froid en arrière-plan : elle peut mettre plusieurs secondes à charger le morceau.
+        val fin = debut + 14_000
+        var relances = 0
+        var dernierPlay = 0L
+        var toucheEnvoyee = false
         while (System.currentTimeMillis() < fin) {
-            Thread.sleep(600)
-            c = session(pkg) ?: continue
+            Thread.sleep(500)
+            val maintenant = System.currentTimeMillis()
+            c = session(pkg)
+            if (c == null) {
+                // Toujours pas de lecteur au bout de 4 s : touche « lecture » (va à l'appli qui vient de s'ouvrir).
+                if (!toucheEnvoyee && maintenant - debut > 4000) { toucheEnvoyee = true; mediaKey("play") }
+                continue
+            }
             if (!modeEnvoye) {
                 MusiqueBibliotheque.configurerMode(ctx, mode, pkg)
                 modeEnvoye = true
             }
             val titre = titreDe(c)
             val change = titre != null && titre != avant
-            if (joue(c) && (change || correspond(c, choisi.titre))) break
-            // Ouvert sur le bon titre mais en pause : on lance la lecture (une seule fois).
-            if (!joue(c) && change && !relance && System.currentTimeMillis() > fin - 6000) { runCatching { c.transportControls.play() }; relance = true }
+            val bon = change || correspond(c, choisi.titre)
+            if (joue(c) && bon) break
+            // Le morceau demandé est chargé mais en pause (lien ouvert sans lecture automatique) : « lecture », redemandé
+            // jusqu'à 3 fois — avant : une seule tentative, et seulement si le titre avait déjà changé → musique ouverte
+            // mais jamais lancée.
+            if (!joue(c) && maintenant - debut > 1500 && maintenant - dernierPlay > 2000 && relances < 3) {
+                if (bon) { runCatching { c.transportControls.play() }; relances++; dernierPlay = maintenant }
+                else if (maintenant - debut > 6000) {
+                    // Toujours l'ancien morceau au bout de 6 s : le lien est rouvert une fois puis « lecture ».
+                    if (relances == 0) YtMusique.ouvrir(ctx, pkg, choisi, radio)
+                    runCatching { c.transportControls.play() }; relances++; dernierPlay = maintenant
+                }
+            }
         }
         val joueBien = c != null && joue(c)
+        if (!joueBien) fr.dd.jarvis.voice.JournalVoix.noter("musique", "« ${choisi.titre} » ouvert mais pas en lecture (session ${if (c == null) "absente" else "en pause"}, $relances relance(s))")
         YtMusique.retenir(listOf(choisi))
         // Réponse volontairement minimale : l'utilisateur veut uniquement le titre et l'artiste,
         // pas le nom de l'application, le mode de lecture ni une liste de résultats secondaires.
