@@ -60,7 +60,7 @@ class PhoneControl(private val ctx: Context) {
         return if (on) "Lampe allumée." else "Lampe éteinte."
     }
 
-    private fun adbOk() = PhoneShell.ready(ctx) || AdbShell.hasKey(ctx)
+    fun adbOk() = PhoneShell.ready(ctx) || AdbShell.hasKey(ctx)
     private fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
 
     fun findPackage(name: String): Pair<String, String>? {

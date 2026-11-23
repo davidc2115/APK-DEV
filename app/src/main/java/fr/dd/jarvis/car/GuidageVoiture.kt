@@ -3,7 +3,12 @@ package fr.dd.jarvis.car
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.os.Build
+import android.provider.Settings
 import android.net.Uri
 import androidx.core.app.NotificationCompat
 import fr.dd.jarvis.JarvisApp
@@ -22,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap
 object GuidageVoiture {
     val PAQUETS = setOf("com.waze", "com.google.android.apps.maps")
     private val dernieres = ConcurrentHashMap<String, Long>()
+    private val fenetres = ConcurrentHashMap<String, Long>()
     private const val NOTIF = 7731
 
     /** Notification d'une appli de navigation (appelé par l'écouteur de notifications). */
@@ -30,18 +36,46 @@ object GuidageVoiture {
         if (categorie == Notification.CATEGORY_NAVIGATION || permanente) dernieres.merge(pkg, quand) { a, b -> maxOf(a, b) }
     }
 
-    /** Guidage démarré depuis [depuis] ? null = impossible à savoir (accès aux notifications non accordé). */
-    fun demarreDepuis(depuis: Long): Boolean? {
-        if (dernieres.values.any { it >= depuis }) return true
-        return fr.dd.jarvis.service.JarvisNotificationListener.navigationActive(PAQUETS, depuis)
+    /** Fenêtre de Waze / Maps ouverte sur le téléphone (appelé par le service d'accessibilité). */
+    fun noterFenetre(pkg: String) { if (pkg in PAQUETS) fenetres[pkg] = System.currentTimeMillis() }
+
+    /** Voix de guidage en cours (Waze / Maps annonce le départ) : lecture audio « navigation » active. */
+    fun guidageVocal(ctx: Context): Boolean = runCatching {
+        ctx.getSystemService(AudioManager::class.java).activePlaybackConfigurations
+            .any { it.audioAttributes.usage == AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE }
+    }.getOrDefault(false)
+
+    /**
+     * Guidage démarré depuis [depuis] ? Indices : notification de navigation publiée ou mise à jour, fenêtre de Waze / Maps
+     * ouverte, voix de guidage. null = impossible à savoir (ni notifications ni accessibilité).
+     */
+    fun demarreDepuis(depuis: Long, ctx: Context? = null): Boolean? {
+        if (dernieres.values.any { it >= depuis } || fenetres.values.any { it >= depuis }) return true
+        if (ctx != null && guidageVocal(ctx)) return true
+        val notif = fr.dd.jarvis.service.JarvisNotificationListener.navigationActive(PAQUETS, depuis)
+        if (notif == null && fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) return false
+        return notif
     }
 
     /** Attend jusqu'à [ms] que le guidage apparaisse. */
-    suspend fun attendre(depuis: Long, ms: Long = 6000): Boolean? {
+    suspend fun attendre(depuis: Long, ms: Long = 6000, ctx: Context? = null): Boolean? {
         val fin = System.currentTimeMillis() + ms
-        var r = demarreDepuis(depuis)
-        while (r == false && System.currentTimeMillis() < fin) { delay(400); r = demarreDepuis(depuis) }
+        var r = demarreDepuis(depuis, ctx)
+        while (r == false && System.currentTimeMillis() < fin) { delay(400); r = demarreDepuis(depuis, ctx) }
         return r
+    }
+
+    /**
+     * Raison probable d'un lancement bloqué en arrière-plan, ou null si rien ne l'empêche (autorisations en place) :
+     * l'itinéraire a alors très probablement démarré même si aucun indice ne l'a confirmé.
+     */
+    fun blocageProbable(app: JarvisApp): String? {
+        if (fr.dd.jarvis.device.Xiaomi.est() && fr.dd.jarvis.device.Xiaomi.arrierePlan(app) == false)
+            return "HyperOS bloque l'ouverture d'applis en arrière-plan"
+        val superposition = runCatching { Settings.canDrawOverlays(app) }.getOrDefault(false)
+        if (Build.VERSION.SDK_INT >= 29 && !superposition && fr.dd.jarvis.service.JarvisAccessibilityService.instance == null && !app.phone.adbOk())
+            return "Android bloque les applis lancées en arrière-plan"
+        return null
     }
 
     /** Adresse au format attendu par Android Auto : mots séparés par « + » (« 12+rue+de+la+Paix,+Dijon »). */
@@ -82,7 +116,7 @@ object GuidageVoiture {
             val accepte = NavigationVoiture.lancer(destination, point)
             journal.noter("voiture", "Android Auto ${if (accepte) "a accepté" else "a refusé"} ${geo(destination, point)}")
             if (accepte) {
-                when (attendre(t0)) {
+                when (attendre(t0, ctx = app)) {
                     true -> { journal.noter("voiture", "guidage démarré par Android Auto vers $nom"); return "🧭 Guidage lancé dans Android Auto vers $nom." }
                     // Pas de lecture des notifications : impossible de vérifier, on ne relance pas une 2e fois par le téléphone.
                     null -> return "🧭 Guidage demandé à Android Auto vers $nom. Je ne peux pas vérifier qu'il a démarré : autorise l'accès aux notifications à JARVIS pour que je le confirme."
@@ -99,10 +133,20 @@ object GuidageVoiture {
         journal.noter("voiture", "téléphone : ${choix.ifBlank { "Google Maps" }} → ${r.take(120)}")
         if (r.startsWith("🧭")) {
             // Waze démarré à froid met plusieurs secondes à calculer l'itinéraire.
-            when (attendre(t1, 10_000)) {
-                true -> { journal.noter("voiture", "guidage démarré par ${choix.ifBlank { "Google Maps" }} vers $nom"); return "🧭 Guidage lancé vers $nom avec ${choix.ifBlank { "Google Maps" }}, affiché dans Android Auto." }
-                null -> return "$r Je ne peux pas vérifier qu'il a démarré : autorise l'accès aux notifications à JARVIS pour que je le confirme."
-                false -> echecs += "${choix.ifBlank { "Google Maps" }} ne s'est pas ouvert (Android bloque les applis lancées en arrière-plan)"
+            val nomAppli = choix.ifBlank { "Google Maps" }
+            when (attendre(t1, 10_000, app)) {
+                true -> { journal.noter("voiture", "guidage démarré par $nomAppli vers $nom"); return "🧭 Itinéraire vers $nom lancé dans $nomAppli." }
+                null -> return "🧭 Itinéraire vers $nom envoyé à $nomAppli."
+                false -> {
+                    val blocage = blocageProbable(app)
+                    // Rien ne l'empêche (autorisations en place) : Waze ne signale simplement pas toujours son départ.
+                    // Avant, JARVIS annonçait un échec alors que la navigation démarrait.
+                    if (blocage == null) {
+                        journal.noter("voiture", "$nomAppli : départ non confirmé, mais aucune autorisation ne manque → annoncé comme envoyé")
+                        return "🧭 Itinéraire vers $nom envoyé à $nomAppli."
+                    }
+                    echecs += "$nomAppli ne s'est pas ouvert ($blocage)"
+                }
             }
         } else echecs += r.removePrefix("❌ ").take(120)
 

@@ -144,7 +144,12 @@ class PorcupineWake(private val ctx: Context, private val accessKey: String, pri
  * ne déclenchent plus rien (c'était la cause des bips à répétition). Si des faux réveils se répètent, le service
  * relève [exigence] et le seuil monte.
  */
-class VoskWake(private val ctx: Context, private val econome: Boolean = true, private val onWake: () -> Unit) : WakeDetector {
+class VoskWake(
+    private val ctx: Context, private val econome: Boolean = true,
+    /** « Jarvis » n'importe où dans la phrase (coupure pendant une réponse : le micro entend aussi la voix de JARVIS). */
+    private val partout: Boolean = false,
+    private val onWake: () -> Unit
+) : WakeDetector {
     private var model: Model? = null
     private var service: SpeechService? = null
     @Volatile private var boucle: BoucleEconome? = null
@@ -202,6 +207,16 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
         /** Mots admis avant « jarvis » (« ok Jarvis », « dis Jarvis », « hey Jarvis »…). */
         private val AVANT = setOf("[unk]", "hey", "okay", "ok", "dis", "salut", "bonjour")
 
+        /** « jarvis » à n'importe quelle place, assez sûr et de durée plausible. */
+        internal fun contientMot(mots: org.json.JSONArray?, seuil: Double): Boolean {
+            if (mots == null) return false
+            return (0 until mots.length()).any { i ->
+                val w = mots.optJSONObject(i) ?: return@any false
+                val duree = w.optDouble("end", 0.0) - w.optDouble("start", 0.0)
+                w.optString("word") == "jarvis" && w.optDouble("conf", 0.0) >= seuil && duree in 0.22..1.3
+            }
+        }
+
         internal fun estReveil(mots: org.json.JSONArray?, seuil: Double): Boolean {
             if (mots == null) return false
             for (i in 0 until minOf(mots.length(), 2)) {
@@ -214,6 +229,8 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
             return false
         }
     }
+
+    private fun detecte(mots: org.json.JSONArray?) = if (partout) contientMot(mots, seuil()) else estReveil(mots, seuil())
 
     override fun start(): Boolean {
         if (!VoskModel.ready(ctx)) return false
@@ -240,7 +257,7 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
                     private fun check(j: String?) {
                         if (fired || j == null) return
                         try {
-                            if (estReveil(org.json.JSONObject(j).optJSONArray("result"), seuil())) { fired = true; JournalVoix.noter("Vosk", "« Jarvis » détecté${if (francais) "" else " (modèle anglais)"}"); onWake() }
+                            if (detecte(org.json.JSONObject(j).optJSONArray("result"))) { fired = true; JournalVoix.noter("Vosk", "« Jarvis » détecté${if (francais) "" else " (modèle anglais)"}"); onWake() }
                         } catch (_: Throwable) {}
                     }
                     override fun onPartialResult(hypothesis: String?) {}
@@ -264,7 +281,7 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
     private fun verifier(j: String?) {
         if (fired || j == null) return
         try {
-            if (estReveil(org.json.JSONObject(j).optJSONArray("result"), seuil())) { fired = true; JournalVoix.noter("Vosk", "« Jarvis » détecté${if (francais) "" else " (modèle anglais)"}"); onWake() }
+            if (detecte(org.json.JSONObject(j).optJSONArray("result"))) { fired = true; JournalVoix.noter("Vosk", "« Jarvis » détecté${if (francais) "" else " (modèle anglais)"}"); onWake() }
         } catch (_: Throwable) {}
     }
 

@@ -1250,6 +1250,11 @@ class VoiceManager(private val ctx: Context) {
         @Volatile private var prepare = false
         @Volatile private var total = 0
         private var coupe = false
+        /** En voiture : coupure en disant « Jarvis » (détecteur hors-ligne), la voix de l'autoradio empêchant la détection au son. */
+        private var coupeVoiture = false
+        private var motCoupure: VoskWake? = null
+        /** Derniers morceaux dits (la voiture les joue avec retard) : un « Jarvis » qui en fait partie est sa propre voix. */
+        @Volatile private var ditRecemment = ""
         private var externe = false
         private var attrsVoix: AudioAttributes = attrAssistant
         private var volume = 1f
@@ -1322,6 +1327,7 @@ class VoiceManager(private val ctx: Context) {
             if (!fini.compareAndSet(false, true)) return
             Presence.parole(false); Presence.sousTitre = ""
             barge?.stop(); barge = null
+            main.post { libererMotCoupure() }
             runCatching { piste?.pause(); piste?.flush() }
             runCatching { tts?.stop() }
             if (sansSuite) {
@@ -1341,6 +1347,7 @@ class VoiceManager(private val ctx: Context) {
             // en reprenant la parole » se déclencherait sur sa propre voix. Elle reste active sur le téléphone seul.
             externe = sortieBluetooth()
             coupe = bargeIn && micOk() && !externe
+            coupeVoiture = bargeIn && micOk() && externe && appli()?.enVoiture == true && VoskModel.ready(ctx)
             val appel = coupe && duplex && hautParleurSeul() && entrerModeAppel()
             // En Bluetooth/A2DP et Android Auto, l'usage MEDIA garantit le routage vers l'autoradio.
             // Micro du casque Bluetooth en service : la voix passe par la même liaison mains-libres (l'A2DP y est suspendu).
@@ -1359,8 +1366,50 @@ class VoiceManager(private val ctx: Context) {
         private fun voixLancee() {
             Presence.parole(true)
             if (coupe) main.post {
-                if (!fini.get() && barge == null && coupureAutorisee()) barge = BargeIn { main.post { if (!fini.get() && coupureAutorisee()) { JournalVoix.noter(nom, "coupure de parole : voix entendue pendant la réponse"); arreter(sansSuite = false) } } }.also { it.start() }
+                if (!fini.get() && barge == null && coupureAutorisee()) barge = BargeIn { main.post { if (!fini.get() && coupureAutorisee()) { JournalVoix.noter(nom, "coupure de parole : voix entendue pendant la réponse"); coupeLe = System.currentTimeMillis(); arreter(sansSuite = false) } } }.also { it.start() }
             }
+            if (coupeVoiture) main.post { if (!fini.get() && motCoupure == null && coupureAutorisee()) ecouterMotCoupure() }
+        }
+
+        /** Écoute « Jarvis » pendant la réponse en voiture (micro du téléphone, détecteur hors-ligne). */
+        private fun ecouterMotCoupure() {
+            // Chargement du modèle et ouverture du micro hors du fil principal.
+            Thread({
+                val w = VoskWake(ctx, econome = true, partout = true) { main.post { surMotCoupure() } }.apply { exigence = 2 }
+                val ok = w.start()
+                main.post {
+                    when {
+                        !ok -> { w.release(); JournalVoix.noter(nom, "coupure en voiture indisponible (micro occupé)") }
+                        fini.get() || motCoupure != null -> Thread({ runCatching { w.stop(); w.release() } }, "jarvis-fin-coupure").start()
+                        else -> { motCoupure = w; JournalVoix.noter(nom, "coupure en voiture prête : dis « Jarvis » pour couper la réponse") }
+                    }
+                }
+            }, "jarvis-coupure-voiture").start()
+        }
+
+        private fun surMotCoupure() {
+            val w = motCoupure ?: return
+            if (fini.get()) return
+            if (fr.dd.jarvis.societe.core.normaliser(ditRecemment).contains("jarvis")) {
+                // La réponse contient elle-même « Jarvis » : c'est sa propre voix sortie de l'autoradio.
+                JournalVoix.noter(nom, "« Jarvis » entendu dans sa propre réponse : ignoré")
+                motCoupure = null
+                Thread({
+                    w.stop(); Thread.sleep(400)   // le temps que l'ancienne boucle rende le micro
+                    val ok = w.start()
+                    main.post { if (ok && !fini.get() && motCoupure == null) motCoupure = w else Thread({ runCatching { w.stop(); w.release() } }).start() }
+                }, "jarvis-coupure-voiture").start()
+                return
+            }
+            JournalVoix.noter(nom, "coupure en voiture : « Jarvis » entendu pendant la réponse")
+            coupeLe = System.currentTimeMillis()
+            arreter(sansSuite = false)
+        }
+
+        private fun libererMotCoupure() {
+            val w = motCoupure ?: return
+            motCoupure = null
+            Thread({ runCatching { w.stop(); w.release() } }, "jarvis-fin-coupure").start()
         }
 
         private fun boucle() {
@@ -1372,6 +1421,7 @@ class VoiceManager(private val ctx: Context) {
                     // Voix libre : les phrases complètes déjà reçues partent sans attendre un bloc plus long.
                     if (file.isEmpty()) synchronized(tampon) { extraire(attendreBloc = false, toutDire = false) }
                     val morceau = file.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    if (morceau != null) ditRecemment = (ditRecemment.takeLast(300) + " " + morceau).takeLast(600)
                     if (morceau == null) {
                         if (ferme && file.isEmpty()) break
                         continue
@@ -1501,6 +1551,7 @@ class VoiceManager(private val ctx: Context) {
         private fun terminerApres() {
             Presence.parole(false); Presence.sousTitre = ""
             val b = barge; barge = null
+            main.post { libererMotCoupure() }
             finVoix = System.currentTimeMillis()
             // Android Auto : le son arrive dans la voiture avec du retard (flux sans fil, tampon de l'autoradio). Rendre le
             // focus audio — ou rouvrir le micro de la voiture — dès que le téléphone a fini d'écrire coupait la fin de la
@@ -1526,6 +1577,12 @@ class VoiceManager(private val ctx: Context) {
     }
 
     /** Fait taire JARVIS sans rappeler la suite (nouvelle demande, arrêt…). */
+    /** Dernière fois que l'utilisateur a coupé la parole à JARVIS (sa voix, ou « Jarvis » en voiture). */
+    @Volatile var coupeLe = 0L
+
+    /** L'utilisateur vient de couper la réponse : il faut l'écouter, pas retourner en veille. */
+    fun coupeRecente(): Boolean = System.currentTimeMillis() - coupeLe < 6000
+
     /** Voix, écoute ou micro en cours (sinon la conversation n'a plus rien d'actif). */
     fun occupee(): Boolean = paroleEnCours != null || ecoute || microJ != null
 

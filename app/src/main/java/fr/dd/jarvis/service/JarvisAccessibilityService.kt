@@ -111,6 +111,8 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
         val pkg = event.packageName?.toString()?.take(120).orEmpty()
         if (pkg.isBlank() || pkg == packageName) return
+        // Waze / Maps vient d'ouvrir une fenêtre : l'itinéraire demandé par JARVIS lui est bien parvenu.
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) fr.dd.jarvis.car.GuidageVoiture.noterFenetre(pkg)
         val kind = when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> "fenêtre/application changée"
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> "contenu actualisé"
