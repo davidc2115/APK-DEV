@@ -1325,7 +1325,8 @@ class Brain(
                     "tele|tv|television|lave linge|lave vaisselle|seche linge|aspirateur|robot|four|ventilateur|vmc|voiture)\\b").containsMatchIn(n)) return null
             val niveau = "(eco|economie|economique|haute performance|performance|equilibre|balanced)"
             val ordre = Regex("\\b(passe|passer|mets|mettre|met|active|activer|bascule|basculer|choisis|choisir|regle|regler|change|changer|remets|remettre)\\b.{0,60}\\b(mode\\s*)?$niveau\\b").containsMatchIn(n) ||
-                Regex("^(jarvis )?(en )?mode $niveau$").containsMatchIn(n)
+                Regex("^(jarvis )?(en )?mode $niveau$").containsMatchIn(n) ||
+                Regex("^(le |mon )?(telephone|portable|smartphone|jarvis)( qui passe| passe)?( en| sur| :)? (mode )?$niveau( d energie)?$|^mode $niveau (du|de|pour) (telephone|portable|jarvis)$").containsMatchIn(n)
             if (!ordre) return null
             val mode = modeEnergieDans(n) ?: return null
             val jarvis = Regex("\\b(jarvis|application|appli|app|assistant|toi|ton mode|ta configuration|mode de fonctionnement|fonctionnement)\\b").containsMatchIn(n)

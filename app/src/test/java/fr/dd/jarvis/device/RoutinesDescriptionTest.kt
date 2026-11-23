@@ -51,3 +51,28 @@ class PoeleConsigneDeuxPoelesTest {
         assertEquals(listOf("switch.poelerdcnaturalmode"), salon.map { it.id })
     }
 }
+
+class RoutinesComptesRendusTest {
+    @Test fun echecsReconnus() {
+        listOf("Le mode nuit du poêle de l’étage n’a pas pu être désactivé ; le commutateur reste sur « on ».",
+            "Home Assistant a accepté la commande pour désactiver le mode nuit du poêle du salon, mais l'état de l'appareil ne confirme pas encore le changement",
+            "⚠️ Poêle salon : mode nuit demandé, mais Home Assistant ne le confirme pas").forEach {
+            assertTrue(it, Routines.ligne("x", it).startsWith("❌"))
+        }
+        assertTrue(Routines.ligne("x", "🔥 -poele etage Natural Mode : mode nuit retiré.").startsWith("✅"))
+    }
+
+    @Test fun pasDeRoutineDansLaRoutine() {
+        Routines.pendantRoutine(60_000)
+        try {
+            assertTrue(Routines.refus("routines", JSONObject().put("action", "lancer").put("nom", "mode coucher")) != null)
+            assertNull(Routines.refus("routines", JSONObject().put("action", "lister")))
+        } finally { Routines.pendantRoutine(0) }
+    }
+
+    @Test fun modesEcritsSansVerbe() {
+        assertEquals("telephone" to "economie", fr.dd.jarvis.ai.Brain.modeEnergieDemande(fr.dd.jarvis.societe.core.normaliser("Téléphone en mode éco")))
+        assertEquals("jarvis" to "economie", fr.dd.jarvis.ai.Brain.modeEnergieDemande(fr.dd.jarvis.societe.core.normaliser("Jarvis en mode économie")))
+        assertEquals("telephone" to "equilibre", fr.dd.jarvis.ai.Brain.modeEnergieDemande(fr.dd.jarvis.societe.core.normaliser("le téléphone qui passe en mode équilibré")))
+    }
+}

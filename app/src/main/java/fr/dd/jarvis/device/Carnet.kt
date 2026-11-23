@@ -236,6 +236,20 @@ object Carnet {
     }
 
     /**
+     * Comme [entitesNotees], en cherchant AUSSI dans le coffre de notes et la mémoire d'Hermès (là où l'IA les trouve quand
+     * tu lui parles) : une consigne notée ailleurs que dans le carnet ou la mémoire de Jarvis était invisible pour les
+     * commandes directes.
+     */
+    suspend fun entitesNoteesToutes(app: JarvisApp, recherche: String): List<Pair<String, String>> {
+        val mots = NotesPertinentes.motsCles(recherche)
+        if (mots.isEmpty()) return emptyList()
+        val sources = toutes(app).map { it.sujet to it.texte } + runCatching { app.memo.all().map { (k, v) -> k to v } }.getOrDefault(emptyList()) +
+            runCatching { app.memo.entreesHermesListe().map { "hermes" to it } }.getOrDefault(emptyList()) +
+            runCatching { listOf("notes" to NotesPertinentes.pour(app, recherche, 700)) }.getOrDefault(emptyList())
+        return entitesParLigne(sources, mots)
+    }
+
+    /**
      * Consigne par consigne (une ligne, une phrase) : chaque entité est rendue avec SA phrase, les plus pertinentes
      * d'abord. Avant, toute une rubrique de consignes (« maison » : des dizaines de lignes) comptait comme un seul texte :
      * ses 6 premières entités sortaient dans l'ordre du fichier, avec le début de la rubrique comme contexte — la

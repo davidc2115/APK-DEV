@@ -320,7 +320,9 @@ object PoeleDirect {
         // 0. Entité écrite dans la phrase (« … mode nuit avec switch.xxx ») : c'est elle.
         explicites.mapNotNull { pour(it) }.takeIf { it.isNotEmpty() }?.let { return it }
         // 0 bis. Tes notes pour CE mode de CE poêle (« le mode nuit du poêle du salon, c'est select.xxx ») : elles priment.
-        val noteesMode = notes.filter { (_, extrait) -> contientMode(" " + normaliser(extrait) + " ") && (d.lieu.isEmpty() || lieuOk(" " + normaliser(extrait) + " ", d.lieu)) }
+        // Consigne qui parle de ce mode, et de cette pièce — dans sa phrase OU dans le nom de l'entité citée.
+        val noteesMode = notes.filter { (id, extrait) -> contientMode(" " + normaliser(extrait) + " ") &&
+            (d.lieu.isEmpty() || lieuOk(" " + normaliser(extrait) + " ", d.lieu) || (id in parId && lieuOk(t(id), d.lieu))) }
             .mapNotNull { (id, extrait) -> if (id.startsWith("climate.") && options(id, "preset_modes").isEmpty() && options(id, "fan_modes").isEmpty()) null else pour(id, extrait) }
         if (noteesMode.isNotEmpty() && (d.tous || noteesMode.size == 1)) return noteesMode
         // Une consigne qui cite les deux poêles (« mode nuit : switch.a pour l'étage, switch.b pour le rez-de-chaussée ») :
@@ -424,7 +426,7 @@ object PoeleDirect {
         if (!Serveur.haConfigure(app)) return null
         val arr = JSONArray(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Serveur.ha(app, "GET", "/api/states") })
         val toutes = (0 until arr.length()).map { arr.getJSONObject(it) }
-        val notes = runCatching { fr.dd.jarvis.device.Carnet.entitesNotees(app, "poele " + d.lieu.joinToString(" ") + " mode " + d.mode.first()) }.getOrDefault(emptyList())
+        val notes = runCatching { fr.dd.jarvis.device.Carnet.entitesNoteesToutes(app, "poele " + d.lieu.joinToString(" ") + " mode " + d.mode.first()) }.getOrDefault(emptyList())
         val explicites = Regex("\\b(?:climate|switch|select|input_boolean|input_select|button|input_button|script|scene)\\.[a-z0-9_]+").findAll(texte.lowercase()).map { it.value }.toList()
         val cmds = commandesMode(toutes, d, notes.map { it.first }, notes, explicites) ?: run {
             // Pour comprendre la prochaine fois : ce que JARVIS a vu (interrupteurs / sélecteurs des poêles, consignes).

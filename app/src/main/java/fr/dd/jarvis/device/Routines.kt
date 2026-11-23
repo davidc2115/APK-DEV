@@ -165,6 +165,9 @@ object Routines {
 
     /** Routine en cours jusqu'à cette heure (0 = aucune) : les outils d'administration sont refusés à tous. */
     @Volatile private var enCoursJusqua = 0L
+    /** Routines en cours d'exécution (identifiants) et leurs noms / phrases : jamais relancées par leurs propres actions. */
+    private val enCours = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val nomsEnCours = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val INTERDITS = setOf("ha_admin", "ha_config", "ha_sauvegarde", "ha_dashboard", "serveur_service", "serveur_tache", "serveur_diagnostic",
         "serveur_fichiers", "serveur_scan_ports", "ssh_commande", "ssh_fichier", "ssh_script", "pilote_ecran", "piloter_telephone")
 
@@ -183,6 +186,10 @@ object Routines {
         val args = fr.dd.jarvis.societe.core.normaliser(a.toString().replace('_', ' '))
         val interdit = when {
             outil in TOUJOURS -> true
+            // Une action de routine ne relance ni une routine ni le mode du même nom (imbrication, actions mélangées).
+            outil == "routines" -> a.optString("action").trim().lowercase() in setOf("lancer", "executer", "activer")
+            outil == "modes_jarvis" -> a.optString("action").trim().lowercase() in setOf("activer", "desactiver") &&
+                (cle(a.optString("nom")) in nomsEnCours || cle(a.optString("nom")).removePrefix("mode ") in nomsEnCours)
             outil == "ha_service" -> domaine in setOf("homeassistant", "hassio", "recorder", "system_log", "logger")
             // Administration : seulement ses actions dangereuses (un appel de service par l'API reste permis — c'est
             // parfois ainsi qu'Hermès retire le mode nuit, et il le fait aussi hors routine).
@@ -209,6 +216,12 @@ object Routines {
         val debut = System.currentTimeMillis()
         val lignes = mutableListOf<String>()
         val actions = r.actions.map { it.trim().replace(Regex("^(?:[-•*·]+|\\d+[.)])\\s*"), "").trim() }.filter { it.isNotBlank() }
+        // Routine déjà en cours (relancée par une de ses propres actions) : pas d'imbrication.
+        if (!enCours.add(r.id)) {
+            fr.dd.jarvis.voice.JournalVoix.noter("routine", "« ${r.nom} » déjà en cours : relance imbriquée ignorée")
+            return "⚙️ Routine « ${r.nom} » déjà en cours."
+        }
+        nomsEnCours.addAll(listOf(cle(r.nom)) + r.phrases.map { cle(it) })
         enCoursJusqua = System.currentTimeMillis() + 10 * 60_000L
         try {
             var poeleAvant = false
@@ -221,16 +234,18 @@ object Routines {
                 poeleAvant = poele
                 val t0 = System.currentTimeMillis()
                 val direct = runCatching { brain.reflexeSeul(a) }.getOrNull()
-                // Comme une demande dite à Jarvis : avec la conversation récente (ce que tu lui as expliqué sur tes poêles,
-                // tes entités…) — avant, l'action arrivait seule, sans ce que la même phrase dite hors routine avait.
-                val fil = runCatching { app.chat.toList().takeLast(12) }.getOrDefault(emptyList())
+                // L'action seule : avec la conversation, l'IA voyait « passe en mode coucher » et RELANÇAIT la routine en
+                // cours, imbriquée (très long, actions mélangées). Tes consignes et notes, elles, sont lues dans tous les cas.
                 val rep = direct ?: runCatching {
-                    brain.reply(fil + ChatMsg(true, a), apprendre = false, vocal = CanalDemande.vocal) { }
+                    brain.reply(listOf(ChatMsg(true, a)), apprendre = false, vocal = CanalDemande.vocal) { }
                 }.getOrElse { "❌ ${it.message ?: it.javaClass.simpleName}" }
                 fr.dd.jarvis.voice.JournalVoix.noter("routine", "« ${a.take(60)} » ${if (direct != null) "sans IA" else "comme une demande normale"} en ${System.currentTimeMillis() - t0} ms : ${rep.lineSequence().firstOrNull().orEmpty().take(80)}")
                 lignes += ligne(a, rep)
             }
-        } finally { enCoursJusqua = 0L }
+        } finally {
+            enCours.remove(r.id); nomsEnCours.clear()
+            if (enCours.isEmpty()) enCoursJusqua = 0L
+        }
         fr.dd.jarvis.voice.JournalVoix.noter("routine", "« ${r.nom} » terminée en ${System.currentTimeMillis() - debut} ms")
         return "⚙️ Routine « ${r.nom} »\n" + lignes.joinToString("\n")
     }
@@ -238,7 +253,9 @@ object Routines {
     /** Compte rendu d'une action en une ligne : ✅ / ❌ puis le résultat court. */
     internal fun ligne(action: String, resultat: String): String {
         val premiere = resultat.lineSequence().map { it.replace(Regex("[#*_`>|]+"), "").trim() }.firstOrNull { it.isNotBlank() }.orEmpty().take(140)
-        val echec = Regex("^(❌|⚠️)|(^|[^\\p{L}])([ÉéEe]chec|[Ii]mpossible|[Ii]ntrouvable|[Ee]rreur)").containsMatchIn(premiere)
+        val n = fr.dd.jarvis.societe.core.normaliser(premiere)
+        val echec = Regex("^(❌|⚠️|⛔)|(^|[^\\p{L}])([ÉéEe]chec|[Ii]mpossible|[Ii]ntrouvable|[Ee]rreur)").containsMatchIn(premiere) ||
+            Regex("\\b(n a pas pu|pas pu etre|ne confirme pas|non confirme|pas confirme|reste sur|reste a|toujours (sur|en|actif|allume)|echoue|refuse|bloque|n a pas (ete|change|suivi)|pas ete (active|desactive|applique|pris))").containsMatchIn(n)
         val texte = premiere.replace(Regex("^(✅|❌|⚠️)\\s*"), "").ifBlank { action }
         return (if (echec) "❌ " else "✅ ") + texte
     }
