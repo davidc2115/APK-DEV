@@ -156,7 +156,9 @@ object Restitution {
             "(tu ne dois pas l'inventer), réponds uniquement le mot INCOMPLET. Si aucune consigne ne s'applique, renvoie la réponse telle quelle. " +
             "Sinon, réponds uniquement avec la réponse remise en forme, en français."
         val utilisateur = "CONSIGNES :\n" + regles.joinToString("\n") { "- $it" } + "\n\nDEMANDE : $demande\n\nRÉPONSE À REMETTRE EN FORME :\n$r"
-        val sortie = kotlinx.coroutines.withTimeoutOrNull(if (miseEnForme) 4_000L else 2_500L) {
+        // À la voix, la mise en forme ne retarde la réponse que d'1,5 s au plus (sinon : réponse brute, tout de suite).
+        val delai = when { CanalDemande.vocal -> 1_500L; miseEnForme -> 4_000L; else -> 2_500L }
+        val sortie = kotlinx.coroutines.withTimeoutOrNull(delai) {
             try { app.llm.groq.plain(systeme, utilisateur) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
         }?.trim().orEmpty()
         if (Regex("^\\W*INCOMPLET\\W*$").matches(sortie)) {

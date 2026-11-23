@@ -38,6 +38,8 @@ class Brain(
     /** Consigne apprise en arrière-plan pendant cette demande / le modèle a lui-même appelé memoire_ajouter. */
     @Volatile private var consigneApprise: ConsignesExplicites.Consigne? = null
     @Volatile private var memoireAjouteeCeTour = false
+    /** Réflexes seuls (actions d'une routine) : s'arrête avant le bavardage, Hermès et l'IA. */
+    @Volatile private var reflexesSeuls = false
     private val fond = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     private fun consigneExigeUneSuite(texte: String): Boolean = forcerCerveau || runCatching { Restitution.exigeUneSuite(app.memo.all(), texte) }.getOrDefault(false)
@@ -67,6 +69,18 @@ class Brain(
             if (r == "déjà enregistrée" || r == "rien à enregistrer") null
             else ConsignesExplicites.Consigne(e.rubrique, e.texte).also { consigneApprise = it; ConsignesExplicites.derniere = it.rubrique to it.texte }
         }
+    }
+
+    /**
+     * Réflexe seul, sans IA ni Hermès : la réponse si une commande directe sait faire [texte] (elle est alors exécutée),
+     * sinon null. Sert aux routines, dont chaque action simple part ainsi tout de suite.
+     */
+    suspend fun reflexeSeul(texte: String, onStatus: (String) -> Unit = {}): String? {
+        reflexesSeuls = true
+        sortieDirecte = false; sortieLecture = false; forcerCerveau = false; captureConsignes = false
+        return try {
+            replyInterne(listOf(ChatMsg(true, texte)), false, null, onStatus).takeIf { it != SANS_REFLEXE }
+        } finally { reflexesSeuls = false }
     }
 
     private fun confirmation(c: ConsignesExplicites.Consigne): String =
@@ -569,6 +583,8 @@ class Brain(
                 if (!multi && !suite) installationDirecte(texteUser, onStatus)?.let { return reflexe(it) }
             }
         }
+        // Action de routine : aucun réflexe ne la connaît → elle ira à l'IA (ou Hermès) avec les autres.
+        if (reflexesSeuls) return SANS_REFLEXE
         // Conversation simple (« salut », « comment ça va ? », « merci ») : réponse immédiate, un seul appel d'IA, sans outils ni Hermès.
         // Le bavardage utilisateur est prioritaire sur le mode « Hermès pour tout » :
         // une conversation sociale ne doit jamais être escaladée vers Hermès.
@@ -1143,6 +1159,8 @@ class Brain(
     }
 
     companion object {
+        /** Réponse interne de [reflexeSeul] : aucun réflexe ne sait faire cette action. */
+        private const val SANS_REFLEXE = "\u0000sans-reflexe"
         /** Demande d'AGIR après une lecture (planning, SMS, mails, réveils…) : la lecture n'est alors qu'une étape. Verbes seulement. */
         internal val ACTION_APRES_LECTURE = Regex("\\b(navigation|navigue|naviguer|gps|itineraire|emmene|amene|ramene|guide moi|conduis|waze|" +
             "appelle|appeler|telephone a|envoie|envoyer|transfere|transferer|ecris|ecrire|reponds|repondre|previens|prevenir|partage|partager|" +

@@ -680,11 +680,19 @@ class PhoneControl(private val ctx: Context) {
     /** Essaie chaque commande, puis vérifie l'état réel avant de répondre. */
     private fun toggle(label: String, on: Boolean, key: String, cmds: List<String>): String {
         val errors = mutableListOf<String>()
+        // Déjà dans l'état demandé : rien à faire (réponse immédiate).
+        if (stateOn(key) == on) return "$label ${if (on) "activé" else "désactivé"}."
         for (c in cmds) {
             val r = sh(c)
             if (isError(r)) return "Échec $label : $r"
-            Thread.sleep(1200)
-            val st = stateOn(key)
+            // État relu toutes les 250 ms (1,5 s au plus) au lieu d'1,2 s d'attente fixe.
+            var st: Boolean? = null
+            val fin = System.currentTimeMillis() + 1500
+            while (System.currentTimeMillis() < fin) {
+                Thread.sleep(250)
+                st = stateOn(key)
+                if (st == on) break
+            }
             if (st == null || st == on) {
                 return if (st == on) "$label ${if (on) "activé" else "désactivé"}." else "$label : commande envoyée (état non vérifiable)."
             }

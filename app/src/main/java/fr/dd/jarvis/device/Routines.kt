@@ -9,6 +9,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.ai.Brain
+import fr.dd.jarvis.ai.CanalDemande
 import fr.dd.jarvis.ai.ChatMsg
 import fr.dd.jarvis.ai.ToolBox
 import org.json.JSONArray
@@ -139,12 +140,48 @@ object Routines {
             "puis réponds par un compte rendu très court, une ligne par action commençant par ✅ ou ❌ :\n" +
             r.actions.mapIndexed { i, a -> "${i + 1}. $a" }.joinToString("\n")
 
+    /**
+     * Exécute la routine action par action, dans l'ordre. Chaque action qu'une commande directe sait faire (musique,
+     * lumière, appli, navigation, mode du téléphone…) part TOUT DE SUITE, sans IA ; seules les autres passent par l'IA
+     * (ou Hermès), regroupées quand elles se suivent. Avant : toute la routine partait à l'IA (voire à Hermès), même pour
+     * trois commandes simples — de longues secondes sur « réfléchit ».
+     */
     suspend fun executer(app: JarvisApp, r: Routine, contexte: String = "", tools: ToolBox? = null): String {
         marquer(app, r)
         if (r.actions.isEmpty()) return "La routine « ${r.nom} » n'a aucune action : ajoute-en dans Réglages › Agents › Routines."
         val brain = Brain(app.llm, tools ?: ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }
-        val rep = runCatching { brain.reply(listOf(ChatMsg(true, consigne(r, contexte))), apprendre = false) { } }.getOrElse { "❌ ${it.message ?: it.javaClass.simpleName}" }
-        return "⚙️ Routine « ${r.nom} »\n$rep"
+        val debut = System.currentTimeMillis()
+        val lignes = mutableListOf<String>()
+        val pourIA = mutableListOf<String>()
+        suspend fun viderIA() {
+            if (pourIA.isEmpty()) return
+            val t0 = System.currentTimeMillis()
+            val rep = runCatching { brain.reply(listOf(ChatMsg(true, consigne(r.copy(actions = pourIA.toList()), contexte))), apprendre = false, vocal = CanalDemande.vocal) { } }
+                .getOrElse { "❌ ${it.message ?: it.javaClass.simpleName}" }
+            fr.dd.jarvis.voice.JournalVoix.noter("routine", "${pourIA.size} action(s) par l'IA en ${System.currentTimeMillis() - t0} ms")
+            lignes += rep.trim()
+            pourIA.clear()
+        }
+        for (a in r.actions.map { it.trim() }.filter { it.isNotBlank() }) {
+            // Une action qui suit des actions confiées à l'IA attend son tour (l'ordre de la routine est gardé).
+            if (pourIA.isNotEmpty()) { pourIA += a; continue }
+            val t0 = System.currentTimeMillis()
+            val direct = runCatching { brain.reflexeSeul(a) }.getOrNull()
+            if (direct == null) { pourIA += a; continue }
+            fr.dd.jarvis.voice.JournalVoix.noter("routine", "« ${a.take(60)} » sans IA en ${System.currentTimeMillis() - t0} ms")
+            lignes += ligne(a, direct)
+        }
+        viderIA()
+        fr.dd.jarvis.voice.JournalVoix.noter("routine", "« ${r.nom} » terminée en ${System.currentTimeMillis() - debut} ms")
+        return "⚙️ Routine « ${r.nom} »\n" + lignes.joinToString("\n")
+    }
+
+    /** Compte rendu d'une action en une ligne : ✅ / ❌ puis le résultat court. */
+    internal fun ligne(action: String, resultat: String): String {
+        val premiere = resultat.lineSequence().map { it.replace(Regex("[#*_`>|]+"), "").trim() }.firstOrNull { it.isNotBlank() }.orEmpty().take(140)
+        val echec = Regex("^(❌|⚠️)|(^|[^\\p{L}])([ÉéEe]chec|[Ii]mpossible|[Ii]ntrouvable|[Ee]rreur)").containsMatchIn(premiere)
+        val texte = premiere.replace(Regex("^(✅|❌|⚠️)\\s*"), "").ifBlank { action }
+        return (if (echec) "❌ " else "✅ ") + texte
     }
 
     private fun marquer(app: JarvisApp, r: Routine) {
