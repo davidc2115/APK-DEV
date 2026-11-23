@@ -102,7 +102,11 @@ class PhoneControl(private val ctx: Context) {
                 extras.forEach { (k, v) -> append(" --es ").append(k).append(' ').append(q(v)) }
             }
             val r = PhoneShell.exec(ctx, cmd)
-            if (!r.contains("Error", true) && !r.contains("Exception", true) && !r.startsWith("ADB non") && !r.startsWith("Erreur ADB")) return ""
+            if (!r.contains("Error", true) && !r.contains("Exception", true) && !r.startsWith("ADB non") && !r.startsWith("Erreur ADB")) {
+                fr.dd.jarvis.voice.JournalVoix.noter("lancement", "${pkg ?: data?.substringBefore(':') ?: "appli"} : lancé par l'ADB intégré")
+                return ""
+            }
+            fr.dd.jarvis.voice.JournalVoix.noter("lancement", "ADB intégré en échec : ${r.take(100)}")
         }
         return try {
             val i = Intent(action ?: Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

@@ -289,6 +289,7 @@ class VoskWake(private val ctx: Context, private val econome: Boolean = true, pr
             if (ar.state != android.media.AudioRecord.STATE_INITIALIZED) { ar.release(); return false }
             try { ar.startRecording() } catch (_: Throwable) { ar.release(); return false }
             if (ar.recordingState != android.media.AudioRecord.RECORDSTATE_RECORDING) { ar.release(); return false }
+            runCatching { ar.routedDevice?.let { d -> JournalVoix.noter("Vosk", "écoute de « Jarvis » sur ${d.productName} (type ${d.type})") } }
             micro = ar
             vivantes.incrementAndGet()
             fil = Thread({ try { boucle(ar, taille) } finally { vivantes.decrementAndGet() } }, "jarvis-ecoute").apply { isDaemon = true; start() }

@@ -33,6 +33,7 @@ class JarvisNotificationListener : NotificationListenerService() {
                 it.packageName != ctx.packageName && it.playbackState?.state == PlaybackState.STATE_PLAYING
             }
             sessionsPauseesPourVoix = enLecture
+            if (enLecture.isNotEmpty()) fr.dd.jarvis.voice.FocusJarvis.noter()
             enLecture.forEach { runCatching { it.transportControls.pause() } }
             enLecture.isNotEmpty()
         }.getOrDefault(false)

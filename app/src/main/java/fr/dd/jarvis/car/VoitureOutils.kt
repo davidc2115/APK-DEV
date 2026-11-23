@@ -46,6 +46,9 @@ object VoixVoiture {
 
     fun taire() { main.post { vm?.stopSpeaking() } }
 
+    /** La voix de la voiture parle (ou se prépare à parler). */
+    fun occupee(): Boolean = vm?.occupee() == true
+
     fun liberer() { main.post { vm?.release(); vm = null } }
 }
 

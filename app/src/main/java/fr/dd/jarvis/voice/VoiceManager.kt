@@ -902,6 +902,7 @@ class VoiceManager(private val ctx: Context) {
                     }
                     // Hors conversation, la musique de la voiture / du casque baisse le temps du bip (sinon il s'y perd).
                     if (externe && !sessionActive && Build.VERSION.SDK_INT >= 26) focusBip = runCatching {
+                        FocusJarvis.noter()
                         AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attrs)
                             .setOnAudioFocusChangeListener({ }, main).build().also { am.requestAudioFocus(it) }
                     }.getOrNull()
@@ -954,6 +955,7 @@ class VoiceManager(private val ctx: Context) {
     fun sessionDebut() = main.post {
         if (sessionActive) return@post
         sessionActive = true
+        FocusJarvis.noter()
         // Casque / voiture Bluetooth : leur micro (liaison mains-libres) pour toute la conversation.
         ouvrirMicroBluetooth()
         if (Build.VERSION.SDK_INT >= 26) runCatching {
@@ -1150,6 +1152,7 @@ class VoiceManager(private val ctx: Context) {
     /** Focus exclusif temporaire : demande aux lecteurs actifs de suspendre leur lecture pendant le TTS. */
     private fun demanderFocusReponse(attrs: AudioAttributes = attrAssistant) {
         if (Build.VERSION.SDK_INT < 26) return
+        FocusJarvis.noter()
         runCatching {
             focus?.let { am.abandonAudioFocusRequest(it) }
             if (focusLegacy) {
@@ -1236,6 +1239,8 @@ class VoiceManager(private val ctx: Context) {
 
     inner class Parole internal constructor(private val limite: Int, private val onDone: () -> Unit) {
         private val fini = AtomicBoolean(false)
+        /** Arrêtée (ou terminée) : plus rien ne sera dit et [onDone] ne sera plus appelé si elle a été coupée. */
+        val terminee: Boolean get() = fini.get()
         private val file = java.util.concurrent.LinkedBlockingDeque<String>()
         private val tampon = StringBuilder()
         private val recu = StringBuilder()
@@ -1450,9 +1455,9 @@ class VoiceManager(private val ctx: Context) {
                     JournalVoix.noter(nom, "voix → ${d.productName} (type ${d.type})")
                     if (d.type !in telephone) { sortieVoiture = d; return@OnRoutingChangedListener }
                     if (fini.get()) return@OnRoutingChangedListener
-                    JournalVoix.noter(nom, "⚠️ voix basculée sur le haut-parleur du téléphone en pleine réponse : retour vers la voiture demandé")
+                    JournalVoix.noter(nom, "⚠️ voix basculée sur le haut-parleur du téléphone en pleine réponse" +
+                        (sortieVoiture?.let { " : retour vers ${it.productName} demandé" } ?: ""))
                     sortieVoiture?.let { v -> runCatching { t.setPreferredDevice(v) } }
-                    demanderFocusReponse(attrsVoix)
                 }, main)
             }
         }
@@ -1521,6 +1526,9 @@ class VoiceManager(private val ctx: Context) {
     }
 
     /** Fait taire JARVIS sans rappeler la suite (nouvelle demande, arrêt…). */
+    /** Voix, écoute ou micro en cours (sinon la conversation n'a plus rien d'actif). */
+    fun occupee(): Boolean = paroleEnCours != null || ecoute || microJ != null
+
     fun stopSpeaking() {
         paroleEnCours?.arreter(sansSuite = true)
         paroleEnCours = null

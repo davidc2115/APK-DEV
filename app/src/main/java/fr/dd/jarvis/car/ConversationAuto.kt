@@ -39,15 +39,26 @@ object ConversationAuto {
         }
     }
 
+    /**
+     * Dit [texte] et revient quand la voix a fini. Si la voix est coupée sans prévenir (pause de la voiture, autre son),
+     * on n'attend plus la fin qui ne viendra pas : avant, la conversation restait bloquée et « Jarvis » n'était plus entendu.
+     */
     private suspend fun parler(app: JarvisApp, texte: String) {
-        // Garde-fou proportionnel à la longueur : une longue réponse (agenda, mails…) dure plus de 90 s ; l'ancienne limite
-        // fixe coupait la voix au milieu d'une phrase et passait à l'écoute suivante.
-        withTimeoutOrNull(90_000L + texte.length * 110L) {
-            suspendCancellableCoroutine { c ->
-                VoixVoiture.parler(app, texte) { if (c.isActive) c.resume(Unit) }
-                c.invokeOnCancellation { VoixVoiture.taire() }
+        val fini = java.util.concurrent.atomic.AtomicBoolean(false)
+        VoixVoiture.parler(app, texte) { fini.set(true) }
+        // Garde-fou proportionnel à la longueur (une longue réponse dure plus de 90 s).
+        val limite = System.currentTimeMillis() + 90_000L + texte.length * 110L
+        try {
+            kotlinx.coroutines.delay(1500)
+            var calme = 0
+            while (!fini.get() && System.currentTimeMillis() < limite) {
+                if (!VoixVoiture.occupee()) {
+                    if (++calme >= 3) { fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "voix coupée avant la fin de la réponse : on continue"); return }
+                } else calme = 0
+                kotlinx.coroutines.delay(400)
             }
-        }
+            if (!fini.get()) VoixVoiture.taire()
+        } catch (e: kotlinx.coroutines.CancellationException) { VoixVoiture.taire(); throw e }
     }
 
     private suspend fun boucle(app: JarvisApp, ctx: androidx.car.app.CarContext) {

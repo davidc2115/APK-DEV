@@ -148,6 +148,7 @@ class MicroVoiture(private val ctx: CarContext) {
                 }
             }
             .build()
+        fr.dd.jarvis.voice.FocusJarvis.noter()
         val focusAccorde = runCatching { am.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED }.getOrDefault(false)
         try {
             // 1) Micro de la voiture (Android Auto le transmet au téléphone).
@@ -162,7 +163,8 @@ class MicroVoiture(private val ctx: CarContext) {
                     } finally { runCatching { record.stopRecording() } }
                 }.getOrNull()
                 if (r != null && r !is Ecoute.Erreur) { telephone = false; return r }
-            }
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "micro de la voiture inutilisable (${(r as? Ecoute.Erreur)?.message ?: "erreur"}) → micro du téléphone")
+            } else fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "micro de la voiture non fourni" + (if (!focusAccorde) " (focus audio refusé)" else "") + " → micro du téléphone")
             // 2) Repli : micro du téléphone.
             telephone = true
             return telephone(attenteMs, maxMs)
@@ -216,8 +218,9 @@ class MicroVoiture(private val ctx: CarContext) {
                     // L'ordre des octets du flux n'est pas garanti : le bon est celui où le bruit de fond est faible.
                     calLE += Pcm.rms(trame, 0, Pcm.TRAME, false); calBE += Pcm.rms(trame, 0, Pcm.TRAME, true)
                     if (calLE.size >= 15) {
-                        // Silence numérique parfait : aucun vrai micro ne donne ça (micro refusé par l'hôte) → repli.
-                        if (calLE.sum() == 0.0 && calBE.sum() == 0.0) return Ecoute.Erreur("micro muet")
+                        // Silence numérique (quasi) parfait : aucun vrai micro ne donne ça, même dans une voiture à l'arrêt
+                        // (micro coupé par l'hôte, flux vide) → repli sur le micro du téléphone.
+                        if ((calLE.maxOrNull() ?: 0.0) < 2.0 && (calBE.maxOrNull() ?: 0.0) < 2.0) return Ecoute.Erreur("micro muet")
                         val be = calBE.sum() < calLE.sum()
                         grosBoutiste = be
                         fin = FinDePhrase((if (be) calBE else calLE).minOrNull() ?: 100.0)

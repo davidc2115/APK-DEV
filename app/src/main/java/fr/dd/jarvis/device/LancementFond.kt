@@ -26,6 +26,8 @@ object LancementFond {
     fun demarrer(ctx: Context, i: Intent) {
         val app = ctx.applicationContext
         val point = if (Build.VERSION.SDK_INT >= 26 && runCatching { Settings.canDrawOverlays(app) }.getOrDefault(false)) afficherPoint(app) else null
+        fr.dd.jarvis.voice.JournalVoix.noter("lancement", "${i.`package` ?: i.data?.scheme ?: "appli"} : superposition ${if (point != null) "affichée" else "non autorisée"}, " +
+            "accessibilité ${if (fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) "active" else "inactive"}")
         try {
             val acc = fr.dd.jarvis.service.JarvisAccessibilityService.instance
             if (acc != null) runCatching { acc.startActivity(i) }.getOrElse { app.startActivity(i) } else app.startActivity(i)

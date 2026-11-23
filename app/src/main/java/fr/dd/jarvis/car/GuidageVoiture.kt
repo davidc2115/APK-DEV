@@ -37,7 +37,7 @@ object GuidageVoiture {
     }
 
     /** Attend jusqu'à [ms] que le guidage apparaisse. */
-    suspend fun attendre(depuis: Long, ms: Long = 8000): Boolean? {
+    suspend fun attendre(depuis: Long, ms: Long = 6000): Boolean? {
         val fin = System.currentTimeMillis() + ms
         var r = demarreDepuis(depuis)
         while (r == false && System.currentTimeMillis() < fin) { delay(400); r = demarreDepuis(depuis) }
@@ -68,11 +68,16 @@ object GuidageVoiture {
         val journal = fr.dd.jarvis.voice.JournalVoix
         val nom = destination.ifBlank { point?.let { "${coord(it.first)}, ${coord(it.second)}" }.orEmpty() }
         val echecs = mutableListOf<String>()
+        journal.noter("voiture", "itinéraire demandé vers « $nom »" + (point?.let { " (${coord(it.first)}, ${coord(it.second)})" } ?: " (adresse non géolocalisée)") +
+            " · JARVIS ouvert dans Android Auto : ${if (NavigationVoiture.contexte != null) "oui" else "non"}" +
+            " · lecture des notifications : ${if (fr.dd.jarvis.service.JarvisNotificationListener.active) "oui" else "NON"}")
 
         // 1. Android Auto lance lui-même son GPS (JARVIS ouvert dans Android Auto pendant le trajet).
         if (NavigationVoiture.contexte != null) {
             val t0 = System.currentTimeMillis()
-            if (NavigationVoiture.lancer(destination, point)) {
+            val accepte = NavigationVoiture.lancer(destination, point)
+            journal.noter("voiture", "Android Auto ${if (accepte) "a accepté" else "a refusé"} ${geo(destination, point)}")
+            if (accepte) {
                 when (attendre(t0)) {
                     true -> { journal.noter("voiture", "guidage démarré par Android Auto vers $nom"); return "🧭 Guidage lancé dans Android Auto vers $nom." }
                     // Pas de lecture des notifications : impossible de vérifier, on ne relance pas une 2e fois par le téléphone.
@@ -87,6 +92,7 @@ object GuidageVoiture {
         val choix = appli.trim().ifBlank { app.store.appPrefs["navigation"].orEmpty() }.ifBlank { dispo.keys.firstOrNull { it.contains("Waze") } ?: dispo.keys.firstOrNull().orEmpty() }
         val t1 = System.currentTimeMillis()
         val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.navigate(destination, "d", choix, point) }
+        journal.noter("voiture", "téléphone : ${choix.ifBlank { "Google Maps" }} → ${r.take(120)}")
         if (r.startsWith("🧭")) {
             when (attendre(t1)) {
                 true -> { journal.noter("voiture", "guidage démarré par ${choix.ifBlank { "Google Maps" }} vers $nom"); return "🧭 Guidage lancé vers $nom avec ${choix.ifBlank { "Google Maps" }}, affiché dans Android Auto." }

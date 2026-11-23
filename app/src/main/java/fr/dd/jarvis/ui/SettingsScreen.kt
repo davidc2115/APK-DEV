@@ -837,6 +837,14 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                             runCatching { (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
                                 .setPrimaryClip(android.content.ClipData.newPlainText("Journal écoute JARVIS", journal)) }
                         }
+                        HudChip("Partager", false) {
+                            runCatching {
+                                ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
+                                    .setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, fr.dd.jarvis.voice.JournalVoix.texte())
+                                    .putExtra(android.content.Intent.EXTRA_SUBJECT, "Journal écoute JARVIS"), "Envoyer le journal")
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                            }
+                        }
                         HudChip("Effacer", false) { fr.dd.jarvis.voice.JournalVoix.vider(); journal = fr.dd.jarvis.voice.JournalVoix.texte() }
                     }
                 }

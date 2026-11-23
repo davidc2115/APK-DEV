@@ -95,6 +95,7 @@ class JarvisApp : Application() {
         installCrashReporter()
         runCatching { noterArretsAnormaux() }
         store = Store(this)
+        runCatching { fr.dd.jarvis.voice.JournalVoix.brancher(filesDir) }
         if (!store.hermesModeMigre.value) {
             if (store.hermesMode.value == "auto") store.hermesMode.set("tout")
             store.hermesModeMigre.set(true)

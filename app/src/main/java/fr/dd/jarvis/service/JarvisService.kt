@@ -234,6 +234,7 @@ class JarvisService : Service() {
         getSystemService(NotificationManager::class.java).cancel(NOTIF_REPRISE)
         running = true
         actuel = this
+        main.removeCallbacks(surveillanceConversation); main.postDelayed(surveillanceConversation, 10_000)
         // Historique de la réception mobile et alerte de perte prolongée du réseau (écoute passive, sans mesure active).
         runCatching { fr.dd.jarvis.device.ReseauHistorique.demarrer(application as fr.dd.jarvis.JarvisApp) }
         // Verrou de veille seulement PENDANT une conversation (voir garderEveille) : en attente du mot « Jarvis », le
@@ -410,6 +411,28 @@ class JarvisService : Service() {
             if (oui) wake?.acquire(10 * 60_000L)
             else if (wake?.isHeld == true) wake?.release()
         } catch (_: Throwable) {}
+    }
+
+    /**
+     * Filet de sécurité : une conversation « ouverte » sans voix, sans écoute ni traitement pendant 40 s (fin de voix jamais
+     * reçue, micro refermé par Android) rend l'écoute de « Jarvis » — avant, le mot d'éveil restait sourd jusqu'au
+     * redémarrage de JARVIS.
+     */
+    private var inactifDepuis = 0L
+    private val surveillanceConversation = object : Runnable {
+        override fun run() {
+            if (!running) return
+            val bloquee = awake && !busy && !deverrouillage && confirm == null && voice?.occupee() == false
+            val maintenant = System.currentTimeMillis()
+            if (!bloquee) inactifDepuis = 0L
+            else if (inactifDepuis == 0L) inactifDepuis = maintenant
+            else if (maintenant - inactifDepuis > 40_000) {
+                inactifDepuis = 0L
+                journal("conversation restée ouverte sans voix ni écoute : retour à l'attente de « Jarvis »")
+                goIdle()
+            }
+            main.postDelayed(this, 10_000)
+        }
     }
 
     /** Retour à l'attente du mot « Jarvis » (détecteur hors-ligne s'il est installé, sinon écoute en boucle). */
@@ -684,7 +707,13 @@ class JarvisService : Service() {
                     flux?.arreter(sansSuite = true)
                 } else {
                     busy = false
-                    flux?.finir(reply)
+                    val f = flux
+                    if (f == null || f.terminee) {
+                        // Voix coupée pendant le traitement (pause de la voiture, autre son) : sa fin ne viendra jamais. Sans
+                        // ça, la conversation restait « ouverte » et le détecteur « Jarvis » n'était plus jamais réarmé.
+                        journal("réponse prête mais voix déjà coupée : retour à l'attente de « Jarvis »")
+                        if (awake && relancer) ecouter() else goIdle()
+                    } else f.finir(reply)
                 }
             }
         }
@@ -823,6 +852,7 @@ class JarvisService : Service() {
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(surveillanceConversation)
         running = false
         if (actuel === this) actuel = null
         runCatching { fr.dd.jarvis.device.ReseauHistorique.arreter(application as fr.dd.jarvis.JarvisApp) }

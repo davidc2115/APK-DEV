@@ -538,12 +538,24 @@ class JarvisMediaService : MediaBrowserService() {
         }
 
         override fun onPause() {
+            // Pause envoyée par Android Auto parce que JARVIS vient lui-même de prendre le son (voix, micro, bip) : on
+            // n'interrompt rien (avant : sa propre voix coupée en pleine phrase, conversation fermée, « Jarvis » sourd).
+            if (fr.dd.jarvis.voice.FocusJarvis.recent()) {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "pause de la carte JARVIS ignorée (provoquée par JARVIS lui-même)")
+                session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)); return
+            }
+            fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "pause demandée par la voiture : JARVIS se tait")
             VoixVoiture.taire(); JarvisService.interrompreDepuisVoiture()
             enCours = false; piloteJusqua = 0L; veille?.cancel(); derniereFin = SystemClock.elapsedRealtime()
             session.setPlaybackState(etat(PlaybackState.STATE_PAUSED))
         }
 
         override fun onStop() {
+            if (fr.dd.jarvis.voice.FocusJarvis.recent()) {
+                fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "arrêt de la carte JARVIS ignoré (provoqué par JARVIS lui-même)")
+                session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)); return
+            }
+            fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "arrêt demandé par la voiture : JARVIS se tait")
             VoixVoiture.taire(); JarvisService.interrompreDepuisVoiture()
             enCours = false; piloteJusqua = 0L; veille?.cancel()
             session.setPlaybackState(etat(PlaybackState.STATE_STOPPED))
