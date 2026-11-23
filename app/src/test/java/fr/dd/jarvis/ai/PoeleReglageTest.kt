@@ -159,3 +159,70 @@ class PoeleModeNotesTest {
         assertNull(fr.dd.jarvis.device.Routines.refus("ha_admin", JSONObject()))       // pas de routine en cours
     }
 }
+
+class PoeleRetraitModeTest {
+    private fun etat(id: String, nom: String, state: String = "heat", attrs: JSONObject = JSONObject()) =
+        JSONObject().put("entity_id", id).put("state", state).put("attributes", attrs.put("friendly_name", nom))
+
+    @Test fun formesDuRetrait() {
+        listOf("Retirer le mode nuit des poêles", "Fin du mode nuit du poêle du salon", "Poêle du salon mode nuit off",
+            "Poêle de l'étage : mode nuit désactivé", "Poêles sans mode nuit", "Désactiver le mode nuit du poêle de l'étage").forEach {
+            assertTrue(it, !PoeleDirect.modeDemande(it)!!.activer)
+        }
+        assertTrue(PoeleDirect.modeDemande("Retirer le mode nuit des poêles")!!.tous)
+        PoeleDirect.modeDemande("Remets le poêle du salon en mode normal")!!.let { assertTrue(!it.activer); assertEquals(listOf("salon"), it.lieu); assertTrue("silence" in it.mode) }
+    }
+
+    @Test fun retraitSurLesDeuxPoeles() {
+        val toutes = listOf(etat("climate.poele_etage", "Poêle étage"), etat("climate.poele_salon", "Poêle salon"),
+            etat("switch.poele_etage_mode_nuit", "Poêle étage Mode nuit", "on"), etat("switch.poele_salon_mode_nuit", "Poêle salon Mode nuit", "on"),
+            etat("switch.poele_salon_silence", "Poêle salon Silence", "off"))
+        // « Les poêles » : chaque interrupteur à SON poêle (avant : deux candidats par poêle → rien, puis échec).
+        val c = PoeleDirect.commandesMode(toutes, PoeleDirect.modeDemande("Retirer le mode nuit des poêles")!!)!!
+        assertEquals(listOf("switch.poele_etage_mode_nuit", "switch.poele_salon_mode_nuit"), c.map { it.id }.sorted())
+        assertTrue(c.all { it.service == "turn_off" })
+        // « Mode normal » : on éteint les modes allumés de ce poêle seulement.
+        assertEquals(listOf("switch.poele_salon_mode_nuit"), PoeleDirect.commandesMode(toutes, PoeleDirect.modeDemande("Remets le poêle du salon en mode normal")!!)!!.map { it.id })
+    }
+
+    @Test fun gardeDesRoutinesCiblee() {
+        val R = fr.dd.jarvis.device.Routines
+        R.pendantRoutine(60_000)
+        try {
+            assertTrue(R.refus("ha_admin", JSONObject().put("action", "redemarrer")) != null)
+            assertTrue(R.refus("ha_admin", JSONObject().put("action", "integration_recharger")) != null)
+            assertTrue(R.refus("ha_service", JSONObject().put("domaine", "homeassistant").put("service", "restart")) != null)
+            assertTrue(R.refus("ssh_commande", JSONObject().put("commande", "ls")) != null)
+            // Un appel de service par l'API d'administration reste permis (Hermès retire parfois le mode nuit ainsi).
+            assertNull(R.refus("ha_admin", JSONObject().put("action", "rest").put("chemin", "/api/services/switch/turn_off").put("methode", "POST")))
+            assertNull(R.refus("ha_service", JSONObject().put("domaine", "switch").put("service", "turn_off")))
+            assertNull(R.refus("ha_entites", JSONObject()))
+        } finally { R.pendantRoutine(0) }
+    }
+}
+
+class ConsignesParLigneTest {
+    @Test fun chaqueEntiteAvecSaConsigne() {
+        val maison = (1..12).joinToString("\n") { "- la lumière $it c'est light.lampe_$it" } +
+            "\n- pour le mode nuit du poêle du salon, utilise select.salon_puissance (option Nuit)" +
+            "\n- pour retirer le mode nuit du poêle du salon, mets select.salon_puissance sur Confort" +
+            "\n- le poêle de l'étage c'est climate.poele_etage"
+        val mots = fr.dd.jarvis.device.NotesPertinentes.motsCles("poele salon mode nuit")
+        val r = fr.dd.jarvis.device.Carnet.entitesParLigne(listOf("maison" to maison), mots)
+        // Avant : les 6 premières entités de la rubrique (des lampes), avec le début de la rubrique comme contexte.
+        assertEquals("select.salon_puissance", r.first().first)
+        assertTrue(r.first().second.contains("mode nuit du poêle du salon"))
+        assertTrue(r.none { it.first.startsWith("light.") })
+    }
+
+    @Test fun optionNommeeDansLaConsigne() {
+        val toutes = listOf(
+            JSONObject().put("entity_id", "climate.poele_salon").put("state", "heat").put("attributes", JSONObject().put("friendly_name", "Poêle salon")),
+            JSONObject().put("entity_id", "select.salon_puissance").put("state", "Nuit").put("attributes", JSONObject().put("friendly_name", "Salon puissance")
+                .put("options", JSONArray(listOf("Confort", "Nuit", "Turbo")))))
+        val notes = listOf("select.salon_puissance" to "maison : pour retirer le mode nuit du poêle du salon, mets select.salon_puissance sur Confort")
+        PoeleDirect.commandesMode(toutes, PoeleDirect.modeDemande("Retirer le mode nuit du poêle du salon")!!, notes.map { it.first }, notes)!!.single().let {
+            assertEquals("select_option", it.service); assertEquals("Confort", it.donnees!!.getString("option"))
+        }
+    }
+}

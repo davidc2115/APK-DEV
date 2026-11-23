@@ -146,11 +146,28 @@ object Routines {
     private val INTERDITS = setOf("ha_admin", "ha_config", "ha_sauvegarde", "ha_dashboard", "serveur_service", "serveur_tache", "serveur_diagnostic",
         "serveur_fichiers", "serveur_scan_ports", "ssh_commande", "ssh_fichier", "ssh_script", "pilote_ecran", "piloter_telephone")
 
+    internal fun pendantRoutine(ms: Long) { enCoursJusqua = if (ms <= 0) 0L else System.currentTimeMillis() + ms }
+
+    /** Ce qui, dans les arguments d'un outil d'administration, peut redémarrer, recharger, supprimer ou reconfigurer. */
+    private val DANGER = Regex("restart|redemarr|reboot|reload|recharg|\\bstop\\b|arreter|supprim|delete|remove|desinstall|uninstall|mettre a jour|mise a jour|" +
+        "\\bupdate|upgrade|hacs|docker|systemctl|\\bkill|config entries|config core|check config|ecrire|\\bwrite|restaur|backup|sauvegard|integration")
+    /** Outils toujours refusés pendant une routine (shell du serveur, pilotage de l'écran). */
+    private val TOUJOURS = setOf("ssh_commande", "ssh_fichier", "ssh_script", "serveur_tache", "ha_sauvegarde", "pilote_ecran", "piloter_telephone")
+
     /** Refus d'un outil pendant une routine (null : autorisé). */
-    fun refus(outil: String, a: JSONObject): String? {
-        if (System.currentTimeMillis() > enCoursJusqua) return null
+    internal fun refus(outil: String, a: JSONObject, maintenant: Long = System.currentTimeMillis()): String? {
+        if (maintenant > enCoursJusqua) return null
         val domaine = a.optString("domaine").trim().lowercase()
-        if (outil !in INTERDITS && !(outil == "ha_service" && domaine in setOf("homeassistant", "hassio", "recorder", "system_log", "logger"))) return null
+        val args = fr.dd.jarvis.societe.core.normaliser(a.toString().replace('_', ' '))
+        val interdit = when {
+            outil in TOUJOURS -> true
+            outil == "ha_service" -> domaine in setOf("homeassistant", "hassio", "recorder", "system_log", "logger")
+            // Administration : seulement ses actions dangereuses (un appel de service par l'API reste permis — c'est
+            // parfois ainsi qu'Hermès retire le mode nuit, et il le fait aussi hors routine).
+            outil in INTERDITS -> DANGER.containsMatchIn(args)
+            else -> false
+        }
+        if (!interdit) return null
         fr.dd.jarvis.voice.JournalVoix.noter("routine", "outil « $outil » refusé pendant la routine (administration / redémarrage)")
         return "⛔ Interdit pendant une routine : pas d'administration de Home Assistant ni du serveur (recharger, redémarrer, configurer). " +
             "Fais seulement l'action demandée avec ha_service sur l'appareil, sinon réponds ❌ pour cette action."

@@ -231,10 +231,26 @@ object Carnet {
     fun entitesNotees(app: JarvisApp, recherche: String): List<Pair<String, String>> {
         val mots = NotesPertinentes.motsCles(recherche)
         if (mots.isEmpty()) return emptyList()
-        val sources = toutes(app).map { it.sujet + " : " + it.texte } + runCatching { app.memo.all().map { (k, v) -> "$k : $v" } }.getOrDefault(emptyList())
-        return sources.filter { NotesPertinentes.score(it, mots) > 0 }
-            .flatMap { s -> ENTITE.findAll(s).map { it.value to s.replace('\n', ' ').take(220) }.toList() }
-            .distinctBy { it.first }.take(6)
+        val sources = toutes(app).map { it.sujet to it.texte } + runCatching { app.memo.all().map { (k, v) -> k to v } }.getOrDefault(emptyList())
+        return entitesParLigne(sources, mots)
+    }
+
+    /**
+     * Consigne par consigne (une ligne, une phrase) : chaque entité est rendue avec SA phrase, les plus pertinentes
+     * d'abord. Avant, toute une rubrique de consignes (« maison » : des dizaines de lignes) comptait comme un seul texte :
+     * ses 6 premières entités sortaient dans l'ordre du fichier, avec le début de la rubrique comme contexte — la
+     * consigne « pour le mode nuit du poêle du salon, utilise … » était souvent introuvable.
+     */
+    internal fun entitesParLigne(sources: List<Pair<String, String>>, mots: Set<String>): List<Pair<String, String>> {
+        data class Ligne(val texte: String, val score: Int, val ordre: Int)
+        val lignes = sources.flatMap { (sujet, texte) ->
+            texte.split(Regex("\\n+|(?<=[.;!?])\\s+(?=[A-ZÀ-ÖØ-Ý«\"-])")).map { it.trim().removePrefix("-").trim() }.filter { it.isNotBlank() }.map { "$sujet : $it" }
+        }
+        return lignes.mapIndexed { i, l -> Ligne(l, NotesPertinentes.score(l, mots), i) }
+            .filter { it.score > 0 && ENTITE.containsMatchIn(it.texte) }
+            .sortedWith(compareByDescending<Ligne> { it.score }.thenBy { it.ordre })
+            .flatMap { l -> ENTITE.findAll(l.texte).map { it.value to l.texte.take(300) }.toList() }
+            .distinctBy { it.first }.take(10)
     }
 
     fun lire(app: JarvisApp, sujet: String): String {

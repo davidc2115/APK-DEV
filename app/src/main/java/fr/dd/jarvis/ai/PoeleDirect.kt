@@ -245,7 +245,8 @@ object PoeleDirect {
     data class ModeDemande(val mode: Set<String>, val activer: Boolean, val lieu: List<String>, val tous: Boolean)
 
     private val MODE_ON = Regex("\\b(mets|met|mettre|remets|passe|passer|repasse|active|activer|allume|allumer|lance|enclenche|bascule|basculer)\\b")
-    private val MODE_OFF = Regex("\\b(desactive|desactiver|enleve|enlever|retire|retirer|coupe|couper|eteins|eteindre|arrete|arreter|sors|sortir|quitte|quitter|stoppe)\\b")
+    private val MODE_OFF = Regex("\\b(desactive|desactivee?s?|desactiver|enleve|enlever|retire|retirer|coupe|couper|eteins|eteindre|arrete|arreter|sors|sortir|quitte|quitter|stoppe|" +
+        "fin|sans|hors|off|arret|retrait|plus de|pas de|annule|annuler|termine|terminer)\\b")
     private val MODE_NORMAL = Regex("\\b(normal|normale|standard|aucun|none|off|desactive|manuel|manual)\\b")
     private val VIDES_MODE = VIDES + setOf("mode", "mets", "met", "mettre", "remets", "passe", "passer", "repasse", "active", "activer", "allume", "allumer",
         "lance", "enclenche", "bascule", "basculer", "desactive", "desactiver", "enleve", "enlever", "retire", "retirer", "coupe", "couper", "eteins",
@@ -257,6 +258,13 @@ object PoeleDirect {
         val n = simple(texte.replace(Regex("(?i)\\b(?:avec |via |par |entite |l entite )?(?:climate|switch|select|input_boolean|input_select|button|input_button|script|scene)\\.[a-z0-9_]+"), " "))
         if (n.split(' ').size > 14 || !POELE.containsMatchIn(n) || texte.trim().endsWith("?")) return null
         if (Regex("\\d|\\b(degres?|temperature|demain|ce soir|dans|pendant|jusqu|quand|si|est ce|combien|pourquoi|quel|quelle)\\b").containsMatchIn(n)) return null
+        // « Remets le poêle en mode normal / jour » : on RETIRE les modes particuliers (nuit, silence, éco…) qui sont actifs.
+        if (Regex("\\bmode (normal|normale|standard|jour|classique|habituel)\\b").containsMatchIn(n) && SYNONYMES_MODE.none { g -> g.any { Regex("\\b$it\\b").containsMatchIn(n) } }) {
+            val tous = Regex("\\b(tous|toutes|les deux|les 2|chacun|ensemble|poeles)\\b").containsMatchIn(n)
+            val lieu = n.split(' ').filter { it.length >= 2 && it !in VIDES_MODE && !POELE.matches(it) && it !in setOf("en", "sur", "normal", "normale", "standard", "jour", "classique", "habituel") }
+            if (lieu.size > 3) return null
+            return ModeDemande(SYNONYMES_MODE.flatten().toSet(), false, lieu, tous && lieu.isEmpty())
+        }
         val groupe = SYNONYMES_MODE.firstOrNull { g -> g.any { Regex("\\b$it\\b").containsMatchIn(n) } } ?: return null
         val off = MODE_OFF.containsMatchIn(n)
         // Sans verbe (« Poêle du salon en mode nuit », comme on l'écrit dans une routine) : activer le mode.
@@ -282,17 +290,24 @@ object PoeleDirect {
         fun t(id: String) = texte(id, parId[id]?.optJSONObject("attributes")?.optString("friendly_name").orEmpty())
         fun contientMode(x: String) = d.mode.any { x.contains(" $it") }
         fun options(id: String, cle: String) = parId[id]?.optJSONObject("attributes")?.optJSONArray(cle)?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+        /**
+         * Option à choisir parmi [opts] : celle du mode (activer) ou la normale (retirer) ; sinon celle que TA consigne
+         * nomme ([extrait] : « … pour retirer le mode nuit, mets-le sur Confort »).
+         */
+        fun option(opts: List<String>, extrait: String): String? {
+            val e = " " + normaliser(extrait) + " "
+            val citees = opts.filter { o -> normaliser(o).length >= 2 && e.contains(" " + normaliser(o) + " ") }
+            return if (d.activer) opts.firstOrNull { contientMode(" " + normaliser(it) + " ") } ?: citees.singleOrNull()
+            else opts.firstOrNull { MODE_NORMAL.containsMatchIn(normaliser(it)) } ?: citees.filter { !contientMode(" " + normaliser(it) + " ") }.singleOrNull()
+        }
         /** Commande pour une entité DÉSIGNÉE (dans la phrase ou dans tes notes pour ce mode), quel que soit son nom. */
-        fun pour(id: String): Commande? {
+        fun pour(id: String, extrait: String = ""): Commande? {
             if (id !in parId) return null
             return when (id.substringBefore('.')) {
                 "switch", "input_boolean" -> Commande(id.substringBefore('.'), if (d.activer) "turn_on" else "turn_off", id, null)
-                "select", "input_select" -> (if (d.activer) options(id, "options").firstOrNull { contientMode(" " + normaliser(it) + " ") }
-                    else options(id, "options").firstOrNull { MODE_NORMAL.containsMatchIn(normaliser(it)) })?.let { Commande(id.substringBefore('.'), "select_option", id, JSONObject().put("option", it)) }
-                "climate" -> (if (d.activer) options(id, "preset_modes").firstOrNull { contientMode(" " + normaliser(it) + " ") } else options(id, "preset_modes").firstOrNull { MODE_NORMAL.containsMatchIn(normaliser(it)) })
-                    ?.let { Commande("climate", "set_preset_mode", id, JSONObject().put("preset_mode", it)) }
-                    ?: (if (d.activer) options(id, "fan_modes").firstOrNull { contientMode(" " + normaliser(it) + " ") } else null)
-                        ?.let { Commande("climate", "set_fan_mode", id, JSONObject().put("fan_mode", it)) }
+                "select", "input_select" -> option(options(id, "options"), extrait)?.let { Commande(id.substringBefore('.'), "select_option", id, JSONObject().put("option", it)) }
+                "climate" -> option(options(id, "preset_modes"), extrait)?.let { Commande("climate", "set_preset_mode", id, JSONObject().put("preset_mode", it)) }
+                    ?: option(options(id, "fan_modes"), extrait)?.let { Commande("climate", "set_fan_mode", id, JSONObject().put("fan_mode", it)) }
                 "button", "input_button" -> if (d.activer) Commande(id.substringBefore('.'), "press", id, null) else null
                 "script" -> if (d.activer) Commande("script", "turn_on", id, null) else null
                 "scene" -> if (d.activer) Commande("scene", "turn_on", id, null) else null
@@ -303,7 +318,7 @@ object PoeleDirect {
         explicites.mapNotNull { pour(it) }.takeIf { it.isNotEmpty() }?.let { return it }
         // 0 bis. Tes notes pour CE mode de CE poêle (« le mode nuit du poêle du salon, c'est select.xxx ») : elles priment.
         val noteesMode = notes.filter { (_, extrait) -> contientMode(" " + normaliser(extrait) + " ") && (d.lieu.isEmpty() || lieuOk(" " + normaliser(extrait) + " ", d.lieu)) }
-            .mapNotNull { (id, _) -> if (id.startsWith("climate.") && options(id, "preset_modes").isEmpty() && options(id, "fan_modes").isEmpty()) null else pour(id) }
+            .mapNotNull { (id, extrait) -> if (id.startsWith("climate.") && options(id, "preset_modes").isEmpty() && options(id, "fan_modes").isEmpty()) null else pour(id, extrait) }
         if (noteesMode.isNotEmpty() && (d.tous || noteesMode.size == 1)) return noteesMode
         val climats = paires.filter { it.first.startsWith("climate.") }
         // Poêles visés : celui du lieu (ou noté), ou tous pour « les poêles ».
@@ -320,12 +335,15 @@ object PoeleDirect {
             val fan = if (d.activer && climat != null) options(climat, "fan_modes").firstOrNull { contientMode(" " + normaliser(it) + " ") } else null
             if (climat != null && fan != null) { res += Commande("climate", "set_fan_mode", climat, JSONObject().put("fan_mode", fan)); continue }
             // 2. Interrupteur / sélecteur de ce mode, au lieu demandé et rattaché à ce poêle.
-            val jetons = climat?.substringAfter('.')?.split('_')?.filter { it.length >= 3 }.orEmpty()
+            val marques = Regex("\\b(mcz|maestro|palazzetti|edilkamin|rika|extraflame|ravelli|micronova|fumis|cadel|laminox|piazzetta)\\b")
+            val jetons = climat?.let { c -> (c.substringAfter('.').split('_') + normaliser(parId[c]?.optJSONObject("attributes")?.optString("friendly_name").orEmpty()).split(' ')) }
+                .orEmpty().filter { it.length >= 3 && !POELE.matches(it) && !marques.matches(it) && it !in VIDES }.distinct()
             fun duPoele(id: String): Boolean {
                 val x = t(id)
                 val lieuOk = if (d.lieu.isEmpty()) true else lieuOk(x, d.lieu)
-                val rattache = POELE.containsMatchIn(x) || jetons.any { x.contains(" $it") } ||
-                    Regex("\\b(mcz|maestro|palazzetti|edilkamin|rika|extraflame|ravelli|micronova|fumis|cadel|laminox|piazzetta)\\b").containsMatchIn(x)
+                // « Les poêles » : la pièce de CE poêle doit apparaître (sinon les deux interrupteurs iraient aux deux poêles).
+                val rattache = if (d.tous && jetons.isNotEmpty()) jetons.any { x.contains(" $it") }
+                    else POELE.containsMatchIn(x) || jetons.any { x.contains(" $it") } || marques.containsMatchIn(x)
                 return lieuOk && rattache
             }
             val notee = notees.firstOrNull { id -> id in parId && (id.startsWith("switch.") || id.startsWith("input_boolean.")) && contientMode(t(id)) }
@@ -335,6 +353,12 @@ object PoeleDirect {
             if (inters.size == 1 && (notee != null || d.tous || d.lieu.isNotEmpty() || climats.size <= 1)) {
                 val dom = inters.single().substringBefore('.')
                 res += Commande(dom, if (d.activer) "turn_on" else "turn_off", inters.single(), null); continue
+            }
+            if (!d.activer && inters.size > 1 && (d.tous || d.lieu.isNotEmpty() || climats.size <= 1)) {
+                val allumes = inters.filter { parId[it]?.optString("state") == "on" }
+                if (allumes.isNotEmpty()) { allumes.forEach { res += Commande(it.substringBefore('.'), "turn_off", it, null) }; continue }
+                // Aucun allumé : rien à retirer pour ce poêle (déjà en mode normal).
+                if (inters.all { parId[it]?.optString("state") == "off" }) continue
             }
             val selects = paires.map { it.first }.filter { id -> (id.startsWith("select.") || id.startsWith("input_select.")) && duPoele(id) }
                 .mapNotNull { id ->
