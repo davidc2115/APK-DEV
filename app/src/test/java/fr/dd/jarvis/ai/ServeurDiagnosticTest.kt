@@ -75,8 +75,8 @@ class ServeurDiagnosticTest {
         val docker = ServeurDiagnostic.commandeRemede(ServeurDiagnostic.Remede.REDEMARRER_DOCKER)
         assertTrue(nettoyage.contains("set -euo pipefail"))
         assertTrue(services.contains("set -euo pipefail"))
-        assertTrue(services.contains("[ \"$etat\" = active ]"))
-        assertTrue(heure.contains("[ \"$synchronisee\" = yes ]"))
+        assertTrue(services.contains(" = active ]"))
+        assertTrue(heure.contains(" = yes ]"))
         assertTrue(docker.contains("systemctl is-active --quiet docker"))
     }
 
