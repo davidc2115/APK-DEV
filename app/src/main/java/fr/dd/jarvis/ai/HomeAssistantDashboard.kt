@@ -144,11 +144,17 @@ object HomeAssistantDashboard {
                     val raw = a.optString("carte").trim()
                     if (raw.isBlank()) return "JSON de la carte requis."
                     val c = config(s, path); val views = c.optJSONArray("views") ?: return "Aucune vue dans ce tableau."
-                    val vi = a.optInt("vue", 0).coerceIn(0, views.length() - 1); val view = views.getJSONObject(vi)
-                    backup(app, path, c)
+                    if (views.length() == 0) return "Aucune vue disponible dans ce tableau : ajoute d'abord une vue avant d'y placer une carte."
+                    val vi = a.optInt("vue", 0)
+                    if (vi !in 0 until views.length()) return "Indice de vue invalide : ce tableau contient ${views.length()} vue(s), indices autorisés de 0 à ${views.length() - 1}."
+                    val view = views.getJSONObject(vi)
                     val sections = view.optJSONArray("sections")
+                    val si = a.optInt("section", 0)
+                    if (sections != null && sections.length() > 0 && si !in 0 until sections.length()) {
+                        return "Indice de section invalide : cette vue contient ${sections.length()} section(s), indices autorisés de 0 à ${sections.length() - 1}."
+                    }
+                    backup(app, path, c)
                     if (sections != null && sections.length() > 0) {
-                        val si = a.optInt("section", 0).coerceIn(0, sections.length() - 1)
                         val section = sections.getJSONObject(si)
                         (section.optJSONArray("cards") ?: JSONArray().also { section.put("cards", it) }).put(JSONObject(raw))
                     } else (view.optJSONArray("cards") ?: JSONArray().also { view.put("cards", it) }).put(JSONObject(raw))
