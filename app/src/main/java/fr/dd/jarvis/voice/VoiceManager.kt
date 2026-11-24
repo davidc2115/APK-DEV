@@ -761,7 +761,10 @@ class VoiceManager(private val ctx: Context) {
             val motsLocaux = f.texteLocal.split(Regex("\\s+")).count { it.isNotBlank() }
             // Commande simple bien entendue hors-ligne (tous les mots sûrs) : exécutée tout de suite, sans l'aller-retour
             // Whisper (~0,5 à 1,5 s).
-            val rapide = f.voskActif && motsLocaux in 1..6 && f.motsSurs >= motsLocaux && commandeSimple(f.texteLocal)
+            // Micro de la voiture / Bluetooth : le modèle hors-ligne y entend mal — Whisper décide (pas de raccourci, et
+            // un mot court comme « pause » ou « suivant » n'est pas pris pour un bruit).
+            val lointain = MicroJarvis.dernier.orEmpty().let { it.startsWith("micro Bluetooth") || it == "micro de la voiture" }
+            val rapide = !lointain && f.voskActif && motsLocaux in 1..6 && f.motsSurs >= motsLocaux && commandeSimple(f.texteLocal)
             if (rapide) { texte = f.texteLocal; source = "hors-ligne, commande simple sans Whisper" }
             else if (a != null && a.llm.groq.disponible() && (f.voixMs >= 250 || motsLocaux >= 2)) {
                 val debut = System.currentTimeMillis()
@@ -776,7 +779,7 @@ class VoiceManager(private val ctx: Context) {
                     }
                     // Bruit bref que le modèle hors-ligne n'a pas compris du tout, mais que Whisper « traduit » en un mot
                     // (« Merci. », « Ah. ») : ignoré.
-                    if (motsLocaux == 0 && VoskModel.francais(ctx) && f.voixMs < 600 && texte.split(' ').size <= 2) {
+                    if (!lointain && motsLocaux == 0 && VoskModel.francais(ctx) && f.voixMs < 600 && texte.split(' ').size <= 2) {
                         JournalVoix.noter(nom, "bruit bref ignoré (Whisper : « ${texte.take(40)} »)")
                         texte = ""
                     }
@@ -788,6 +791,15 @@ class VoiceManager(private val ctx: Context) {
             }
             if (rapide) Unit
             else if (!whisperOk) texte = if (f.voixMs >= 250 || motsLocaux >= 2) f.texteLocal else ""
+            else if (voiture && f.voskActif) {
+                // En voiture (micro de l'autoradio ou Bluetooth, bruit de la route) le texte hors-ligne est souvent faux :
+                // il ne remplace plus ce que Whisper a bien compris (avant : « Whisper a entendu une autre voix » → ta
+                // demande remplacée par des mots approximatifs). Seule une transcription dans une autre langue est écartée.
+                if (etranger(texte)) {
+                    JournalVoix.noter(nom, "Whisper s'est trompé de langue : « ${texte.take(90)} » → texte hors-ligne")
+                    texte = f.texteLocal
+                }
+            }
             else if (f.voskActif) {
                 // Recoupement avec le texte hors-ligne (qui n'entend bien que la voix proche du téléphone) : mauvaise
                 // langue, voix d'une autre personne ou de la télé, phrases de la télé collées à ta demande.

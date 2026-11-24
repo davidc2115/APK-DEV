@@ -236,7 +236,11 @@ class MicroJarvis(private val ctx: Context) {
             val t = texte()
             if (t != affiche) { affiche = t; if (t.isNotBlank()) r.partiel(t) }
         }
-        fun parle() = if (rec != null) mots.parle else porte.parle
+        // Micro de la voiture ou Bluetooth (son « téléphonique » filtré par l'autoradio) : le modèle hors-ligne y reconnaît
+        // mal les mots. Ta voix repérée au NIVEAU sonore compte alors aussi — avant, la phrase finissait en « personne
+        // n'a parlé » alors que tu parlais, ou ne se terminait qu'au bout du délai.
+        val lointain = ar is EntreeVoiture || ar.nom.startsWith("micro Bluetooth")
+        fun parle() = if (rec != null) (mots.parle || (lointain && porte.parle)) else porte.parle
         fun phrase(): Fin.Phrase {
             val toutes = tout.toByteArray()
             var final = ""
@@ -298,7 +302,9 @@ class MicroJarvis(private val ctx: Context) {
                     if (affiche != texteJuge) { texteJuge = affiche; commande = VoiceManager.commandeComplete(affiche) }
                     termine = mots.trame(affiche, trames) ||
                         (mots.parle && porte.parle && finVoix && trames - mots.derniereActivite >= 25 && !VoiceManager.suiteProbable(affiche)) ||
-                        (commande && mots.parle && porte.silenceTrames >= 40 && trames - mots.derniereActivite >= 40)
+                        (commande && mots.parle && porte.silenceTrames >= 40 && trames - mots.derniereActivite >= 40) ||
+                        // Micro lointain sans mots reconnus : la fin de TA voix (niveau sonore) termine la phrase.
+                        (lointain && !mots.parle && porte.parle && finVoix)
                 } else if (avecModele && System.currentTimeMillis() - debut < 4000) {
                     // Modèle encore en chargement (première écoute) : on enregistre, la décision viendra des mots.
                     porte.trame(rms); termine = false

@@ -24,10 +24,15 @@ object CommandeMedia {
     private val POLITESSE = Regex("^(?:(?:est ce que )?(?:tu peux|tu pourrais|peux tu|pourrais tu|tu veux bien|je veux que tu|j aimerais que tu|je voudrais que tu)\\s+)")
     private val FIN = Regex("(?:\\s+(?:s il te plait|stp|svp|merci|jarvis|maintenant|tout de suite|steuplait))+$")
     private val AUTRE_APPAREIL = Regex("\\b(tele|tv|television|televiseur|enceintes?|sonos|chaine|ampli|barre de son|home ?assistant|chromecast|ordinateur|pc|salon|chambre|cuisine|bureau|garage|alarme|reveil|sonnerie|video|film|serie|podcast de)\\b")
-    private const val MUS = "(?:la musique|ma musique|la lecture|la chanson|le morceau|le titre|le son|la playlist|spotify|deezer|youtube music|yt music|la radio)"
+    private const val MUS = "(?:la musique|ma musique|la lecture|ma lecture|l ecoute|la chanson|ma chanson|le morceau|mon morceau|le titre|le son|la playlist|ma playlist|spotify|deezer|youtube music|yt music|la radio)"
+    /**
+     * Ce qui suit souvent « reprends la lecture » : « en cours », « là où elle en était », « que j'écoutais »… — avant, la
+     * phrase n'était plus reconnue comme une commande de musique et partait à l'IA, qui disait le titre sans relancer.
+     */
+    private const val SUITE = "(?: (?:(?:qui )?(?:etait |est )?(?:en cours|en pause|mise? en pause|interrompue?|arretee?)|qui jouait|qui passait|de tout a l heure|d il y a un instant|(?:la )?ou (?:elle|il|on|j|tu) en etai[st]|ou je l avais (?:laisse|arrete)e?|que j ecoutais|que j etais en train d ecouter|sur (?:le telephone|android auto|la voiture|l autoradio)))?"
 
     private val R_PAUSE = Regex("^(?:(?:mets?|fais) (?:$MUS |ca |la )?(?:en )?pause|pause (?:$MUS|musique)|(?:stop|stoppe|arrete|suspends?|interromps?) $MUS|(?:mets|met) $MUS en pause)$")
-    private val R_PLAY = Regex("^(?:(?:reprends?|reprendre|relance[rz]?|continue[rz]?|redemarre[rz]?|rejoue|remets?|remettre|relancer|demarre[rz]?|lance[rz]?|joue[rz]?) $MUS|(?:lance[rz]?|demarre[rz]?|mets?|joue[rz]?|remets?) (?:de la |la |ma |une )musique|(?:remets?|relance|lance[rz]?|demarre[rz]?) (?:en route|la lecture de) $MUS|(?:enleve|retire|sors) (?:$MUS )?(?:de la |la )?pause)$")
+    private val R_PLAY = Regex("^(?:(?:reprends?|reprendre|relance[rz]?|continue[rz]?|poursuis|poursuivre|redemarre[rz]?|rejoue|remets?|remettre|relancer|demarre[rz]?|lance[rz]?|joue[rz]?) $MUS$SUITE|(?:reprends?|relance|remets?|redemarre) (?:la |le |ma |mon )?(?:lecture|musique|morceau|chanson|son) (?:qui )?(?:etait )?en cours|(?:lance[rz]?|demarre[rz]?|mets?|joue[rz]?|remets?) (?:de la |la |ma |une )musique|(?:remets?|relance|lance[rz]?|demarre[rz]?) (?:en route|la lecture de) $MUS|(?:enleve|retire|sors) (?:$MUS )?(?:de la |la )?pause)$")
     private val R_NEXT = Regex("^(?:(?:chanson|morceau|titre|piste|musique|son) (?:suivante?|d apres)|(?:passe|va) (?:a la |au |la |le )?(?:chanson |morceau |titre |piste )?(?:suivante?|d apres)|(?:passe|change|zappe|saute) (?:la chanson|le morceau|le titre|de chanson|de morceau|de titre|celle ci|celui ci|ca|cette chanson|ce morceau)|(?:mets|joue) (?:la |le )?(?:chanson|morceau|titre) (?:suivante?|d apres))$")
     private val R_PREV = Regex("^(?:(?:chanson|morceau|titre|piste|musique) (?:precedente?|d avant)|(?:reviens|retourne|repasse|va) (?:a la |au )?(?:chanson |morceau |titre )?(?:precedente?|d avant|en arriere)|(?:remets|rejoue|mets) (?:la |le )?(?:chanson|morceau|titre) (?:precedente?|d avant))$")
     private val R_RESTART = Regex("^(?:recommence|reprends?|rejoue|relance) (?:la chanson|le morceau|le titre|ce morceau|cette chanson|ce titre)(?: (?:du|depuis le|au) debut)?$")
@@ -35,7 +40,7 @@ object CommandeMedia {
     private val R_DEBUT = Regex("^(?:recommence|reprends?) (?:du|depuis le|au) debut$")
     private val R_PLUS = Regex("^(?:(?:monte|augmente|hausse|remonte|pousse) (?:le son|le volume|la musique)(?: un peu| un peu plus)?|(?:un peu )?plus fort|monte|plus de son)$")
     private val R_MOINS = Regex("^(?:(?:baisse|diminue|descends|reduis) (?:le son|le volume|la musique)(?: un peu| un peu plus)?|(?:un peu )?moins fort|moins de son)$")
-    private val R_INFO = Regex("^(?:(?:quelle est|c est quoi|quel est) (?:cette chanson|ce morceau|ce titre|ce son|la chanson|le morceau|le titre)(?: qui (?:passe|joue))?|qu est ce qu on ecoute|qu est ce qui passe|qu est ce qui joue|quelle chanson (?:passe|joue|est ce)|qui chante(?: ca| cette chanson)?|c est qui qui chante|on ecoute quoi|c est quoi ce que j ecoute)$")
+    private val R_INFO = Regex("^(?:(?:quelle est|c est quoi|quel est) (?:cette chanson|ce morceau|ce titre|ce son|la chanson|le morceau|le titre)(?: qui (?:passe|joue))?|qu est ce qu on ecoute|qu est ce qui passe|qu est ce qui joue|quelle chanson (?:passe|joue|est ce)|qui chante(?: ca| cette chanson)?|c est qui qui chante|on ecoute quoi|c est quoi ce que j ecoute|(?:quelle est|quel est|c est quoi|dis moi) (?:la lecture|la musique|la chanson|le morceau|le titre) (?:en cours|actuelle?)|qu est ce qui est en (?:cours de )?lecture)$")
 
     /** Un seul mot (« suivant », « pause », « lecture »…) : seulement si une musique est ouverte (sinon c'est peut-être autre chose). */
     private val R_MOT = Regex("^(?:suivante?|next|skip|zappe|precedente?|previous|lecture|play|pause|reprends?|reprendre)$")
@@ -112,6 +117,16 @@ object CommandeMedia {
         return listOf(t, a).filter { it.isNotBlank() }.joinToString(" — ")
     }
 
+    /**
+     * La musique doit JOUER une fois JARVIS silencieux : sa voix ne fera que la baisser, le micro ne se rouvre pas derrière,
+     * et si elle est encore en pause quand plus rien ne parle ni n'écoute (Android Auto : la voix ou le micro de la
+     * voiture l'avaient arrêtée), la lecture est relancée.
+     */
+    private fun garantir(ctx: Context, c: MediaController) {
+        LectureGarantie.noter(c.packageName)
+        runCatching { LectureGarantie.surveiller(ctx) }
+    }
+
     /** Exécute la commande ; réponse courte (lue à voix haute). [voiture] : jamais de touche média de repli. */
     fun executer(ctx: Context, a: Action, voiture: Boolean = false): String {
         // « Pause » : la musique lancée par JARVIS ne doit plus être relancée en fin de conversation.
@@ -160,10 +175,10 @@ object CommandeMedia {
                     }
                 }
             }
-            Action.PLAY -> { tc.play(); "▶️ Lecture reprise" + morceau(c).let { if (it.isBlank()) " ($appli)." else " : $it." } }
-            Action.NEXT -> { tc.skipToNext(); if (!joue(c)) tc.play(); "⏭️ Morceau suivant." }
-            Action.PREVIOUS -> { tc.skipToPrevious(); if (!joue(c)) tc.play(); "⏮️ Morceau précédent." }
-            Action.RESTART -> { tc.seekTo(0); if (!joue(c)) tc.play(); "🔁 Morceau repris du début." }
+            Action.PLAY -> { tc.play(); garantir(ctx, c); "▶️ Lecture reprise" + morceau(c).let { if (it.isBlank()) " ($appli)." else " : $it." } }
+            Action.NEXT -> { val enPause = !joue(c); tc.skipToNext(); if (enPause) tc.play(); garantir(ctx, c); "⏭️ Morceau suivant." }
+            Action.PREVIOUS -> { val enPause = !joue(c); tc.skipToPrevious(); if (enPause) tc.play(); garantir(ctx, c); "⏮️ Morceau précédent." }
+            Action.RESTART -> { val enPause = !joue(c); tc.seekTo(0); if (enPause) tc.play(); garantir(ctx, c); "🔁 Morceau repris du début." }
             Action.INFO -> morceau(c).let { m -> if (m.isBlank()) "🎵 $appli joue un titre sans information." else "🎵 $m ($appli${if (joue(c)) "" else ", en pause"})." }
             else -> ""
         }

@@ -168,7 +168,7 @@ object Routines {
     /** Routines en cours d'exécution (identifiants) et leurs noms / phrases : jamais relancées par leurs propres actions. */
     private val enCours = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val nomsEnCours = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-    private val INTERDITS = setOf("ha_admin", "ha_config", "ha_sauvegarde", "ha_dashboard", "serveur_service", "serveur_tache", "serveur_diagnostic",
+    private val INTERDITS = setOf("ha_admin", "ha_config", "ha_sauvegarde", "ha_dashboard", "serveur_service", "serveur_tache", "serveur_diagnostic", "serveur_depanner",
         "serveur_fichiers", "serveur_scan_ports", "ssh_commande", "ssh_fichier", "ssh_script", "pilote_ecran", "piloter_telephone")
 
     internal fun pendantRoutine(ms: Long) { enCoursJusqua = if (ms <= 0) 0L else System.currentTimeMillis() + ms }

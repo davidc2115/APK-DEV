@@ -553,6 +553,16 @@ class Brain(
                 onStatus("🔁 Enquête sur les redémarrages de Home Assistant…")
                 return reflexe(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { HaSur.causesRedemarrages(app) }.getOrElse { "❌ Enquête impossible : ${it.message}" } }, lecture = true)
             }
+            // Serveur : « nettoie le disque du serveur » (remède, avec confirmation), « diagnostique le serveur », « le SSH
+            // ne marche plus », « pourquoi le serveur rame » — bilan lu et expliqué, sans passer par l'IA.
+            ServeurDiagnostic.demandeRemede(texteUser)?.let { r ->
+                onStatus("🛠️ Dépannage du serveur…")
+                return reflexe(tools.execute("serveur_depanner", JSONObject().put("action", r.name.lowercase())).text, lecture = true)
+            }
+            ServeurDiagnostic.demande(texteUser)?.let { c ->
+                onStatus("🩺 Diagnostic du serveur (1 à 2 min)…")
+                return reflexe(tools.execute("serveur_diagnostic", JSONObject().put("cible", c)).text, lecture = true)
+            }
             // Poêle : « mets le poêle du salon en mode nuit » — préréglage, interrupteur ou sélecteur du mode, puis relu.
             if (!pourSociete && PoeleDirect.modeDemande(texteUser) != null) {
                 onStatus("🔥 Poêle…")
@@ -714,7 +724,7 @@ class Brain(
         val outilsDebianAExclure = if (fr.dd.jarvis.hermes.Routeur.homeAssistantApi(texteUser)) {
             // Pour les demandes domotiques, ne laisse pas l'agent choisir le serveur Debian à la place de l'API HA.
             // Exception : demande explicite de stockage/volume, où serveur_service action=stockage est le bon outil.
-            setOf("ssh_commande", "ssh_fichier", "ssh_script", "serveur_diagnostic", "serveur_fichiers", "serveur_tache", "ha_sauvegarde") +
+            setOf("ssh_commande", "ssh_fichier", "ssh_script", "serveur_diagnostic", "serveur_depanner", "serveur_fichiers", "serveur_tache", "ha_sauvegarde") +
                 (if (demandeStockageHote) emptySet() else setOf("serveur_service"))
         } else emptySet()
         val retires = (if (pourHermes || MaisonDirecte.concerne(texteUser) || (!pourHermes && fr.dd.jarvis.hermes.Routeur.dernierChoixMaison)) setOf("hermes", "hermes_deleguer", "tache_arriere_plan") else emptySet()) +

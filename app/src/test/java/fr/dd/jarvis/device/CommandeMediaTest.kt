@@ -36,4 +36,16 @@ class CommandeMediaTest {
         }
         assertEquals(Action.RESTART, i("reprends depuis le début", true))
     }
+
+    @Test fun repriseLectureEnCours() {
+        // Dites en voiture le 24/11 : partaient à l'IA (titre dit, lecture non relancée).
+        listOf("reprends la lecture en cours", "relance la lecture en cours", "Jarvis, reprends la lecture en cours s'il te plaît",
+            "reprends la musique là où elle en était", "relance la musique que j'écoutais", "remets la musique qui était en pause",
+            "reprends ma lecture", "relance la chanson en cours", "continue la lecture en cours").forEach { assertEquals(it, Action.PLAY, i(it)) }
+        assertEquals(Action.INFO, i("c'est quoi la musique en cours"))
+        assertEquals(Action.INFO, i("quel est le titre en cours"))
+        // Pas la musique : le film, la chanson précédente.
+        assertEquals(null, i("reprends le film en cours"))
+        assertEquals(null, i("reprends la chanson précédente"))
+    }
 }

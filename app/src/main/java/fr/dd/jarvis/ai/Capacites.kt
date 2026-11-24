@@ -141,6 +141,7 @@ object Capacites {
         Categorie("serveur", "🖥️", "Serveur (quand tu dis « serveur »)", r("serveur|ssh|docker|debian|conteneurs?|github"), listOf(
             i("Commandes, scripts et fichiers sur le serveur, ou dans un conteneur", "sur le serveur, montre l'espace disque", "ssh_commande,ssh_script,ssh_fichier,serveur_fichiers", Voie.HERMES),
             i("Services (Docker, systemd), tâches longues, diagnostic, ports", "redémarre le conteneur Plex sur le serveur|diagnostic du serveur", "serveur_service,serveur_tache,serveur_diagnostic,serveur_scan_ports", Voie.HERMES),
+            i("Bilan de santé expliqué et dépannage (disque, mémoire, services en échec, heure, SSH)", "diagnostique le serveur|nettoie le disque du serveur|le SSH ne marche plus", "serveur_diagnostic,serveur_depanner"),
             i("Sauvegardes et remise en service de Home Assistant", "liste les sauvegardes de Home Assistant sur le serveur", "ha_sauvegarde", Voie.HERMES),
             i("GitHub : fichiers, commits, versions", "dernière version de Home Assistant sur GitHub", "github"),
         )),

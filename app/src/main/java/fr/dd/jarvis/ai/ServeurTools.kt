@@ -21,7 +21,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             val indisponible = Regex("\\b(indisponibles?|injoignables?|hors ligne|offline|unavailable|inaccessibles?|deconnectes?|deconnectees?)\\b").containsMatchIn(n)
             return parleHa && indisponible
         }
-        val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ha_admin", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox", "appareil_acces_distant", "appareil_ouvrir", "appareil_masquer", "tele")
+        val NAMES = setOf("ha_entites", "ha_position", "ha_etat", "ha_service", "ha_config", "ha_dashboard", "ha_admin", "ssh_commande", "ssh_fichier", "serveur_diagnostic", "serveur_depanner", "serveur_scan_ports", "routeur_diagnostiquer", "reseau_infos", "reseau_scanner", "appareil_sonder", "appareil_page", "imprimantes_trouver", "imprimer", "ssh_script", "github", "appareils_liste", "appareil_nommer", "ip_publique", "box_disque", "freebox", "appareil_acces_distant", "appareil_ouvrir", "appareil_masquer", "tele")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -159,9 +159,48 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("box_disque", "Box internet : accède au disque dur branché sur la box (Freebox associée : par Freebox OS, sans réglage ; autres box : SMB ou FTP, selon Réglages › Maison › Box Internet) : liste les partages et dossiers, lit un fichier texte, le télécharge dans l'appli, y envoie un fichier créé par JARVIS, crée un dossier, supprime, renomme ou déplace un fichier/dossier (utile pour réorganiser une bibliothèque de films/séries pour Plex, par exemple), ou lance directement la lecture d'une vidéo dans le lecteur vidéo du téléphone (aucune app spécifique requise, pas de téléchargement).",
             mapOf("action" to prop("partages | lister | lire | telecharger | envoyer | supprimer | dossier | renommer | deplacer | lire_telephone"), "chemin" to prop("Chemin sur la box : partage/dossier/fichier (ex. « Disque dur/Photos/2026 »). Pour renommer/deplacer : le chemin ACTUEL (source)."), "fichier" to prop("envoyer : nom du fichier créé par JARVIS à copier sur la box. renommer/deplacer : le NOUVEAU chemin complet sur la box (ex. « Disque dur/Films/Dirty Dancing (1987).avi »).")), listOf("action")),
         tool("serveur_diagnostic", "Diagnostic approfondi en lecture seule. cible=complet (défaut) vérifie Debian, SSH, Docker, Plex et Home Assistant ; cible=plex vérifie le conteneur, les volumes, ressources, erreurs, API Plex, bibliothèques et sessions si le jeton est configuré ; cible=home assistant vérifie les entités indisponibles via l’API et le conteneur/volumes/logs côté hôte Debian ; cible=ssh vérifie service SSH, ports d’écoute, paramètres effectifs, pare-feu et journaux ; cible=debian vérifie ressources, disques, Docker et processus ; cible=discord ou bagbot inspecte les processus Bagbot/Discord du PM2 de l’utilisateur SSH et compte les événements des journaux sans afficher de variables d’environnement, jetons ou contenus de messages. Le démon PM2 étant propre à chaque utilisateur Linux, ce diagnostic utilise le compte SSH configuré. Ne modifie rien.", mapOf("cible" to prop("complet | debian | ssh | plex | home assistant | discord | bagbot (défaut complet)."), "lignes" to prop("Nombre de lignes de logs à examiner (20 à 200, défaut 80)."))),
+        tool("serveur_depanner", "Applique un REMÈDE sûr proposé par serveur_diagnostic, après confirmation de l'utilisateur, et mesure le résultat : nettoyer_disque (journaux ramenés à 200 Mo, cache apt, images Docker et cache de construction inutilisés — jamais de conteneur, volume ni donnée), relancer_echecs (redémarre les services systemd en échec puis vérifie), synchroniser_heure (active NTP), redemarrer_docker (tous les conteneurs s'arrêtent ~1 min). Pour un conteneur précis, utilise serveur_service.",
+            mapOf("action" to prop("nettoyer_disque | relancer_echecs | synchroniser_heure | redemarrer_docker")), listOf("action")),
         tool("serveur_scan_ports", "Dépannage réseau : teste DIRECTEMENT DEPUIS LE TÉLÉPHONE (pas besoin que SSH fonctionne) quels ports répondent sur le serveur — utile en premier recours quand SSH refuse de se connecter (mauvais port probable). Teste les ports SSH non standards les plus courants et quelques ports de services courants, identifie lequel répond vraiment comme un serveur SSH (bannière « SSH-… »), et peut corriger le port SSH dans Réglages si tu le demandes et que l'utilisateur confirme. Ne fonctionne que si le téléphone peut atteindre cette adresse (même réseau local que le serveur, ou port déjà redirigé vers l'extérieur).",
             mapOf("hote" to prop("Adresse à tester (optionnel, défaut : l'adresse du serveur dans Réglages)."), "ports" to prop("Ports supplémentaires à tester, séparés par des virgules (optionnel, en plus des ports courants).")))
     )
+
+    /**
+     * SSH ne se connecte pas : ce qui bloque, testé depuis le téléphone — adresse, port, présence d'un serveur SSH (sur
+     * ce port ou un autre), identifiants refusés, délai dépassé — et quoi faire.
+     */
+    private fun depannageConnexion(e: Throwable): String {
+        val hote = app.store.sshHost.value.trim(); val port = app.store.sshPort.value.toIntOrNull() ?: 22
+        val msg = (e.message ?: e.javaClass.simpleName)
+        val sb = StringBuilder("## 🔌 Dépannage de la connexion SSH ($hote:$port)\n")
+        val m = fr.dd.jarvis.societe.core.normaliser(msg)
+        val resolu = runCatching { java.net.InetAddress.getByName(hote).hostAddress }.getOrNull()
+        if (resolu == null) {
+            sb.append("🔴 L'adresse « $hote » ne se résout pas depuis le téléphone.\n1. Vérifie l'adresse dans Réglages › Maison › Serveur (IP locale, ex. 192.168.1.x, ou nom DDNS).\n")
+            return sb.toString().trimEnd()
+        }
+        val ouvert = runCatching { Serveur.scannerPorts(hote, listOf(port)).firstOrNull()?.second == true }.getOrDefault(false)
+        val banniere = if (ouvert) runCatching { Serveur.banniereSsh(hote, port) }.getOrNull() else null
+        when {
+            Regex("auth|password|mot de passe|permission denied|publickey").containsMatchIn(m) ->
+                sb.append("🔴 Le serveur répond mais refuse les identifiants (utilisateur « ${app.store.sshUser.value} »).\n1. Vérifie le mot de passe ou la clé dans Réglages › Maison › Serveur.\n2. Avec une clé : droits de ~/.ssh (700) et ~/.ssh/authorized_keys (600) sur le serveur.\n3. Trop d'essais ratés : Fail2ban a peut-être bloqué le téléphone (attends 10 min ou débloque son adresse).\n")
+            banniere != null ->
+                sb.append("🟠 Un serveur SSH répond bien sur le port $port (« ${banniere.take(50)} ») mais la session a échoué : « ${msg.take(160)} ».\n1. Réessaie dans un instant ; si ça persiste, vérifie l'empreinte du serveur (réinstallé ?) et l'utilisateur.\n")
+            ouvert ->
+                sb.append("🟠 Le port $port est ouvert mais ce n'est pas un serveur SSH.\n1. Le bon port SSH est peut-être un autre : je cherche…\n")
+            else -> {
+                sb.append(if (Regex("refus|refused").containsMatchIn(m)) "🔴 Connexion refusée sur le port $port : SSH est arrêté, ou écoute sur un autre port.\n"
+                    else "🔴 Aucune réponse du port $port ($resolu) : serveur éteint, téléphone pas sur le même réseau, ou port non redirigé sur la box.\n")
+            }
+        }
+        if (banniere == null) {
+            val autres = runCatching { Serveur.scannerPorts(hote, Serveur.PORTS_SSH_COURANTS.filter { it != port }).filter { it.second }.map { it.first } }.getOrDefault(emptyList())
+            val ssh = autres.firstOrNull { runCatching { Serveur.banniereSsh(hote, it) }.getOrNull() != null }
+            if (ssh != null) sb.append("💡 Un serveur SSH répond sur le port **$ssh** : mets ce port dans Réglages › Maison › Serveur (ou demande-moi de corriger le port).\n")
+            else if (autres.isEmpty() && !ouvert) sb.append("2. Aucun port SSH courant ne répond : le serveur est probablement éteint ou injoignable depuis ce réseau. Vérifie qu'il est allumé et branché ; hors de chez toi, il faut l'adresse distante (DDNS) et la redirection du port sur la box.\n")
+        }
+        return sb.toString().trimEnd()
+    }
 
     private fun sortie(r: Pair<Int, String>, max: Int = 5500): String {
         val t = r.second.trim().ifBlank { "(aucune sortie)" }
@@ -300,18 +339,41 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             "serveur_diagnostic" -> {
                 val cible = a.optString("cible").trim().ifBlank { "complet" }
                 val lignes = a.optString("lignes").toIntOrNull() ?: 80
+                var bilan = ""
                 val sortieHote = if (!Serveur.sshConfigure(app)) {
                     "Connexion SSH Debian non configurée : diagnostic hôte ignoré."
                 } else runCatching {
                     val sudo = app.store.sshUser.value.trim() != "root"
-                    val commande = ServeurDiagnostic.commande(cible, app.store.plexToken.value, lignes, sudo)
-                    sortie(Serveur.exec(app, commande, 120), 8500)
-                }.getOrElse { "Diagnostic SSH Debian impossible : ${it.message?.take(220) ?: it.javaClass.simpleName}." }
+                    // Avec le mot de passe enregistré, tout le bilan passe en administrateur (journaux du noyau, SMART,
+                    // ports et processus…) ; si sudo le refuse, nouvel essai en « sudo -n ».
+                    val enRoot = sudo && app.store.sshPass.value.isNotBlank()
+                    var r = Serveur.exec(app, ServeurDiagnostic.commande(cible, app.store.plexToken.value, lignes, sudo, toutEnRoot = enRoot), 150)
+                    if (enRoot && !r.second.contains("== Hôte Debian ==")) {
+                        fr.dd.jarvis.voice.JournalVoix.noter("serveur", "diagnostic : sudo avec mot de passe refusé → essai sans")
+                        r = Serveur.exec(app, ServeurDiagnostic.commande(cible, app.store.plexToken.value, lignes, sudo), 150)
+                    }
+                    bilan = ServeurDiagnostic.rapport(ServeurDiagnostic.analyser(r.second))
+                    sortie(r.first to ServeurDiagnostic.sansReperes(r.second), 7000)
+                }.getOrElse { e ->
+                    // SSH lui-même ne passe pas : dépannage de la CONNEXION depuis le téléphone.
+                    bilan = depannageConnexion(e)
+                    "Diagnostic SSH Debian impossible : ${e.message?.take(220) ?: e.javaClass.simpleName}."
+                }
                 val ha = if (cible.equals("complet", true) || cible.equals("home assistant", true) || cible.equals("homeassistant", true) || cible.equals("ha", true)) {
                     "\n\n## Home Assistant — contrôle API (instance configurée)\n" + ServeurDiagnostic.resumeHomeAssistant(app)
                 } else ""
-                ToolResult("# 🧰 Diagnostic approfondi — ${cible}\n\n```\n" + sortieHote + "\n```" + ha +
-                    "\n\n_Contrôle SSH en lecture seule : aucune modification n’a été effectuée._", direct = true)
+                // La voix ne lit que le bilan ; les détails techniques restent à l'écran (après la marque de fin d'oral).
+                ToolResult("# 🧰 Diagnostic du serveur — ${cible}\n\n" + (if (bilan.isNotBlank()) bilan + "\n\n" else "") +
+                    fr.dd.jarvis.voice.TexteParle.FIN_ORAL + "### Détails techniques\n```\n" + sortieHote + "\n```" + ha +
+                    "\n\n_Contrôle en lecture seule : rien n’a été modifié. Pour appliquer un remède, demande-le (ex. « nettoie le disque du serveur »)._", direct = true)
+            }
+            "serveur_depanner" -> {
+                val r = ServeurDiagnostic.remede(a.optString("action")) ?: return ToolResult("Remède inconnu : ${a.optString("action")}. Possibles : nettoyer_disque, relancer_echecs, synchroniser_heure, redemarrer_docker.")
+                if (!Serveur.sshConfigure(app)) return ToolResult("Connexion SSH au serveur non configurée (Réglages › Maison › Serveur).")
+                if (!confirm(r.question, true)) return ToolResult("Annulé : rien n'a été modifié.")
+                if (r == ServeurDiagnostic.Remede.REDEMARRER_DOCKER) runCatching { HaSur.noterDemande(app, "redémarrage de Docker") }
+                val res = Serveur.exec(app, ServeurDiagnostic.commandeRemede(r), 240)
+                ToolResult(ServeurDiagnostic.resultatRemede(r, res.second), direct = true)
             }
             "serveur_scan_ports" -> {
                 val hote = a.optString("hote").trim().ifBlank { app.store.sshHost.value.trim() }

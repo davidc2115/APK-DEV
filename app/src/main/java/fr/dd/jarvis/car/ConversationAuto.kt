@@ -35,7 +35,11 @@ object ConversationAuto {
         if (ctx == null || enCours) { fin(); return }
         enCours = true
         CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
-            try { boucle(app, ctx) } catch (_: Throwable) { } finally { enCours = false; fin() }
+            try { boucle(app, ctx) } catch (_: Throwable) { } finally {
+                enCours = false; fin()
+                // Musique demandée pendant la conversation : elle doit jouer maintenant que micro et voix sont libérés.
+                runCatching { fr.dd.jarvis.device.LectureGarantie.surveiller(app) }
+            }
         }
     }
 
@@ -122,6 +126,13 @@ object ConversationAuto {
                 app.chatAjouter(question); app.chatAjouter(reponse)
                 ActiviteVoiture.signaler(ActiviteVoiture.Etape.REPONSE, texte, rep)
                 if (!rep.startsWith("▶️")) parler(app, rep)
+                // La musique repart (ou continue) : la conversation s'arrête ici. Avant, le micro de la voiture se
+                // rouvrait aussitôt pour la phrase suivante, et Android Auto remettait la musique en pause — le titre
+                // s'affichait, mais rien ne jouait.
+                if (media != fr.dd.jarvis.device.CommandeMedia.Action.PAUSE) {
+                    journal.noter("android-auto", "commande de musique : fin de la conversation pour laisser jouer la musique")
+                    return
+                }
                 continue
             }
 
@@ -147,6 +158,12 @@ object ConversationAuto {
             CarBridge.ajouter(reponse); app.chatAjouter(reponse)
             ActiviteVoiture.signaler(ActiviteVoiture.Etape.REPONSE, texte, propre)
             parler(app, propre)
+            // Musique lancée ou reprise par cette demande : on ne rouvre pas le micro (il la remettrait en pause), sauf
+            // si JARVIS vient de poser une question.
+            if (fr.dd.jarvis.device.LectureGarantie.recente(60_000) && !propre.trimEnd().endsWith("?")) {
+                journal.noter("android-auto", "musique lancée : fin de la conversation pour la laisser jouer")
+                return
+            }
             // En mode Android Auto, on garde la session ouverte après chaque réponse :
             // l'utilisateur peut enchaîner sans réactiver Jarvis ni redire le mot d'éveil.
             continue
