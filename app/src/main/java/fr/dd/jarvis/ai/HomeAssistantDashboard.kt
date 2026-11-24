@@ -95,12 +95,27 @@ object HomeAssistantDashboard {
                 "creer" -> {
                     if (!path.matches(Regex("[a-z0-9_-]{2,60}"))) return "url_path requis : 2 à 60 caractères minuscules, chiffres, tirets ou underscores."
                     val title = a.optString("titre").trim().ifBlank { path.replace('-', ' ').replace('_', ' ').replaceFirstChar { it.uppercase() } }
-                    s.command("lovelace/dashboards/create", JSONObject().put("url_path", path).put("title", title)
-                        .put("icon", a.optString("icone").ifBlank { "mdi:view-dashboard" }).put("show_in_sidebar", true).put("require_admin", false))
+                    // Valider entièrement la configuration avant de créer l'entrée dans Home Assistant.
                     val initial = a.optString("configuration").takeIf { it.isNotBlank() }?.let { JSONObject(it) }
                         ?: JSONObject().put("title", title).put("views", JSONArray().put(JSONObject().put("title", "Accueil").put("path", "accueil").put("icon", "mdi:home").put("cards", JSONArray())))
-                    save(s, path, initial)
-                    return "Tableau de bord « $title » créé (/$path) avec une vue Accueil."
+                    if ((initial.optJSONArray("views")?.length() ?: 0) < 1) {
+                        return "Configuration refusée : au moins une vue est requise. Aucun tableau n'a été créé."
+                    }
+                    s.command("lovelace/dashboards/create", JSONObject().put("url_path", path).put("title", title)
+                        .put("icon", a.optString("icone").ifBlank { "mdi:view-dashboard" }).put("show_in_sidebar", true).put("require_admin", false))
+                    try {
+                        save(s, path, initial)
+                    } catch (e: Exception) {
+                        // Éviter de laisser un tableau vide si l'enregistrement de sa configuration échoue.
+                        try {
+                            s.command("lovelace/dashboards/delete", JSONObject().put("url_path", path))
+                            throw IllegalStateException("Configuration non enregistrée : tableau créé puis supprimé automatiquement. ${e.message ?: ""}", e)
+                        } catch (rollback: Exception) {
+                            if (rollback.message?.startsWith("Configuration non enregistrée :") == true) throw rollback
+                            throw IllegalStateException("Configuration non enregistrée et suppression automatique impossible : /$path peut rester vide. ${e.message ?: ""}", e)
+                        }
+                    }
+                    return "Tableau de bord « $title » créé (/$path). Configuration enregistrée."
                 }
                 "supprimer" -> {
                     if (path.isBlank()) return "url_path obligatoire."
