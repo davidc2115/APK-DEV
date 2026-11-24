@@ -1007,6 +1007,8 @@ object Serveur {
         }.joinToString(", ").let { if (it.isBlank()) "" else " ($it)" }
         return when {
             etat == "unavailable" -> "⚠️ $nom (`$id`) est INDISPONIBLE dans Home Assistant : la commande $domaine.$service a été acceptée mais l'appareil ne répond pas (hors ligne, intégration déconnectée…)."
+            etat == "unknown" -> "⚠️ $nom (`$id`) est en état INCONNU dans Home Assistant : $domaine.$service a été accepté, mais aucune confirmation fiable n'est possible."
+            !verificationServiceConnue(service, donnees) -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant ; état actuel « $etat »$detail. Le résultat fonctionnel n'est pas vérifiable automatiquement : ne le présente pas comme confirmé."
             confirmeService(domaine, service, donnees, o) -> "✅ $nom (`$id`) : $domaine.$service confirmé — état « $etat »$detail."
             else -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant, mais l'état reste « $etat »$detail après 2,5 s. Ne dis PAS que c'est fait : l'appareil n'a peut-être pas suivi (ou il réagit lentement)."
         }
