@@ -58,7 +58,7 @@ class SelectionOutilsTest {
 
     @Test fun vocabulaireDuCoffreRetrouveLaRechercheObsidian() {
         val (s, _) = catalogue()
-        val r = SelectionOutils.rechercher(s, "le coffre ne retrouve pas mon dossier", emptySet())
+        val r = SelectionOutils.rechercher(s, "le coffre ne retrouve pas mes dossiers", emptySet())
         assertEquals("obsidian_chercher", r.first().getJSONObject("function").getString("name"))
     }
 }
