@@ -217,13 +217,34 @@ object Geo {
      * « Venarey » pour « Venarey-les-Laumes ») doit figurer dans l'adresse ; une adresse sans nom de commune se
      * contente du code postal. Plusieurs communes partagent souvent le même code postal (21150 : Venarey, Alise, Grignon…).
      */
+    /**
+     * Vérifie la commune sans emprunter les mots du nom de rue.
+     *
+     * Piège rencontré en dictée : « 21 rue de Massingy Vitteaux » était validé pour
+     * « Massingy-les-Vitteaux » parce que les deux noms partageaient les mots Massingy et Vitteaux.
+     * Le géocodeur envoyait alors les coordonnées du mauvais village alors que le texte annoncé était correct.
+     *
+     * Si la commune est isolée par une virgule / un code postal, on la compare à ce segment seulement.
+     * Sans séparateur, le nom complet de la commune doit être présent à la FIN de l'adresse. Une commune
+     * multi-mots ne peut donc plus être validée par des mots qui appartiennent à la rue.
+     */
+    internal fun communeCorrespond(ville: String?, r: Requete): Boolean {
+        if (ville.isNullOrBlank()) return false
+        val cible = jetons(ville)
+        if (cible.isEmpty()) return false
+        val segment = r.commune
+        val source = jetons(segment ?: r.texte)
+        if (source.size < cible.size) return false
+        val suffixe = source.takeLast(cible.size)
+        return suffixe == cible
+    }
+
     private fun communeOk(villes: List<String?>, pc: String?, r: Requete): Boolean {
         for (v in villes) {
-            if (v.isNullOrBlank()) continue
-            if (correspond(v, r.mots)) return true
-            val distinctif = significatifs(v).firstOrNull { it !in GENERIQUES && it.length >= 3 }
-            if (distinctif != null && r.mots.any { proche(it, distinctif) }) return true
+            if (communeCorrespond(v, r)) return true
         }
+        // Un code postal seul ne désigne pas une commune unique : on n'accepte le centre de commune
+        // que si aucune commune n'était explicitement demandée et si le code postal correspond.
         return r.cp != null && pc == r.cp && r.sansCommune
     }
 
