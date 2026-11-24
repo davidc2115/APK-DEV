@@ -89,8 +89,11 @@ object HomeAssistantDashboard {
                 }
                 "supprimer" -> {
                     if (path.isBlank()) return "url_path obligatoire."
+                    // Ne jamais supprimer un tableau personnalisé sans conserver sa configuration.
+                    val ancienneConfiguration = config(s, path)
+                    backup(app, path, ancienneConfiguration)
                     s.command("lovelace/dashboards/delete", JSONObject().put("url_path", path))
-                    return "Tableau de bord /$path supprimé."
+                    return "Tableau de bord /$path supprimé. Sauvegarde locale créée avant suppression."
                 }
                 "lire" -> return config(s, path).toString(2).take(18000)
                 "modifier", "refaire" -> {
