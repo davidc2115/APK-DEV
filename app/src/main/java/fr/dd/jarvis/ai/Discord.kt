@@ -189,6 +189,7 @@ object Discord {
             if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}). Réponse de Discord : ${t.take(200).ifBlank { "(vide)" }}. Vérifie que c'est bien le jeton du BOT (onglet Bot du developer portal \u203a \u00ab Reset Token \u00bb), pas le Client Secret/ID. Si ce jeton fonctionne par ailleurs (ex. un bot lancé sur le serveur Debian) mais pas ici, c'est probablement un copier-coller différent : régénère un jeton (\u00ab Reset Token \u00bb), colle-le UNE SEULE fois dans Réglages \u203a Discord sans le retaper, et utilise ce même nouveau jeton partout.")
             if (r.code == 403) throw IllegalStateException("Discord 403 : le bot n'a pas la permission, ou son rôle n'est pas placé au-dessus du rôle concerné dans la hiérarchie du serveur.")
             if (r.code == 429) throw IllegalStateException(messageLimiteDiscord(r.header("Retry-After"), t))
+            if (r.code >= 500) throw IllegalStateException("Discord est temporairement indisponible (HTTP ${r.code}). Réessaie dans quelques instants.")
             if (!r.isSuccessful) throw IllegalStateException("Discord ${r.code} : ${t.take(300)}")
             return if (t.isBlank()) JSONObject() else runCatching { JSONObject(t) }.getOrDefault(JSONObject().put("brut", t))
         }
