@@ -416,9 +416,12 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     @Synchronized
     fun majCapacitesHermes(json: String) {
-        val j = runCatching { org.json.JSONObject(json) }.getOrNull() ?: return
+        require(json.length <= 60_000) { "Les capacités Hermès dépassent la taille maximale autorisée." }
+        val j = org.json.JSONObject(json)
+        // Même garantie que la mémoire : pas d'accusé de réception si le fichier durable
+        // n'a pas été remplacé correctement, afin que le hook réessaie.
+        persisterCopieHermes(capacitesLocal, json)
         capacitesCache = j
-        runCatching { capacitesLocal.writeText(json.take(60_000)) }
     }
 
     private fun capacites(): org.json.JSONObject = capacitesCache
