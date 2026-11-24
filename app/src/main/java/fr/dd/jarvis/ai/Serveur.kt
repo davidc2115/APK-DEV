@@ -953,13 +953,28 @@ object Serveur {
         if (ids.isEmpty()) return "⚠️ $domaine.$service accepté par Home Assistant, mais aucun entity_id ne permet de vérifier le résultat : ne le présente pas comme confirmé."
         val changes = HashMap<String, JSONObject>()
         runCatching { JSONArray(reponse) }.getOrNull()?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { changes[it.optString("entity_id")] = it } }
+        // Un seul budget de 2,5 s pour toute la commande, mais des lectures en tours :
+        // chaque entité a ainsi une chance d'être vérifiée, au lieu de laisser la première
+        // consommer tout le délai avant même de regarder les suivantes.
+        val observations = ids.associateWith { changes[it] }.toMutableMap()
+        val aVerifier = ids.filterTo(linkedSetOf()) { id ->
+            verificationServiceConnue(service, demandes) &&
+                (observations[id] == null || !confirmeService(domaine, service, demandes, observations[id]!!))
+        }
         val limite = System.currentTimeMillis() + 2_500
-        return ids.joinToString("\n") { id ->
-            var o: JSONObject? = changes[id]
-            while (verificationServiceConnue(service, demandes) && (o == null || !confirmeService(domaine, service, demandes, o)) && System.currentTimeMillis() < limite) {
-                Thread.sleep(400)
-                o = runCatching { JSONObject(ha(app, "GET", "/api/states/$id")) }.getOrNull() ?: o
+        while (aVerifier.isNotEmpty() && System.currentTimeMillis() < limite) {
+            Thread.sleep(400)
+            for (id in aVerifier.toList()) {
+                if (System.currentTimeMillis() >= limite) break
+                val nouvelEtat = runCatching { JSONObject(ha(app, "GET", "/api/states/$id")) }.getOrNull()
+                if (nouvelEtat != null) {
+                    observations[id] = nouvelEtat
+                    if (confirmeService(domaine, service, demandes, nouvelEtat)) aVerifier.remove(id)
+                }
             }
+        }
+        return ids.joinToString("\n") { id ->
+            var o = observations[id]
             if (o == null) o = runCatching { JSONObject(ha(app, "GET", "/api/states/$id")) }.getOrNull()
             compteRenduService(domaine, service, id, demandes, o)
         }
