@@ -154,10 +154,16 @@ object HomeAssistantDashboard {
                         return "Indice de section invalide : cette vue contient ${sections.length()} section(s), indices autorisés de 0 à ${sections.length() - 1}."
                     }
                     backup(app, path, c)
-                    if (sections != null && sections.length() > 0) {
-                        val section = sections.getJSONObject(si)
+                    if (sections != null) {
+                        // Une vue en mode sections doit conserver ses cartes dans une section,
+                        // même si la liste de sections est encore vide.
+                        val section = if (sections.length() == 0) {
+                            JSONObject().put("cards", JSONArray()).also { sections.put(it) }
+                        } else sections.getJSONObject(si)
                         (section.optJSONArray("cards") ?: JSONArray().also { section.put("cards", it) }).put(JSONObject(raw))
-                    } else (view.optJSONArray("cards") ?: JSONArray().also { view.put("cards", it) }).put(JSONObject(raw))
+                    } else {
+                        (view.optJSONArray("cards") ?: JSONArray().also { view.put("cards", it) }).put(JSONObject(raw))
+                    }
                     save(s, path, c)
                     return "Carte ajoutée à la vue ${view.optString("title", vi.toString())} de /$path. Sauvegarde créée."
                 }
