@@ -31,4 +31,23 @@ class HaServiceConfirmationTest {
         assertTrue(ko.startsWith("⚠️") && ko.contains("Ne dis PAS"))
         assertTrue(Serveur.compteRenduService("switch", "turn_on", "switch.x", JSONObject(), etat("unavailable")).contains("INDISPONIBLE"))
     }
+    @Test fun actionsSansEtatDeConfirmationNeSontPasDeclareesReussies() {
+        assertTrue(Serveur.verificationServiceConnue("turn_on", JSONObject()))
+        assertTrue(Serveur.verificationServiceConnue("volume_set", JSONObject().put("volume_level", 0.35)))
+        assertFalse(Serveur.verificationServiceConnue("media_play_pause", JSONObject()))
+        assertFalse(Serveur.confirmeService("media_player", "media_play_pause", JSONObject(), etat("playing")))
+        val retour = Serveur.compteRenduService(
+            "media_player", "media_play_pause", "media_player.salon", JSONObject(),
+            etat("playing", JSONObject().put("friendly_name", "Salon"))
+        )
+        assertTrue(retour.startsWith("⚠️"))
+        assertTrue(retour.contains("pas vérifiable automatiquement"))
+    }
+
+    @Test fun etatInconnuNePeutPasEtrePrisPourUneReussite() {
+        val retour = Serveur.compteRenduService("light", "turn_on", "light.salon", JSONObject(), etat("unknown"))
+        assertTrue(retour.startsWith("⚠️"))
+        assertTrue(retour.contains("INCONNU"))
+    }
+
 }
