@@ -48,9 +48,9 @@ object Autorisations {
 
     /** Opérations Discord dont la confirmation ne doit jamais devenir permanente, même pour une commande identique. */
     private val DISCORD_CRITIQUE = Regex(
-        "discord_(membre_(timeout|expulser|bannir)|role_(creer|modifier|supprimer|position|attribuer)|" +
+        "discord_(membre_(timeout|expulser|bannir|pseudo)|role_(creer|modifier|supprimer|position|attribuer)|" +
             "salon_(permission|creer|modifier|supprimer)|salons_reorganiser|serveur_modifier|" +
-            "messages_purger|message_supprimer|fil_gerer)",
+            "messages_purger|message_supprimer|fil_gerer|invitations)",
         RegexOption.IGNORE_CASE
     )
 
