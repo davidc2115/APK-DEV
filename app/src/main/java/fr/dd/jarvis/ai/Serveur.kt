@@ -988,10 +988,10 @@ object Serveur {
         return when {
             service == "turn_on" -> etat !in setOf("off", "standby")
             service == "turn_off" -> etat in setOf("off", "standby")
-            service in setOf("open_cover", "open") -> etat in setOf("open", "opening")
-            service in setOf("close_cover", "close") -> etat in setOf("closed", "closing")
-            service == "lock" -> etat in setOf("locked", "locking")
-            service == "unlock" -> etat in setOf("unlocked", "unlocking", "open")
+            service in setOf("open_cover", "open") -> etat == "open"
+            service in setOf("close_cover", "close") -> etat == "closed"
+            service == "lock" -> etat == "locked"
+            service == "unlock" -> etat in setOf("unlocked", "open")
             service == "set_temperature" && donnees.has("temperature") ->
                 kotlin.math.abs(a.optDouble("temperature", Double.NaN) - donnees.optDouble("temperature", Double.NaN)) < 0.26
             service == "set_hvac_mode" && donnees.has("hvac_mode") -> etat == donnees.optString("hvac_mode")
@@ -1005,6 +1005,14 @@ object Serveur {
             service == "set_value" && donnees.has("value") -> etat == donnees.opt("value").toString() || etat.toDoubleOrNull() == donnees.optDouble("value", Double.NaN)
             else -> false
         }
+    }
+
+    internal fun serviceEnTransition(service: String, etat: String): Boolean = when (service) {
+        "open_cover", "open" -> etat == "opening"
+        "close_cover", "close" -> etat == "closing"
+        "lock" -> etat == "locking"
+        "unlock" -> etat == "unlocking"
+        else -> false
     }
 
     internal fun compteRenduService(domaine: String, service: String, id: String, donnees: JSONObject, o: JSONObject?): String {
@@ -1023,6 +1031,7 @@ object Serveur {
         return when {
             etat == "unavailable" -> "⚠️ $nom (`$id`) est INDISPONIBLE dans Home Assistant : la commande $domaine.$service a été acceptée mais l'appareil ne répond pas (hors ligne, intégration déconnectée…)."
             etat == "unknown" -> "⚠️ $nom (`$id`) est en état INCONNU dans Home Assistant : $domaine.$service a été accepté, mais aucune confirmation fiable n'est possible."
+            serviceEnTransition(service, etat) -> "⏳ $nom (`$id`) : $domaine.$service est bien lancé, mais l'appareil est encore en transition (« $etat »)$detail. L'action n'est pas encore terminée."
             !verificationServiceConnue(service, donnees) -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant ; état actuel « $etat »$detail. Le résultat fonctionnel n'est pas vérifiable automatiquement : ne le présente pas comme confirmé."
             confirmeService(domaine, service, donnees, o) -> "✅ $nom (`$id`) : $domaine.$service confirmé — état « $etat »$detail."
             else -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant, mais l'état reste « $etat »$detail après 2,5 s. Ne dis PAS que c'est fait : l'appareil n'a peut-être pas suivi (ou il réagit lentement)."
