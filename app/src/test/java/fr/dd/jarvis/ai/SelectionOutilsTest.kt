@@ -61,4 +61,17 @@ class SelectionOutilsTest {
         val r = SelectionOutils.rechercher(s, "le coffre ne retrouve pas mes dossiers", emptySet())
         assertEquals("obsidian_chercher", r.first().getJSONObject("function").getString("name"))
     }
+
+    @Test fun formulationsFamilieresDePanneRetrouventLeDiagnostic() {
+        val (s, _) = catalogue()
+        val r = SelectionOutils.rechercher(s, "Plex déconne et se fige depuis hier", emptySet())
+        assertEquals("plex_diagnostic", r.first().getJSONObject("function").getString("name"))
+    }
+
+    @Test fun oubliDesConsignesOrienteVersLaMemoire() {
+        val (s, _) = catalogue()
+        val r = SelectionOutils.rechercher(s, "Jarvis oublie mes consignes et préférences", emptySet())
+        assertTrue(r.isNotEmpty())
+        assertTrue(r.first().getJSONObject("function").getString("name").startsWith("memoire_"))
+    }
 }
