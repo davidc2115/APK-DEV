@@ -7,6 +7,7 @@ class DiscordToolsCapabilitiesTest {
     @Test
     fun outilsAvancesSontEnregistres() {
         assertTrue(DiscordTools.NAMES.containsAll(setOf(
+            "discord_serveur_info",
             "discord_message_modifier",
             "discord_message_supprimer",
             "discord_message_epingler",
