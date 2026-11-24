@@ -20,8 +20,9 @@ object HomeAssistantDashboard {
         override fun onMessage(webSocket: WebSocket, text: String) { incoming.offer(text) }
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { incoming.offer(JSONObject().put("_failure", t.message ?: "WebSocket indisponible").toString()) }
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { incoming.offer(JSONObject().put("_failure", "Connexion fermée : $reason").toString()) }
-        private fun next(): JSONObject {
-            val o = JSONObject(incoming.poll(35, TimeUnit.SECONDS) ?: throw IllegalStateException("Home Assistant ne répond pas à l'API WebSocket."))
+        private fun next(timeoutMs: Long = 35_000): JSONObject {
+            val o = JSONObject(incoming.poll(timeoutMs.coerceAtLeast(1), TimeUnit.MILLISECONDS)
+                ?: throw IllegalStateException("Home Assistant ne répond pas à l'API WebSocket."))
             if (o.has("_failure")) throw IllegalStateException(o.optString("_failure"))
             return o
         }
@@ -38,18 +39,26 @@ object HomeAssistantDashboard {
         fun command(type: String, args: JSONObject = JSONObject()): JSONObject {
             val id = ids.getAndIncrement()
             if (ws?.send(JSONObject(args.toString()).put("id", id).put("type", type).toString()) != true) throw IllegalStateException("Envoi impossible : $type.")
-            repeat(16) {
-                val r = next()
-                if (r.optInt("id", -1) == id) {
-                    if (!r.optBoolean("success", false)) throw IllegalStateException("Home Assistant refuse $type : ${r.optJSONObject("error")?.optString("message") ?: r}")
-                    val result = r.opt("result")
-                    return if (result is JSONObject) result else JSONObject().put("_value", result)
-                }
+            // Les événements d'état et les réponses d'autres commandes peuvent précéder la nôtre.
+            // On attend l'identifiant exact jusqu'à l'échéance au lieu de compter un nombre arbitraire de messages.
+            val echeance = System.nanoTime() + TimeUnit.SECONDS.toNanos(35)
+            while (true) {
+                val restant = TimeUnit.NANOSECONDS.toMillis(echeance - System.nanoTime())
+                if (restant <= 0) throw IllegalStateException("Réponse manquante pour $type.")
+                val r = next(restant)
+                if (!correspondCommande(r.toString(), id)) continue
+                if (!r.optBoolean("success", false)) throw IllegalStateException("Home Assistant refuse $type : ${r.optJSONObject("error")?.optString("message") ?: r}")
+                val result = r.opt("result")
+                return if (result is JSONObject) result else JSONObject().put("_value", result)
             }
-            throw IllegalStateException("Réponse manquante pour $type.")
         }
         override fun close() { ws?.close(1000, "Jarvis terminé") }
     }
+
+    /** Identifie uniquement la réponse corrélée à la commande ; les événements sans id sont ignorés. */
+    internal fun correspondCommande(message: String, id: Int): Boolean = runCatching {
+        JSONObject(message).optInt("id", -1) == id
+    }.getOrDefault(false)
 
     private fun backup(app: JarvisApp, path: String, config: JSONObject) {
         val dir = File(app.filesDir, "ha-dashboard-backups").apply { mkdirs() }
