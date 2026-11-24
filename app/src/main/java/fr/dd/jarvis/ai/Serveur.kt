@@ -927,8 +927,9 @@ object Serveur {
 
     /**
      * Exécute un service puis CONFIRME le résultat : Home Assistant renvoie les états changés pendant l'appel ; pour un
-     * appareil plus lent (Zigbee, télé, poêle…), l'état est relu jusqu'à ~2,5 s. Le compte rendu dit ce qui est
-     * réellement constaté — avant, « exécuté » était annoncé même quand l'appareil, injoignable, n'avait pas bougé.
+     * appareil plus lent (Zigbee, télé, poêle…), l'état est relu pendant un budget global de ~2,5 s.
+     * Les actions sans état de confirmation standard ne déclenchent pas cette attente : elles sont signalées
+     * comme acceptées, mais non vérifiées. Le compte rendu distingue aussi les états inconnus et les transitions.
      */
     /** Services dont le résultat peut être confirmé à partir de l’état standard de l’entité HA. */
     internal fun verificationServiceConnue(service: String, donnees: JSONObject): Boolean = when (service) {
@@ -980,7 +981,7 @@ object Serveur {
         }
     }
 
-    /** L'état relu correspond-il à ce que le service devait produire ? (vrai si rien de précis n'est attendu) */
+    /** L'état relu correspond-il au résultat attendu ? Retourne false dès qu'aucune confirmation fiable n'est possible. */
     internal fun confirmeService(domaine: String, service: String, donnees: JSONObject, o: JSONObject): Boolean {
         val etat = o.optString("state")
         if (etat in setOf("unavailable", "unknown")) return false
