@@ -383,7 +383,8 @@ object Discord {
             val t = r.body?.string().orEmpty()
             if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}).")
             if (r.code == 403) throw IllegalStateException("Discord 403 : le bot n'a pas la permission « Gérer les rôles », ou son propre rôle n'est pas assez haut dans la hiérarchie pour déplacer celui-ci à cette position.")
-            if (r.code == 429) throw IllegalStateException("Discord : trop de requêtes, réessaie dans un instant.")
+            if (r.code == 429) throw IllegalStateException(messageLimiteDiscord(r.header("Retry-After"), t))
+            if (r.code >= 500) throw IllegalStateException("Discord est temporairement indisponible (HTTP ${r.code}). Réessaie dans quelques instants.")
             if (!r.isSuccessful) throw IllegalStateException("Discord ${r.code} : ${t.take(300)}")
         }
     }
@@ -410,7 +411,8 @@ object Discord {
             val t = r.body?.string().orEmpty()
             if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}).")
             if (r.code == 403) throw IllegalStateException("Discord 403 : le bot n'a pas la permission « Gérer les salons » sur ce serveur (ou sur l'un des salons concernés).")
-            if (r.code == 429) throw IllegalStateException("Discord : trop de requêtes, réessaie dans un instant.")
+            if (r.code == 429) throw IllegalStateException(messageLimiteDiscord(r.header("Retry-After"), t))
+            if (r.code >= 500) throw IllegalStateException("Discord est temporairement indisponible (HTTP ${r.code}). Réessaie dans quelques instants.")
             if (!r.isSuccessful) throw IllegalStateException("Discord ${r.code} : ${t.take(300)}")
         }
     }
