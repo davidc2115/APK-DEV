@@ -13,7 +13,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         val KEYWORDS = Regex("discord|r[ôo]le\\b|r[ôo]les\\b|mod[ée]rateur|mod[ée]ration|serveur discord|salon\\b|salons\\b|channels?\\b|cat[ée]gorie discord|cat[ée]gories? (de|des|du) salons?|lien d.invitation|invitations? (du|au) serveur", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t) || DiscordNoms.cite(t)
         val NAMES = setOf(
-            "discord_diagnostic", "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
+            "discord_diagnostic", "discord_guildes", "discord_serveur_info", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
             "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer", "discord_messages_lire", "discord_messages_rechercher", "discord_fil_lire", "discord_message_modifier", "discord_message_supprimer", "discord_message_epingler", "discord_reaction", "discord_fil_creer", "discord_membre_info", "discord_membre_timeout", "discord_membre_expulser", "discord_membre_bannir", "discord_membre_pseudo",
             "discord_salon_creer", "discord_salon_modifier", "discord_salon_supprimer", "discord_salons_reorganiser", "discord_salon_permissions_voir",
             "discord_serveur_modifier", "discord_invitations", "discord_messages_purger", "discord_journal_audit", "discord_fil_gerer"
@@ -33,6 +33,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
     val schema: List<JSONObject> = listOf(
         tool("discord_diagnostic", "Discord : diagnostic en lecture seule du bot JARVIS. Vérifie le jeton, l'identité du bot, les serveurs accessibles, son membre et ses rôles sur chaque serveur, la hiérarchie de ses rôles, les permissions cumulées et l'inventaire des salons. Signale les permissions Discord utiles manquantes. Les intents privilégiés du portail développeur ne sont pas lisibles par l'API : ils ne sont pas déclarés comme vérifiés.", mapOf("serveur" to prop("Nom ou ID d'un serveur précis ; vide pour examiner tous les serveurs accessibles au bot."))),
         tool("discord_guildes", "Discord : liste les serveurs (guildes) où le bot JARVIS est présent.", emptyMap()),
+        tool("discord_serveur_info", "Discord : affiche la fiche détaillée d’un serveur (description, nombre approximatif de membres et de membres en ligne, vérification, boosts, langue et fonctionnalités). Lecture seule.", mapOf("serveur" to prop("Nom, surnom ou ID du serveur Discord (optionnel si un seul)."))),
         tool("discord_roles", "Discord : liste les rôles d'un serveur (nom, couleur, permissions, position).",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si le bot n'est que sur un seul)."))),
         tool("discord_salons", "Discord : liste les salons (textuels, vocaux, catégories) d'un serveur.",
@@ -265,6 +266,32 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         "discord_guildes" -> {
             val arr = Discord.guildes(app)
             ToolResult("# 💬 Serveurs Discord (${arr.length()})\n" + (0 until arr.length()).joinToString("\n") { i -> "- " + Discord.affiche(arr.getJSONObject(i).optString("name")) }, direct = true)
+        }
+        "discord_serveur_info" -> {
+            val guilde = guildeObj(a)
+            val info = Discord.infosGuilde(app, guilde.getString("id"))
+            val verification = when (info.optInt("verification_level", -1)) {
+                0 -> "aucun"
+                1 -> "faible"
+                2 -> "moyen"
+                3 -> "élevé"
+                4 -> "très élevé"
+                else -> "non communiqué"
+            }
+            val fonctions = info.optJSONArray("features")?.let { arr -> (0 until arr.length()).map { arr.optString(it) } }.orEmpty()
+            val lignes = listOf(
+                "# 💬 ${info.optString("name", guilde.optString("name"))}",
+                "Description : ${info.optString("description").ifBlank { "aucune" }}",
+                "Identifiant : ${info.optString("id")}",
+                "Propriétaire (ID) : ${info.optString("owner_id").ifBlank { "non communiqué" }}",
+                "Membres : environ ${info.optInt("approximate_member_count", -1).takeIf { it >= 0 } ?: "non communiqué"}",
+                "En ligne : environ ${info.optInt("approximate_presence_count", -1).takeIf { it >= 0 } ?: "non communiqué"}",
+                "Niveau de vérification : $verification",
+                "Boosts : niveau ${info.optInt("premium_tier")} · ${info.optInt("premium_subscription_count")} abonnement(s)",
+                "Langue préférée : ${info.optString("preferred_locale").ifBlank { "non communiquée" }}",
+                "Fonctionnalités : ${fonctions.joinToString(", ").ifBlank { "non communiquées par API" }}"
+            )
+            ToolResult(lignes.joinToString("\n"), direct = true)
         }
         "discord_salons", "discord_audit_serveur" -> {
             val gid = guilde(a)
