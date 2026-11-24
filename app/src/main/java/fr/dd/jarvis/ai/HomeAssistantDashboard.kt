@@ -51,11 +51,26 @@ object HomeAssistantDashboard {
         override fun close() { ws?.close(1000, "Jarvis terminé") }
     }
 
-    private fun backup(app: JarvisApp, path: String, config: JSONObject) {
-        val dir = File(app.filesDir, "ha-dashboard-backups").apply { mkdirs() }
+    private fun backup(app: JarvisApp, path: String, config: JSONObject): File {
+        // Une sauvegarde n'est considérée valide qu'après écriture ET relecture du JSON.
+        val dir = File(app.filesDir, "ha-dashboard-backups")
+        if (!dir.exists() && !dir.mkdirs()) {
+            throw IllegalStateException("Impossible de créer le dossier des sauvegardes Lovelace.")
+        }
         val safe = path.ifBlank { "default" }.replace(Regex("[^A-Za-z0-9_.-]"), "_")
-        File(dir, "$safe-${System.currentTimeMillis()}.json").writeText(config.toString(2))
+        val file = File(dir, "$safe-${System.currentTimeMillis()}.json")
+        try {
+            file.writeText(config.toString(2))
+            val relu = JSONObject(file.readText())
+            if (!file.isFile || file.length() == 0L || relu.optJSONArray("views") == null) {
+                throw IllegalStateException("La sauvegarde du tableau /$path est incomplète.")
+            }
+        } catch (e: Exception) {
+            file.delete()
+            throw IllegalStateException("Sauvegarde Lovelace impossible : ${e.message ?: "erreur d'écriture"}.", e)
+        }
         dir.listFiles()?.sortedByDescending { it.lastModified() }?.drop(30)?.forEach { it.delete() }
+        return file
     }
     private fun config(s: Session, path: String) = s.command("lovelace/config", if (path.isBlank()) JSONObject() else JSONObject().put("url_path", path))
     private fun save(s: Session, path: String, config: JSONObject) {
@@ -91,6 +106,9 @@ object HomeAssistantDashboard {
                     if (path.isBlank()) return "url_path obligatoire."
                     // Ne jamais supprimer un tableau personnalisé sans conserver sa configuration.
                     val ancienneConfiguration = config(s, path)
+                    if (ancienneConfiguration.optJSONArray("views") == null) {
+                        throw IllegalStateException("Configuration Lovelace incomplète : suppression annulée, aucune sauvegarde fiable possible.")
+                    }
                     backup(app, path, ancienneConfiguration)
                     s.command("lovelace/dashboards/delete", JSONObject().put("url_path", path))
                     return "Tableau de bord /$path supprimé. Sauvegarde locale créée avant suppression."
