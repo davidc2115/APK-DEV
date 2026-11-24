@@ -51,10 +51,10 @@ object CarBridge {
         val style = NotificationCompat.MessagingStyle(me).setConversationTitle("JARVIS")
         val recent = synchronized(history) { history.takeLast(8) }
         recent.forEach { m ->
-            style.addMessage((if (m.fromUser) m.text else fr.dd.jarvis.voice.TexteParle.preparer(m.text)).take(500), m.ts, if (m.fromUser) me else jarvis)
+            style.addMessage(if (m.fromUser) m.text else fr.dd.jarvis.voice.TexteParle.preparer(m.text), m.ts, if (m.fromUser) me else jarvis)
         }
         if (recent.lastOrNull()?.let { !it.fromUser && (it.text == texteBrut || it.text == texte) } != true) {
-            style.addMessage(texte.take(600), System.currentTimeMillis(), jarvis)
+            style.addMessage(texte, System.currentTimeMillis(), jarvis)
         }
 
         val flagsMut = PendingIntent.FLAG_UPDATE_CURRENT or (if (android.os.Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
