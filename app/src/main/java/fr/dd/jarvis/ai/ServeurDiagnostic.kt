@@ -445,22 +445,22 @@ internal object ServeurDiagnostic {
               sudo systemctl reset-failed
             fi
         """, "")
-        Remede.SYNCHRONISER_HEURE -> """
+        Remede.SYNCHRONISER_HEURE -> sh("""
             set -euo pipefail
             sudo timedatectl set-ntp true
             sleep 3
             synchronisee=¤(timedatectl show -p NTPSynchronized --value 2>/dev/null)
             echo "Synchronisation NTP : ¤synchronisee"
             [ "¤synchronisee" = yes ]
-        """.trimIndent()
-        Remede.REDEMARRER_DOCKER -> """
+        """, "")
+        Remede.REDEMARRER_DOCKER -> sh("""
             set -euo pipefail
             sudo systemctl restart docker
             sleep 5
             sudo systemctl is-active --quiet docker
             echo "Docker : actif"
             sudo docker ps --format '{{.Names}} {{.Status}}' | head -15
-        """.trimIndent()
+        """, "")
     }
 
     /** Compte rendu d'un remède : aucun succès n'est annoncé si la commande échoue. */
