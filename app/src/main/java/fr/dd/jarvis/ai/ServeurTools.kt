@@ -352,7 +352,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                         fr.dd.jarvis.voice.JournalVoix.noter("serveur", "diagnostic : sudo avec mot de passe refusé → essai sans")
                         r = Serveur.exec(app, ServeurDiagnostic.commande(cible, app.store.plexToken.value, lignes, sudo), 150)
                     }
-                    bilan = ServeurDiagnostic.rapport(ServeurDiagnostic.analyser(r.second))
+                    bilan = ServeurDiagnostic.rapportExecution(r.second, r.first)
                     sortie(r.first to ServeurDiagnostic.sansReperes(r.second), 7000)
                 }.getOrElse { e ->
                     // SSH lui-même ne passe pas : dépannage de la CONNEXION depuis le téléphone.
