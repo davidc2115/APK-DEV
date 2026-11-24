@@ -66,4 +66,29 @@ class ServeurDiagnosticTest {
         }
         assertTrue(refuse)
     }
+
+    @Test
+    fun depannagesVerifientLesErreursEtLesEtatsFinaux() {
+        val nettoyage = ServeurDiagnostic.commandeRemede(ServeurDiagnostic.Remede.NETTOYER_DISQUE)
+        val services = ServeurDiagnostic.commandeRemede(ServeurDiagnostic.Remede.RELANCER_ECHECS)
+        val heure = ServeurDiagnostic.commandeRemede(ServeurDiagnostic.Remede.SYNCHRONISER_HEURE)
+        val docker = ServeurDiagnostic.commandeRemede(ServeurDiagnostic.Remede.REDEMARRER_DOCKER)
+        assertTrue(nettoyage.contains("set -euo pipefail"))
+        assertTrue(services.contains("set -euo pipefail"))
+        assertTrue(services.contains("[ \"$etat\" = active ]"))
+        assertTrue(heure.contains("[ \"$synchronisee\" = yes ]"))
+        assertTrue(docker.contains("systemctl is-active --quiet docker"))
+    }
+
+    @Test
+    fun echecDeRemedeNePeutPasEtreAnnonceCommeReussi() {
+        val r = ServeurDiagnostic.Remede.REDEMARRER_DOCKER
+        val echec = ServeurDiagnostic.resultatRemede(r, "permission denied", 1)
+        assertTrue(echec.contains("Échec du dépannage"))
+        assertFalse(echec.contains(" : vérifié."))
+        val nettoyageNonMesure = ServeurDiagnostic.resultatRemede(
+            ServeurDiagnostic.Remede.NETTOYER_DISQUE, "commande terminée", 0
+        )
+        assertTrue(nettoyageNonMesure.contains("non confirmé"))
+    }
 }
