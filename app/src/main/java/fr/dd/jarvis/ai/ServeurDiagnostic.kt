@@ -466,7 +466,7 @@ internal object ServeurDiagnostic {
     /** Compte rendu d'un remède : aucun succès n'est annoncé si la commande échoue. */
     fun resultatRemede(r: Remede, sortie: String, codeSortie: Int = 0): String {
         if (codeSortie == -2) {
-            return "⏳ Dépannage toujours en cours sur le serveur : aucune réussite annoncée. La commande continue sans être interrompue. Vérifie son état avec le suivi des tâches serveur.\\n" + sortie.trim().take(1200)
+            return "⏳ Dépannage toujours en cours sur le serveur : aucune réussite annoncée. La commande continue sans être interrompue. Vérifie son état avec le suivi des tâches serveur.\n" + sortie.trim().take(1200)
         }
         if (codeSortie != 0) {
             return "⚠️ Échec du dépannage « " + r.question.substringBefore(" ?") +
