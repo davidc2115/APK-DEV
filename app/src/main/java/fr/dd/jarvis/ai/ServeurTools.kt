@@ -373,7 +373,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (!confirm(r.question, true)) return ToolResult("Annulé : rien n'a été modifié.")
                 if (r == ServeurDiagnostic.Remede.REDEMARRER_DOCKER) runCatching { HaSur.noterDemande(app, "redémarrage de Docker") }
                 val res = Serveur.exec(app, ServeurDiagnostic.commandeRemede(r), 240)
-                ToolResult(ServeurDiagnostic.resultatRemede(r, res.second), direct = true)
+                ToolResult(ServeurDiagnostic.resultatRemede(r, res.second, res.first), direct = true)
             }
             "serveur_scan_ports" -> {
                 val hote = a.optString("hote").trim().ifBlank { app.store.sshHost.value.trim() }
