@@ -15,4 +15,20 @@ class AutorisationsCommandeTest {
         assertNotEquals(Autorisations.empreinte("freebox", a), Autorisations.empreinte("freebox", c))
         assertNotEquals(Autorisations.empreinte("freebox", a), Autorisations.empreinte("ssh_commande", a))
     }
+
+
+    @Test fun actionsDiscordSensiblesNeSontJamaisAutoriseesEnPermanence() {
+        assertEquals(null, Autorisations.cle("discord_membre_bannir", "Bannir ce membre ?"))
+        assertEquals(null, Autorisations.cle("discord_membre_expulser", "Expulser ce membre ?"))
+        assertEquals(null, Autorisations.cle("discord_salon_permission", "Modifier les permissions de ce salon ?"))
+        assertEquals(null, Autorisations.cle("discord_role_attribuer", "Donner ce rôle à ce membre ?"))
+        assertEquals(null, Autorisations.cle("discord_messages_purger", "Purger les messages ?"))
+        assertEquals(null, Autorisations.cle("discord_fil_gerer", "Supprimer ce fil ?"))
+        assertEquals(true, Autorisations.discordCritique("discord_membre_bannir", "Bannir ce membre ?"))
+    }
+
+    @Test fun messageDiscordOrdinairePeutGarderSonAutorisation() {
+        assertNotEquals(null, Autorisations.cle("discord_message_envoyer", "Envoyer ce message dans le salon ?"))
+        assertEquals(false, Autorisations.discordCritique("discord_message_envoyer", "Envoyer ce message ?"))
+    }
 }
