@@ -42,8 +42,8 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("discord_messages_lire", "Discord : lit l’historique d’un salon — les derniers messages (1 à 100, pagination avant/après), ou TOUS ceux d'une journée avec « jour » (hier, aujourd'hui, AAAA-MM-JJ) pour un résumé. Serveur et salon : nom, surnom noté par l'utilisateur ou ID. Lecture seule. Peut aussi lire un fil si son ID est fourni.",
             mapOf("serveur" to prop("Nom, surnom ou ID du serveur Discord (optionnel si un seul)."), "salon" to prop("Nom du salon tel que l'utilisateur le dit (emojis, séparateurs et polices décoratives inutiles), ou ID du salon ou du fil."),
                 "jour" to prop("Journée à lire en entier : hier, aujourd'hui, avant-hier, ou AAAA-MM-JJ (optionnel)."), "jusqu_au" to prop("Fin de période AAAA-MM-JJ incluse, avec « jour » comme début (optionnel)."), "limite" to prop("Nombre de messages à lire, de 1 à 100 (défaut 30)."), "apres_id" to prop("ID du dernier message déjà lu : ne renvoie que les messages plus récents (optionnel)."), "avant_id" to prop("ID du message curseur : récupère les messages plus anciens (optionnel ; ne pas utiliser avec apres_id).")), listOf("salon")),
-        tool("discord_messages_rechercher", "Discord : recherche un mot ou une expression dans les 100 messages les plus récents d’un salon, avec filtre facultatif par auteur. Lecture seule.",
-            mapOf("serveur" to prop("Nom, surnom ou ID du serveur Discord (optionnel si un seul)."), "salon" to prop("Nom simple du salon (emojis et décorations inutiles) ou ID."), "recherche" to prop("Mot ou expression à retrouver dans le contenu (facultatif, mais recommandé)."), "auteur" to prop("Nom ou pseudo à filtrer (facultatif).")), listOf("salon")),
+        tool("discord_messages_rechercher", "Discord : recherche un mot ou une expression dans les 100 messages les plus récents d’un salon, ou dans une période complète avec « jour » et « jusqu_au » (jusqu’à 500 messages). Filtre facultatif par auteur. Lecture seule.",
+            mapOf("serveur" to prop("Nom, surnom ou ID du serveur Discord (optionnel si un seul)."), "salon" to prop("Nom simple du salon (emojis et décorations inutiles) ou ID."), "recherche" to prop("Mot ou expression à retrouver dans le contenu (facultatif, mais recommandé)."), "auteur" to prop("Nom ou pseudo à filtrer (facultatif)."), "jour" to prop("Début de la période : hier, aujourd’hui, avant-hier ou AAAA-MM-JJ (facultatif)."), "jusqu_au" to prop("Fin de période AAAA-MM-JJ incluse (facultatif, avec jour comme début).")), listOf("salon")),
         tool("discord_fil_lire", "Discord : lit les messages d’un fil/thread Discord à partir de son ID (lecture seule). Le bot doit avoir accès au fil.",
             mapOf("serveur" to prop("Nom, surnom ou ID du serveur Discord (optionnel si un seul)."), "fil_id" to prop("ID numérique du fil Discord."), "limite" to prop("Nombre de messages à lire, de 1 à 100 (défaut 30)."), "avant_id" to prop("ID curseur pour remonter dans l’historique (optionnel).")), listOf("fil_id")),
         tool("discord_message_envoyer", "Discord : envoie un message dans un salon textuel ou d'annonces. Les mentions automatiques (@everyone/@here et rôles) sont désactivées par sécurité.",
@@ -330,8 +330,9 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                     (mot.isBlank() || contenu.contains(mot, ignoreCase = true)) && (auteurFiltre.isBlank() || auteur.contains(auteurFiltre, ignoreCase = true))
                 }
             }
-            messages = messages.sortedBy { it.optString("id") }
+            messages = messages.sortedBy { runCatching { it.optString("id").toBigInteger() }.getOrDefault(java.math.BigInteger.ZERO) }
             if (messages.isEmpty()) return ToolResult(when {
+                periode != null && name == "discord_messages_rechercher" -> "Aucun résultat correspondant dans #${salon.optString("name")} (${g.optString("name")}) sur cette période."
                 periode != null -> "Aucun message dans #${salon.optString("name")} (${g.optString("name")}) sur cette période."
                 name == "discord_messages_rechercher" -> "Aucun résultat dans les 100 messages récents de #${salon.optString("name")}."
                 else -> "Aucun message trouvé dans #${salon.optString("name")} / le fil demandé."
