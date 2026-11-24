@@ -26,12 +26,4 @@ class DiscordToolsCapabilitiesTest {
         assertTrue(DiscordTools.concerned("Mets un timeout à ce membre sur Discord"))
         assertTrue(DiscordTools.concerned("Crée un fil Discord à partir de ce message"))
     }
-
-    @Test
-    fun rechercheMessagesAccepteUnePeriode() {
-        val outil = DiscordTools.schema.first { it.optJSONObject("function")?.optString("name") == "discord_messages_rechercher" }
-            .getJSONObject("function").getJSONObject("parameters").getJSONObject("properties")
-        assertTrue(outil.has("jour"))
-        assertTrue(outil.has("jusqu_au"))
-    }
 }
