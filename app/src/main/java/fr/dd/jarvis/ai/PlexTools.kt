@@ -947,15 +947,23 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
     private suspend fun serveur(a: JSONObject): ToolResult {
         return when (fr.dd.jarvis.societe.core.normaliser(a.optString("action")).replace(' ', '_')) {
             "etat" -> {
+                val debut = System.nanoTime()
                 val s = Plex.serveur(app)
+                val delaiApiMs = (System.nanoTime() - debut) / 1_000_000
+                // Une erreur ou une réponse vide de /updater/status ne prouve PAS que le serveur est à jour.
                 val maj = runCatching { Plex.liste(Plex.mc(app, "/updater/status"), "Release").firstOrNull() }.getOrNull()
                 val act = runCatching { Plex.liste(Plex.mc(app, "/activities"), "Activity") }.getOrDefault(emptyList())
                 val sess = runCatching { Plex.mc(app, "/status/sessions").optInt("size") }.getOrDefault(0)
+                val bibliotheques = Plex.sections(app)
+                val majTexte = maj?.let { "✅ disponible — version ${it.optString("version")}" }
+                    ?: "⚠️ vérification indisponible (aucune conclusion sur les mises à jour)"
                 ToolResult("# 🖥️ Plex Media Server\n- ${s.optString("friendlyName")} · version ${s.optString("version")} · ${s.optString("platform")} ${s.optString("platformVersion")}\n" +
-                    "- Mise à jour : " + (maj?.let { "✅ disponible — ${it.optString("version")}" } ?: "à jour (ou non vérifiée)") + "\n" +
+                    "- Connexion API / jeton : ✅ OK · réponse en ${delaiApiMs} ms\n" +
+                    "- Chemin utilisé : ${Plex.chemin(app)}\n" +
+                    "- Mise à jour : $majTexte\n" +
                     "- Lectures en cours : $sess · transcodages max ${s.optString("transcoderActiveVideoSessions", "?")}\n" +
                     "- Activités : " + act.joinToString { "${it.optString("title")} ${it.optInt("progress")} %" }.ifBlank { "aucune" } + "\n" +
-                    "- Bibliothèques : " + Plex.sections(app).joinToString { it.optString("title") }, direct = true)
+                    "- Bibliothèques (${bibliotheques.size}) : " + bibliotheques.joinToString { it.optString("title") }.ifBlank { "aucune détectée" }, direct = true)
             }
             "maintenance" -> {
                 if (!confirm("Plex : optimiser la base, nettoyer les anciens fichiers et vider les corbeilles ?", false)) return ToolResult("Annulé.")
