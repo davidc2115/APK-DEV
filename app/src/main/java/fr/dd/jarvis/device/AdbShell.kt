@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import io.github.muntashirakon.adb.AbsAdbConnectionManager
 import io.github.muntashirakon.adb.android.AdbMdns
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -238,6 +239,8 @@ object AdbShell {
                 runCatching { stream.close() }
                 lecteur.shutdownNow()
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
             "Erreur ADB : ${e.message ?: e.javaClass.simpleName}"
         }
