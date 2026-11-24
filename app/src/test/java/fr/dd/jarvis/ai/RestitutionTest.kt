@@ -8,6 +8,8 @@ import org.junit.Test
 class RestitutionTest {
     @Test fun consignesExplicitesDetectees() {
         assertEquals("musique", ConsignesExplicites.detecter("Quand tu mets une musique, donne-moi seulement le titre et l'artiste")?.rubrique)
+        assertEquals("musique", ConsignesExplicites.detecter("Quand je lui demande de lancer une musique, donne-moi seulement le titre et l'artiste")?.rubrique)
+        assertEquals("localisation", ConsignesExplicites.detecter("Lorsque je lui demande une localisation, donne-moi uniquement l'adresse")?.rubrique)
         assertEquals("localisation", ConsignesExplicites.detecter("Pour la localisation d'une personne, donne-moi seulement l'adresse exacte, pas d'autres informations")?.rubrique)
         assertEquals("reponses", ConsignesExplicites.detecter("À l'avenir, réponds-moi uniquement en deux phrases")?.rubrique)
         assertNull(ConsignesExplicites.detecter("mets du Johnny Hallyday s'il te plaît"))
