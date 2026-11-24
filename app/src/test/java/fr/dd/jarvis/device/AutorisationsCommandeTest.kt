@@ -20,6 +20,8 @@ class AutorisationsCommandeTest {
     @Test fun actionsDiscordSensiblesNeSontJamaisAutoriseesEnPermanence() {
         assertEquals(null, Autorisations.cle("discord_membre_bannir", "Bannir ce membre ?"))
         assertEquals(null, Autorisations.cle("discord_membre_expulser", "Expulser ce membre ?"))
+        assertEquals(null, Autorisations.cle("discord_membre_pseudo", "Changer le pseudo de ce membre ?"))
+        assertEquals(null, Autorisations.cle("discord_invitations", "Créer une invitation Discord ?"))
         assertEquals(null, Autorisations.cle("discord_salon_permission", "Modifier les permissions de ce salon ?"))
         assertEquals(null, Autorisations.cle("discord_role_attribuer", "Donner ce rôle à ce membre ?"))
         assertEquals(null, Autorisations.cle("discord_messages_purger", "Purger les messages ?"))
