@@ -2,6 +2,8 @@ package fr.dd.jarvis.device
 
 import android.content.Context
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -100,6 +102,27 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     companion object {
         const val FOLDER = "JARVIS"
         const val FILE = "Mémoire JARVIS.md"
+
+        /**
+         * Écrit la copie locale de la mémoire Hermès avant de valider le cache.
+         * Le fichier temporaire est synchronisé sur disque puis renommé dans le même dossier :
+         * un arrêt du processus ne doit pas laisser une mémoire partiellement écrite.
+         */
+        internal fun persisterCopieHermes(fichier: File, texte: String) {
+            val parent = fichier.parentFile ?: throw IOException("Dossier de mémoire introuvable.")
+            if (!parent.exists() && !parent.mkdirs()) throw IOException("Impossible de créer le dossier de mémoire.")
+            val temporaire = File(parent, fichier.name + ".tmp")
+            try {
+                FileOutputStream(temporaire).use { sortie ->
+                    sortie.write(texte.toByteArray(Charsets.UTF_8))
+                    sortie.flush()
+                    sortie.fd.sync()
+                }
+                if (!temporaire.renameTo(fichier)) throw IOException("Impossible de valider la nouvelle mémoire Hermès.")
+            } finally {
+                if (temporaire.exists()) temporaire.delete()
+            }
+        }
 
         private val PIECES = Regex("\\b(etage|haut|mezzanine|salon|sejour|living|rez|chaussee|rdc|bas|cuisine|chambre|bureau|garage|veranda|cave|grenier|entree|couloir|buanderie)\\b")
 
@@ -355,8 +378,10 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     fun majHermes(brut: String): Boolean {
         val texte = brut.take(20_000)
         if (texte == hermes()) return false
+        // Ne pas mettre à jour le cache avant la copie durable : sinon un échec disque serait
+        // considéré comme synchronisé et le hook Hermès ne réessaierait plus.
+        persisterCopieHermes(hermesLocal, texte)
         hermesCache = texte
-        runCatching { hermesLocal.writeText(texte) }
         val (notes, profil) = entreesHermes(texte)
         val md = "# Mémoire d'Hermès\n\n_Synchronisée automatiquement depuis Hermès (Termux). Pour corriger une information, demande-le à Jarvis ou à Hermès._\n\n" +
             "## Notes d'Hermès\n" + notes.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } +
