@@ -950,7 +950,7 @@ object Serveur {
         if (ids.isNotEmpty()) corps.put("entity_id", if (ids.size > 1) JSONArray(ids) else ids.first())
         val demandes = JSONObject(corps.toString())
         val reponse = ha(app, "POST", "/api/services/$domaine/$service", corps)
-        if (ids.isEmpty()) return "✅ $domaine.$service exécuté par Home Assistant."
+        if (ids.isEmpty()) return "⚠️ $domaine.$service accepté par Home Assistant, mais aucun entity_id ne permet de vérifier le résultat : ne le présente pas comme confirmé."
         val changes = HashMap<String, JSONObject>()
         runCatching { JSONArray(reponse) }.getOrNull()?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { changes[it.optString("entity_id")] = it } }
         val limite = System.currentTimeMillis() + 2_500
