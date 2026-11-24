@@ -18,7 +18,7 @@ object ConsignesIA {
         "retiens|n oublie|souviens toi|rappelle toi|je (veux|voudrais|prefere|aimerais|souhaite)|j aimerais|j avais (dit|demande)|je t (avais|ai) (dit|demande)|" +
         "je te l (avais|ai)|deja (dit|demande)|combien de fois|comme je (t ai|te l ai|l ai|t avais|te l avais) (dit|demande)|au lieu de|plutot|pas comme ca|" +
         "seulement|uniquement|rien d autre|n ajoute|ne (me )?(donne|dis|mets|affiche)s? (que|pas|plus|jamais)|" +
-        "quand je (te )?(demande|dis|parle)|lorsque je|si je (te )?(demande|dis)|tutoie|vouvoie|appelle moi)\\b")
+        "quand je (te |lui )?(demande|dis|parle)|lorsque je|si je (te )?(demande|dis)|tutoie|vouvoie|appelle moi)\\b")
 
     data class Extraite(val rubrique: String, val texte: String)
 
