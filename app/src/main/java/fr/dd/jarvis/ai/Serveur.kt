@@ -930,6 +930,20 @@ object Serveur {
      * appareil plus lent (Zigbee, télé, poêle…), l'état est relu jusqu'à ~2,5 s. Le compte rendu dit ce qui est
      * réellement constaté — avant, « exécuté » était annoncé même quand l'appareil, injoignable, n'avait pas bougé.
      */
+    /** Services dont le résultat peut être confirmé à partir de l’état standard de l’entité HA. */
+    internal fun verificationServiceConnue(service: String, donnees: JSONObject): Boolean = when (service) {
+        "turn_on", "turn_off", "open_cover", "close_cover", "open", "close", "lock", "unlock" -> true
+        "set_temperature" -> donnees.has("temperature")
+        "set_hvac_mode" -> donnees.has("hvac_mode")
+        "set_preset_mode" -> donnees.has("preset_mode")
+        "set_fan_mode" -> donnees.has("fan_mode")
+        "volume_set" -> donnees.has("volume_level")
+        "volume_mute" -> donnees.has("is_volume_muted")
+        "select_source" -> donnees.has("source")
+        "select_option" -> donnees.has("option")
+        "set_value" -> donnees.has("value")
+        else -> false
+    }
     fun haService(app: JarvisApp, domaine: String, service: String, entite: String, donnees: JSONObject?): String {
         val corps = donnees ?: JSONObject()
         val ids = entite.split(",").map { it.trim() }.filter { it.isNotBlank() }
@@ -942,7 +956,7 @@ object Serveur {
         val limite = System.currentTimeMillis() + 2_500
         return ids.joinToString("\n") { id ->
             var o: JSONObject? = changes[id]
-            while ((o == null || !confirmeService(domaine, service, demandes, o)) && System.currentTimeMillis() < limite) {
+            while (verificationServiceConnue(service, demandes) && (o == null || !confirmeService(domaine, service, demandes, o)) && System.currentTimeMillis() < limite) {
                 Thread.sleep(400)
                 o = runCatching { JSONObject(ha(app, "GET", "/api/states/$id")) }.getOrNull() ?: o
             }
@@ -974,7 +988,7 @@ object Serveur {
             service == "select_source" && donnees.has("source") -> a.optString("source").equals(donnees.optString("source"), true)
             service == "select_option" && donnees.has("option") -> etat.equals(donnees.optString("option"), true)
             service == "set_value" && donnees.has("value") -> etat == donnees.opt("value").toString() || etat.toDoubleOrNull() == donnees.optDouble("value", Double.NaN)
-            else -> true
+            else -> false
         }
     }
 
