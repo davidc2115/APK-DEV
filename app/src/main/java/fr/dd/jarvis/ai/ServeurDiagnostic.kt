@@ -431,7 +431,7 @@ internal object ServeurDiagnostic {
         """, "")
         Remede.RELANCER_ECHECS -> sh("""
             set -euo pipefail
-            U=¤(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print ¤1}' | head -10)
+            U=¤(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print ¤1}' | sed -n '1,10p')
             if [ -z "¤U" ]; then
               echo 'Aucun service en échec.'
             else
@@ -459,7 +459,7 @@ internal object ServeurDiagnostic {
             sleep 5
             sudo systemctl is-active --quiet docker
             echo "Docker : actif"
-            sudo docker ps --format '{{.Names}} {{.Status}}' | head -15
+            sudo docker ps --format '{{.Names}} {{.Status}}' | sed -n '1,15p'
         """, "")
     }
 
