@@ -108,7 +108,7 @@ class ServeurDiagnosticBilanTest {
     }
 
     @Test fun codeSshNonNulSignaleUnBilanPartiel() {
-        val retour = ServeurDiagnostic.rapportExecution("@@ Hôte Debian ==\\n@CHARGE 0.2 0.3 0.2 4", 1)
+        val retour = ServeurDiagnostic.rapportExecution("== Hôte Debian ==\\n@CHARGE 0.2 0.3 0.2 4", 1)
         assertTrue(retour.contains("Diagnostic partiel"))
         assertTrue(retour.contains("code 1"))
     }
