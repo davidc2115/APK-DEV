@@ -160,6 +160,19 @@ object Discord {
 
     // ------------------------------------------------------------ appels HTTP
 
+    /** Explique un rate-limit sans bloquer le fil de réponse : le prochain appel pourra être relancé après ce délai. */
+    internal fun messageLimiteDiscord(retryAfter: String?, corps: String): String {
+        val json = runCatching { JSONObject(corps) }.getOrNull()
+        val secondes = retryAfter?.trim()?.toDoubleOrNull()
+            ?: json?.optDouble("retry_after", Double.NaN)?.takeIf { it.isFinite() && it >= 0.0 }
+        val attente = secondes?.let {
+            val valeur = if (it % 1.0 == 0.0) it.toLong().toString() else String.format(java.util.Locale.FRANCE, "%.1f", it)
+            " Réessaie dans environ $valeur seconde(s)."
+        }.orEmpty()
+        val global = if (json?.optBoolean("global", false) == true) " Limite globale du bot : toutes les requêtes Discord sont temporairement concernées." else ""
+        return "Discord limite temporairement les requêtes (HTTP 429).$attente$global Jarvis n'attend pas automatiquement afin de préserver la rapidité ; relance la demande après le délai indiqué."
+    }
+
     private fun req(app: JarvisApp, method: String, path: String, corps: JSONObject? = null, raisonAudit: String? = null): JSONObject {
         if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Comptes › Discord : jeton du bot).")
         val b = Request.Builder().url(API + path).header("Authorization", "Bot ${jeton(app)}").header("User-Agent", "DiscordBot (https://github.com/davidc2115/APK-DEV, 1.0)")
@@ -175,7 +188,7 @@ object Discord {
             val t = r.body?.string().orEmpty()
             if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}). Réponse de Discord : ${t.take(200).ifBlank { "(vide)" }}. Vérifie que c'est bien le jeton du BOT (onglet Bot du developer portal \u203a \u00ab Reset Token \u00bb), pas le Client Secret/ID. Si ce jeton fonctionne par ailleurs (ex. un bot lancé sur le serveur Debian) mais pas ici, c'est probablement un copier-coller différent : régénère un jeton (\u00ab Reset Token \u00bb), colle-le UNE SEULE fois dans Réglages \u203a Discord sans le retaper, et utilise ce même nouveau jeton partout.")
             if (r.code == 403) throw IllegalStateException("Discord 403 : le bot n'a pas la permission, ou son rôle n'est pas placé au-dessus du rôle concerné dans la hiérarchie du serveur.")
-            if (r.code == 429) throw IllegalStateException("Discord : trop de requêtes, réessaie dans un instant.")
+            if (r.code == 429) throw IllegalStateException(messageLimiteDiscord(r.header("Retry-After"), t))
             if (!r.isSuccessful) throw IllegalStateException("Discord ${r.code} : ${t.take(300)}")
             return if (t.isBlank()) JSONObject() else runCatching { JSONObject(t) }.getOrDefault(JSONObject().put("brut", t))
         }
@@ -189,6 +202,8 @@ object Discord {
             val t = r.body?.string().orEmpty()
             if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}). Réponse de Discord : ${t.take(200).ifBlank { "(vide)" }}. Vérifie que c'est bien le jeton du BOT (onglet Bot du developer portal \u203a \u00ab Reset Token \u00bb), pas le Client Secret/ID. Si ce jeton fonctionne par ailleurs (ex. un bot lancé sur le serveur Debian) mais pas ici, c'est probablement un copier-coller différent : régénère un jeton (\u00ab Reset Token \u00bb), colle-le UNE SEULE fois dans Réglages \u203a Discord sans le retaper, et utilise ce même nouveau jeton partout.")
             if (r.code == 403) throw IllegalStateException("Discord 403 : accès refusé à ce salon ou à ce fil. Vérifie les permissions VIEW_CHANNEL (Voir le salon) et READ_MESSAGE_HISTORY (Lire l’historique des messages), ainsi que l’accès du bot au fil. Si elles sont accordées et que le texte reste vide, vérifie l’intent privilégié MESSAGE_CONTENT dans le Discord Developer Portal.")
+            if (r.code == 429) throw IllegalStateException(messageLimiteDiscord(r.header("Retry-After"), t))
+            if (r.code >= 500) throw IllegalStateException("Discord est temporairement indisponible (HTTP ${r.code}). Réessaie dans quelques instants.")
             if (!r.isSuccessful) throw IllegalStateException("Discord ${r.code} : ${t.take(300)}")
             return JSONArray(t)
         }
