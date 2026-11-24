@@ -377,17 +377,21 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     fun majHermes(brut: String): Boolean {
         val texte = brut.take(20_000)
-        if (texte == hermes()) return false
-        // Ne pas mettre à jour le cache avant la copie durable : sinon un échec disque serait
-        // considéré comme synchronisé et le hook Hermès ne réessaierait plus.
-        persisterCopieHermes(hermesLocal, texte)
-        hermesCache = texte
+        val change = texte != hermes()
+        if (change) {
+            // Ne pas mettre à jour le cache avant la copie durable : sinon un échec disque serait
+            // considéré comme synchronisé et le hook Hermès ne réessaierait plus.
+            persisterCopieHermes(hermesLocal, texte)
+            hermesCache = texte
+        }
         val (notes, profil) = entreesHermes(texte)
         val md = "# Mémoire d'Hermès\n\n_Synchronisée automatiquement depuis Hermès (Termux). Pour corriger une information, demande-le à Jarvis ou à Hermès._\n\n" +
             "## Notes d'Hermès\n" + notes.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } +
             "\n\n## Profil de l'utilisateur (vu par Hermès)\n" + profil.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } + "\n"
-        runCatching { obsidian.saveIn(FOLDER, "Mémoire Hermès", md) }
-        return true
+        // Même sans changement, retenter le miroir Obsidian : un coffre momentanément inaccessible
+        // ne doit pas laisser une mémoire locale correcte mais une note Obsidian durablement périmée.
+        obsidian.saveIn(FOLDER, "Mémoire Hermès", md)
+        return change
     }
 
     fun hermes(): String = hermesCache ?: runCatching { hermesLocal.takeIf { it.exists() }?.readText() }.getOrNull().orEmpty().also { hermesCache = it }
