@@ -49,7 +49,7 @@ object ConsignesIA {
         val contexte = if (demandePrecedente.isNullOrBlank() && reponsePrecedente.isNullOrBlank()) "" else
             "ÉCHANGE PRÉCÉDENT (contexte) :\nDemande : ${demandePrecedente.orEmpty().take(400)}\nRéponse de JARVIS : ${reponsePrecedente.orEmpty().take(700)}\n\n"
         val brut = kotlinx.coroutines.withTimeoutOrNull(8_000) {
-            try { app.llm.groq.plain(SYSTEME, contexte + "MESSAGE À ANALYSER : " + texte.trim()) }
+            try { app.llm.agent(SYSTEME, contexte + "MESSAGE À ANALYSER : " + texte.trim()) }
             catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
         } ?: return null
         return lire(brut)
