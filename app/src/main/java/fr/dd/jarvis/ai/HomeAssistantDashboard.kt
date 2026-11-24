@@ -5,7 +5,7 @@ import okhttp3.*
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -15,7 +15,7 @@ object HomeAssistantDashboard {
     private val client = OkHttpClient.Builder().connectTimeout(12, TimeUnit.SECONDS).readTimeout(35, TimeUnit.SECONDS).build()
 
     private class Session(private val app: JarvisApp) : WebSocketListener(), AutoCloseable {
-        private val incoming = ArrayBlockingQueue<String>(32)
+        private val incoming = LinkedBlockingQueue<String>()
         private var ws: WebSocket? = null
         override fun onMessage(webSocket: WebSocket, text: String) { incoming.offer(text) }
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { incoming.offer(JSONObject().put("_failure", t.message ?: "WebSocket indisponible").toString()) }
