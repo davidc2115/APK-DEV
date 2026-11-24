@@ -396,6 +396,15 @@ internal object ServeurDiagnostic {
         return sb.toString().trimEnd()
     }
 
+    /** Un code SSH non nul ou l’absence du marqueur initial interdit de présenter le bilan comme complet. */
+    internal fun rapportExecution(sortie: String, codeSortie: Int): String {
+        val marqueurPresent = sortie.contains("== Hôte Debian ==")
+        if (!marqueurPresent) {
+            return "⚠️ Diagnostic incomplet : le relevé initial du serveur est absent. Aucun état de santé fiable ne peut être conclu (code SSH $codeSortie). Vérifie les droits SSH/sudo et relance le diagnostic."
+        }
+        val bilan = rapport(analyser(sortie))
+        return if (codeSortie == 0) bilan else "⚠️ Diagnostic partiel : la commande SSH s’est terminée avec le code $codeSortie. Les constats ci-dessous peuvent être incomplets.\n" + bilan
+    }
     /** Sortie brute sans les repères « @… » (déjà résumés dans le bilan). */
     internal fun sansReperes(sortie: String) = sortie.lineSequence().filterNot { it.trimStart().startsWith("@") }.joinToString("\n")
 
