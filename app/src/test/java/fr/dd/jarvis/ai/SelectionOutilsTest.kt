@@ -19,6 +19,10 @@ class SelectionOutilsTest {
         repeat(70) { i -> s.put(outil("divers_$i", "Fonction rare numéro $i")); generaux += "divers_$i" }
         s.put(outil("ha_service", "Home Assistant : exécute un service."))
         s.put(outil("ha_entites", "Home Assistant : entités."))
+        s.put(outil("plex_diagnostic", "Diagnostic Plex : état du serveur, erreurs, journaux et transcodage."))
+        s.put(outil("obsidian_chercher", "Recherche un dossier ou une note dans le coffre Obsidian."))
+        s.put(outil("freebox_appareils", "Liste et diagnostique les appareils connectés à la Freebox et au réseau Wi-Fi."))
+        s.put(outil("ha_diagnostic", "Diagnostic Home Assistant : état, erreurs, entités indisponibles et journaux."))
         return s to generaux
     }
 
@@ -44,5 +48,17 @@ class SelectionOutilsTest {
         val r = SelectionOutils.rechercher(s, "analyser une vidéo", setOf("meteo"))
         assertEquals("analyser_video", r.first().getJSONObject("function").getString("name"))
         assertTrue(SelectionOutils.rechercher(s, "zzzz", emptySet()).isEmpty())
+    }
+
+    @Test fun synonymesDePanneOriententVersLeDiagnosticConcerne() {
+        val (s, _) = catalogue()
+        val r = SelectionOutils.rechercher(s, "Plex rame et ne répond plus, regarde les journaux", emptySet())
+        assertEquals("plex_diagnostic", r.first().getJSONObject("function").getString("name"))
+    }
+
+    @Test fun vocabulaireDuCoffreRetrouveLaRechercheObsidian() {
+        val (s, _) = catalogue()
+        val r = SelectionOutils.rechercher(s, "le coffre ne retrouve pas mon dossier", emptySet())
+        assertEquals("obsidian_chercher", r.first().getJSONObject("function").getString("name"))
     }
 }
