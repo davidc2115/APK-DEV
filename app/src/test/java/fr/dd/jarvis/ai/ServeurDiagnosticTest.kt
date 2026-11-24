@@ -86,6 +86,9 @@ class ServeurDiagnosticTest {
         val echec = ServeurDiagnostic.resultatRemede(r, "permission denied", 1)
         assertTrue(echec.contains("Échec du dépannage"))
         assertFalse(echec.contains(" : vérifié."))
+        val enCours = ServeurDiagnostic.resultatRemede(r, "toujours actif", -2)
+        assertTrue(enCours.contains("toujours en cours"))
+        assertFalse(enCours.contains("Échec du dépannage"))
         val nettoyageNonMesure = ServeurDiagnostic.resultatRemede(
             ServeurDiagnostic.Remede.NETTOYER_DISQUE, "commande terminée", 0
         )
