@@ -18,6 +18,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Android Auto : JARVIS apparaît comme une conversation de messagerie. Dans la voiture, Android Auto lit ses messages à voix haute
@@ -29,6 +31,9 @@ object CarBridge {
     const val KEY_TEXT = "car_text"
     const val NOTIF_ID = 4100
     private val history = mutableListOf<ChatMsg>()
+    // Un seul tour vocal à la fois : conserve l'ordre des demandes et du contexte partagé.
+    private val replyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val replyMutex = Mutex()
 
     private val jarvis get() = Person.Builder().setName("JARVIS").setKey("jarvis").setImportant(true).build()
 
@@ -82,7 +87,8 @@ object CarBridge {
     /** Traite une réponse dictée depuis l’écran Android Auto et actualise la conversation. */
     fun repondre(ctx: Context, texte: String, apres: (() -> Unit)? = null) {
         val app = ctx.applicationContext as JarvisApp
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        replyScope.launch {
+            replyMutex.withLock {
             withContext(Dispatchers.Main) {
                 app.chatCharger()
                 if (contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { ajouter(it) }
@@ -99,6 +105,7 @@ object CarBridge {
             withContext(Dispatchers.Main) {
                 app.chatAjouter(ChatMsg(false, propre))
                 apres?.invoke()
+            }
             }
         }
     }
