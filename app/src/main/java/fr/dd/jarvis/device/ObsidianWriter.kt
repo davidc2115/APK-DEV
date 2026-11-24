@@ -448,18 +448,24 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 val exacts = java.util.concurrent.ConcurrentLinkedQueue<Triple<Int, String, String>>()
                 val parMots = java.util.concurrent.ConcurrentLinkedQueue<Triple<Int, String, String>>()
                 try {
-                    candidates.mapIndexed { i, (path, f) ->
-                        pool.submit {
-                            if (exacts.size >= limit) return@submit
-                            val t = contenu(path, f) ?: return@submit
+                    // Une échéance globale, pas 20 secondes PAR fichier : une recherche reste bornée même
+                    // si le fournisseur SAF bloque sur plusieurs documents successifs.
+                    val taches = candidates.mapIndexed { i, (path, f) ->
+                        java.util.concurrent.Callable {
+                            if (out.size + exacts.size >= limit) return@Callable
+                            val t = contenu(path, f) ?: return@Callable
                             if (t.lowercase().contains(q)) exacts += Triple(i, path, extrait(t))
                             else if (mots.size >= 2) {
                                 val n = fr.dd.jarvis.societe.core.normaliser(t)
                                 if (mots.all { n.contains(it) }) parMots += Triple(i, path, t.lines().firstOrNull { l -> mots.any { fr.dd.jarvis.societe.core.normaliser(l).contains(it) } }?.trim()?.take(200).orEmpty())
                             }
                         }
-                    }.forEach { runCatching { it.get(20, java.util.concurrent.TimeUnit.SECONDS) } }
-                } finally { pool.shutdownNow() }
+                    }
+                    pool.invokeAll(taches, 20, java.util.concurrent.TimeUnit.SECONDS)
+                } finally {
+                    // Interrompt aussi les lectures encore en attente après l'échéance globale.
+                    pool.shutdownNow()
+                }
                 (exacts.sortedBy { it.first } + parMots.sortedBy { it.first }).forEach { (_, path, ex) -> if (out.size < limit) out += path to ex }
             }
         } else {
