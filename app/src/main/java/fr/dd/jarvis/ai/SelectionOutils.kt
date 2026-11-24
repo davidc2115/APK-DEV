@@ -77,7 +77,11 @@ internal object SelectionOutils {
     internal fun mots(texte: String): Set<String> {
         val bruts = normaliser(texte).split(' ').filter { it.isNotBlank() }
         val directs = bruts.filter { it.length >= 4 && it !in VIDES }.map { it.take(6) }
-        val derives = bruts.flatMap { ALIASES[it].orEmpty() }.map { it.take(6) }
+        // Le français ajoute souvent un « s » au pluriel : « dossiers », « poêles », « préférences ».
+        // On ne retire ce suffixe que pour consulter le lexique (jamais dans le texte transmis au modèle).
+        val derives = bruts.flatMap { mot ->
+            ALIASES[mot] ?: ALIASES[mot.removeSuffix("s")].orEmpty()
+        }.map { it.take(6) }
         return (directs + derives).toSet()
     }
 
