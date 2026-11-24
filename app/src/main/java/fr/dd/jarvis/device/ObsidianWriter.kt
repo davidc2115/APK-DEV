@@ -18,7 +18,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     private fun subDir(root: DocumentFile, path: String): DocumentFile {
         var cur = root
         for (part in path.split('/').filter { it.isNotBlank() }) {
-            val existing = cur.trouverLoose(part)
+            val existing = cur.trouverLooseUnique(part)
             if (existing != null) {
                 if (!existing.isDirectory)
                     throw java.io.IOException("Un fichier nommé « $part » empêche la création du dossier « $path ».")
@@ -43,6 +43,22 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         return listFiles().firstOrNull { f -> f.name?.let { normaliseNom(it) == cible } == true }
     }
 
+    /**
+     * Variante réservée aux opérations mutantes : ne choisit jamais arbitrairement un enfant homonyme.
+     * findFile() peut renvoyer un seul résultat même si le fournisseur SAF expose plusieurs noms identiques.
+     */
+    private fun DocumentFile.trouverLooseUnique(nom: String): DocumentFile? {
+        val enfants = listFiles().filter { it.name != null }
+        val noms = enfants.map { it.name!! }
+        val choisi = ObsidianPathResolution.uniqueNameMatch(
+            candidates = noms,
+            wanted = nom,
+            normalize = ::normaliseNom,
+            loose = ::normaliseNom
+        ) ?: return null
+        return enfants.single { it.name == choisi }
+    }
+
     /** [folder] peut contenir des sous-dossiers : « Société/Devis ». Retourne l'emplacement lisible. */
     fun saveBytes(folder: String, fileName: String, bytes: ByteArray, mime: String): String {
         try {
@@ -62,7 +78,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val dir = subDir(tree, dossierReel)
             if (!dir.isDirectory || !dir.canWrite())
                 throw java.io.IOException("Impossible d'accéder au dossier Obsidian demandé : $folder")
-            val target = dir.trouverLoose(name) ?: dir.createFile(mime, name)
+            val target = dir.trouverLooseUnique(name) ?: dir.createFile(mime, name)
                 ?: throw java.io.IOException("Impossible de créer $name dans Obsidian/$folder.")
             val written = ctx.contentResolver.openOutputStream(target.uri, "wt")
                 ?: throw java.io.IOException("Android n'a pas ouvert le fichier Obsidian : $name.")
@@ -130,7 +146,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             } else null
             val cheminFichier = if (dossierRelatif.isBlank()) resoudre(name) else resoudre("$dossierRelatif/$name")
             val cible = cheminFichier?.let { trouver(it)?.takeIf { f -> f.isFile } }
-                ?: cur?.trouverLoose(name)
+                ?: cur?.trouverLooseUnique(name)
             var supprime = false
             if (cible != null) {
                 if (!cible.canWrite()) return false
