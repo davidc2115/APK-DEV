@@ -28,6 +28,12 @@ class HaServiceConfirmationTest {
         assertFalse(Serveur.confirmeService("climate", "set_temperature", d, etat("heat", JSONObject().put("temperature", 18.0))))
         val v = JSONObject().put("volume_level", 0.35)
         assertTrue(Serveur.confirmeService("media_player", "volume_set", v, etat("on", JSONObject().put("volume_level", 0.35))))
+        val muteOff = JSONObject().put("is_volume_muted", false)
+        assertFalse(Serveur.confirmeService("media_player", "volume_mute", muteOff, etat("on")))
+        assertTrue(Serveur.confirmeService("media_player", "volume_mute", muteOff, etat("on", JSONObject().put("is_volume_muted", false))))
+        val preset = JSONObject().put("preset_mode", "eco")
+        assertFalse(Serveur.confirmeService("climate", "set_preset_mode", preset, etat("heat")))
+        assertTrue(Serveur.confirmeService("climate", "set_preset_mode", preset, etat("heat", JSONObject().put("preset_mode", "eco"))))
     }
 
     @Test fun compteRenduHonnete() {
