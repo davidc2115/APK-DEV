@@ -382,6 +382,67 @@ object Discord {
     }
     fun salonPermissionSupprimer(app: JarvisApp, channelId: String, cibleId: String) { req(app, "DELETE", "/channels/$channelId/permissions/$cibleId") }
 
+    // ------------------------------------------------------------ salons, catégories, serveur, invitations, journal
+
+    /** Requête dont le corps est un TABLEAU (positions des salons en une fois). */
+    private fun reqTableau(app: JarvisApp, method: String, path: String, corps: JSONArray, raisonAudit: String? = null) {
+        if (!configure(app)) throw IllegalStateException("Discord non configuré (Réglages › Comptes › Discord : jeton du bot).")
+        val b = Request.Builder().url(API + path).header("Authorization", "Bot ${jeton(app)}").header("User-Agent", "DiscordBot (https://github.com/davidc2115/APK-DEV, 1.0)")
+        raisonAudit?.takeIf { it.isNotBlank() }?.let { b.header("X-Audit-Log-Reason", java.net.URLEncoder.encode(it.take(400), "UTF-8").replace("+", "%20")) }
+        val body = corps.toString().toRequestBody("application/json".toMediaType())
+        if (method == "PATCH") b.patch(body) else b.post(body)
+        http.newCall(b.build()).execute().use { r ->
+            val t = r.body?.string().orEmpty()
+            if (r.code == 401) throw IllegalStateException("Discord 401 : jeton refusé (${diagJeton(app)}).")
+            if (r.code == 403) throw IllegalStateException("Discord 403 : le bot n'a pas la permission « Gérer les salons » sur ce serveur (ou sur l'un des salons concernés).")
+            if (r.code == 429) throw IllegalStateException("Discord : trop de requêtes, réessaie dans un instant.")
+            if (!r.isSuccessful) throw IllegalStateException("Discord ${r.code} : ${t.take(300)}")
+        }
+    }
+
+    /** Erreur Discord rendue claire pour une action sur les salons (le 403 générique parle des rôles). */
+    private fun <T> salonsAction(quoi: String, f: () -> T): T = try { f() } catch (e: IllegalStateException) {
+        val m = e.message.orEmpty()
+        throw when {
+            m.startsWith("Discord 403") -> IllegalStateException("Discord 403 : $quoi refusé — le bot n'a pas la permission « Gérer les salons » (ou « Gérer les rôles » pour des permissions) ici, ou le salon lui est caché par ses permissions.")
+            m.contains("50074") -> IllegalStateException("Discord : ce salon est obligatoire pour un serveur Communauté (règles / mises à jour) — change-le d'abord dans les paramètres Communauté.")
+            m.contains("50024") -> IllegalStateException("Discord : action impossible sur ce type de salon.")
+            m.contains("50035") -> IllegalStateException("Discord : valeur refusée pour $quoi (${m.substringAfter("50035").take(220)}).")
+            else -> e
+        }
+    }
+
+    fun salonCreer(app: JarvisApp, guildId: String, corps: JSONObject, raison: String = ""): JSONObject =
+        salonsAction("la création du salon") { req(app, "POST", "/guilds/$guildId/channels", corps, raison) }
+    fun salonModifier(app: JarvisApp, channelId: String, corps: JSONObject, raison: String = ""): JSONObject =
+        salonsAction("la modification du salon") { req(app, "PATCH", "/channels/$channelId", corps, raison) }
+    fun salonSupprimer(app: JarvisApp, channelId: String, raison: String = "") {
+        salonsAction("la suppression du salon") { req(app, "DELETE", "/channels/$channelId", null, raison) }
+    }
+    /** Positions / catégories de plusieurs salons en une seule requête ({id, position, parent_id, lock_permissions}). */
+    fun salonsPositions(app: JarvisApp, guildId: String, positions: JSONArray, raison: String = "") {
+        salonsAction("le déplacement des salons") { reqTableau(app, "PATCH", "/guilds/$guildId/channels", positions, raison) }
+    }
+    fun guildeModifier(app: JarvisApp, guildId: String, corps: JSONObject, raison: String = ""): JSONObject =
+        salonsAction("la modification du serveur (permission « Gérer le serveur »)") { req(app, "PATCH", "/guilds/$guildId", corps, raison) }
+    fun invitations(app: JarvisApp, guildId: String): JSONArray = reqArr(app, "GET", "/guilds/$guildId/invites")
+    fun invitationCreer(app: JarvisApp, channelId: String, maxAgeS: Int, maxUses: Int): JSONObject =
+        salonsAction("la création de l'invitation") { req(app, "POST", "/channels/$channelId/invites", JSONObject().put("max_age", maxAgeS).put("max_uses", maxUses).put("unique", true)) }
+    fun invitationSupprimer(app: JarvisApp, code: String) { salonsAction("la suppression de l'invitation") { req(app, "DELETE", "/invites/${java.net.URLEncoder.encode(code, "UTF-8")}") } }
+    /** Supprime d'un coup 2 à 100 messages de moins de 14 jours. */
+    fun messagesSupprimerLot(app: JarvisApp, channelId: String, ids: List<String>) {
+        if (ids.size == 1) { supprimerMessage(app, channelId, ids[0]); return }
+        salonsAction("la suppression des messages (permission « Gérer les messages »)") { req(app, "POST", "/channels/$channelId/messages/bulk-delete", JSONObject().put("messages", JSONArray(ids))) }
+    }
+    fun journalAudit(app: JarvisApp, guildId: String, limite: Int): JSONObject =
+        salonsAction("la lecture du journal d'audit (permission « Voir les logs du serveur »)") { req(app, "GET", "/guilds/$guildId/audit-logs?limit=${limite.coerceIn(1, 100)}") }
+
+    /** Catégorie désignée par son nom (souple) ou son ID. */
+    fun trouverCategorie(app: JarvisApp, guildId: String, nom: String): JSONObject? {
+        val arr = salons(app, guildId)
+        return choisir((0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optInt("type") == 4 }, nom.trim().removePrefix("#"), textesAlias(app))
+    }
+
     // ------------------------------------------------------------ recherche par nom (pratique pour le langage naturel)
 
     fun trouverRole(app: JarvisApp, guildId: String, nom: String): JSONObject? {

@@ -10,11 +10,13 @@ import org.json.JSONObject
 class DiscordTools(private val app: JarvisApp, private val confirm: suspend (String, Boolean) -> Boolean) {
 
     companion object {
-        val KEYWORDS = Regex("discord|r[ôo]le\\b|r[ôo]les\\b|mod[ée]rateur|mod[ée]ration|serveur discord|salon\\b|salons\\b|channels?\\b|cat[ée]gorie discord", RegexOption.IGNORE_CASE)
+        val KEYWORDS = Regex("discord|r[ôo]le\\b|r[ôo]les\\b|mod[ée]rateur|mod[ée]ration|serveur discord|salon\\b|salons\\b|channels?\\b|cat[ée]gorie discord|cat[ée]gories? (de|des|du) salons?|lien d.invitation|invitations? (du|au) serveur", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t) || DiscordNoms.cite(t)
         val NAMES = setOf(
             "discord_diagnostic", "discord_guildes", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
-            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer", "discord_messages_lire", "discord_messages_rechercher", "discord_fil_lire", "discord_message_modifier", "discord_message_supprimer", "discord_message_epingler", "discord_reaction", "discord_fil_creer", "discord_membre_info", "discord_membre_timeout", "discord_membre_expulser", "discord_membre_bannir", "discord_membre_pseudo"
+            "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer", "discord_messages_lire", "discord_messages_rechercher", "discord_fil_lire", "discord_message_modifier", "discord_message_supprimer", "discord_message_epingler", "discord_reaction", "discord_fil_creer", "discord_membre_info", "discord_membre_timeout", "discord_membre_expulser", "discord_membre_bannir", "discord_membre_pseudo",
+            "discord_salon_creer", "discord_salon_modifier", "discord_salon_supprimer", "discord_salons_reorganiser", "discord_salon_permissions_voir",
+            "discord_serveur_modifier", "discord_invitations", "discord_messages_purger", "discord_journal_audit", "discord_fil_gerer"
         )
     }
 
@@ -66,7 +68,9 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("discord_role_modifier", "Discord : modifie un rôle existant (nom, couleur, permissions…).",
             mapOf("serveur" to prop("Nom, surnom ou ID du serveur (optionnel si un seul)."), "role" to prop("Nom simple (ou ID) du rôle à modifier. Emojis et décorations inutiles."),
                 "nouveau_nom" to prop("Nouveau nom (optionnel)."), "couleur" to prop("Nouvelle couleur hexadécimale, ex. #ff5733 (optionnel)."),
-                "permissions" to prop(permDesc + " (optionnel : laisse vide pour ne pas toucher aux permissions actuelles)."),
+                "permissions" to prop(permDesc + " (optionnel : REMPLACE toutes les permissions du rôle ; laisse vide pour ne pas y toucher)."),
+                "ajouter_permissions" to prop("Droits à AJOUTER au rôle en gardant les autres (même nomenclature, séparés par des virgules ; optionnel)."),
+                "retirer_permissions" to prop("Droits à RETIRER du rôle en gardant les autres (optionnel)."),
                 "affiche_separement" to prop("« true »/« false » (optionnel)."), "mentionnable" to prop("« true »/« false » (optionnel).")), listOf("role")),
         tool("discord_role_supprimer", "Discord : supprime définitivement un rôle du serveur.",
             mapOf("serveur" to prop("Nom, surnom ou ID du serveur (optionnel si un seul)."), "role" to prop("Nom simple (ou ID) du rôle à supprimer. Emojis et décorations inutiles.")), listOf("role")),
@@ -78,11 +82,52 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 "role" to prop("Nom simple (ou ID) du rôle. Emojis et décorations inutiles."), "action" to prop("donner (défaut) ou retirer.")), listOf("membre", "role")),
         tool("discord_salon_permission", "Discord : règle les permissions précises d'un salon pour un rôle ou un membre. Peut autoriser/refuser plusieurs droits individuellement, appliquer un profil d'accès, ou réinitialiser l'override.",
             mapOf("serveur" to prop("Nom, surnom ou ID du serveur (optionnel si un seul)."), "salon" to prop("Nom simple (emojis et décorations inutiles) ou ID du salon. Inutile si « tous_les_salons » est à true."),
+                "categorie" to prop("Nom ou ID d'une CATÉGORIE dont régler les permissions (à la place de « salon », optionnel)."),
+                "synchroniser_salons" to prop("Avec « categorie » : « true » pour que tous les salons de la catégorie reprennent ensuite ses permissions (optionnel)."),
                 "tous_les_salons" to prop("« true » pour appliquer la règle à TOUS les salons non-catégories du serveur."),
                 "role" to prop("Nom simple (ou ID) du rôle concerné (ou utilise « membre » à la place pour un membre précis). Emojis et décorations inutiles."), "membre" to prop("Nom, pseudo ou ID d'un membre précis (optionnel, à la place de « role »)."),
                 "autoriser" to prop("Liste facultative des droits à autoriser, séparés par des virgules (formulation libre acceptée : « voir le salon », « envoyer des messages »…). Noms : " + Discord.Perm.NOMS.keys.filter { it != "administrateur" }.joinToString(", ") + "."),
                 "refuser" to prop("Liste facultative des droits à refuser, séparés par des virgules. Même nomenclature que « autoriser »."),
-                "acces" to prop("Profil facultatif : « voir_salon », « voir_salon_seulement », « toutes_permissions », « refuser_voir_salon » ou « defaut ». Utilise autoriser/refuser pour régler des droits individuels.")))
+                "acces" to prop("Profil facultatif : « voir_salon », « voir_salon_seulement », « toutes_permissions », « refuser_voir_salon » ou « defaut ». Utilise autoriser/refuser pour régler des droits individuels."))),
+        tool("discord_salon_creer", "Discord : crée un salon (texte, vocal, annonces, forum, scène) ou une CATÉGORIE, éventuellement dans une catégorie, à une position, privé pour certains rôles. Confirmation demandée.",
+            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "nom" to prop("Nom du salon ou de la catégorie (emojis permis)."),
+                "type" to prop("texte (défaut) | vocal | categorie | annonces | forum | scene."), "categorie" to prop("Catégorie où le créer (nom ou ID, optionnel)."),
+                "position" to prop("haut | bas | un nombre | avant:<salon> | apres:<salon> (optionnel, défaut : en bas)."), "sujet" to prop("Sujet / description du salon (optionnel)."),
+                "prive" to prop("« true » : caché à @everyone, visible seulement par « roles_acces » (optionnel)."), "roles_acces" to prop("Rôles qui voient le salon privé, séparés par des virgules."),
+                "synchroniser" to prop("« true » : reprend les permissions de sa catégorie (défaut si ni privé ni rôles)."),
+                "lent_secondes" to prop("Mode lent en secondes (0 à 21600, optionnel)."), "nsfw" to prop("« true »/« false » (optionnel)."),
+                "limite_utilisateurs" to prop("Vocal : nombre maximum de personnes (0 = illimité)."), "debit" to prop("Vocal : débit en kbit/s (8 à 96, plus si boosté).")), listOf("nom")),
+        tool("discord_salon_modifier", "Discord : RENOMME, DÉPLACE (vers une autre catégorie et/ou une position) ou règle un salon ou une catégorie (sujet, mode lent, NSFW, limite et débit vocal, synchronisation des permissions avec la catégorie). Confirmation demandée.",
+            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "salon" to prop("Salon à modifier (nom ou ID)."), "categorie_cible" to prop("Catégorie à modifier elle-même (nom ou ID), à la place de « salon »."),
+                "nouveau_nom" to prop("Nouveau nom (optionnel)."), "deplacer_vers" to prop("Catégorie de destination (nom ou ID), ou « aucune » pour la sortir de toute catégorie (optionnel)."),
+                "position" to prop("haut | bas | un nombre | avant:<salon> | apres:<salon> — parmi ses voisins (optionnel)."),
+                "synchroniser" to prop("« true » : reprend les permissions de sa catégorie (optionnel)."), "sujet" to prop("Nouveau sujet (optionnel ; « - » pour l'effacer)."),
+                "lent_secondes" to prop("Mode lent en secondes (0 à 21600)."), "nsfw" to prop("« true »/« false »."), "limite_utilisateurs" to prop("Vocal : maximum de personnes (0 = illimité)."), "debit" to prop("Vocal : débit en kbit/s.")), emptyList()),
+        tool("discord_salon_supprimer", "Discord : supprime DÉFINITIVEMENT un salon, ou une catégorie (ses salons restent, hors catégorie, sauf avec_contenu=true). Confirmation obligatoire.",
+            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "salon" to prop("Salon à supprimer (nom ou ID)."), "categorie" to prop("Catégorie à supprimer (nom ou ID), à la place de « salon »."),
+                "avec_contenu" to prop("Catégorie : « true » pour supprimer aussi tous ses salons (défaut false).")), emptyList()),
+        tool("discord_salons_reorganiser", "Discord : RÉORGANISE tout le serveur en une fois — ordre des catégories, salons rangés dans chaque catégorie, dans l'ordre donné. Montre l'aperçu avant/après et demande confirmation ; les salons non cités restent où ils sont (après les salons cités). Peut créer les catégories manquantes.",
+            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."),
+                "plan" to prop("Une catégorie par ligne, dans l'ordre voulu : « Catégorie : salon1, salon2, … » (« Sans catégorie : … » pour les salons hors catégorie). Noms tels qu'ils se disent (emojis inutiles)."),
+                "creer_categories" to prop("« true » pour créer les catégories du plan qui n'existent pas encore."), "synchroniser" to prop("« true » : les salons déplacés reprennent les permissions de leur nouvelle catégorie.")), listOf("plan")),
+        tool("discord_salon_permissions_voir", "Discord : montre les permissions particulières d'un salon ou d'une catégorie (pour chaque rôle / membre : droits autorisés et refusés) et s'il est synchronisé avec sa catégorie. Lecture seule.",
+            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "salon" to prop("Salon (nom ou ID)."), "categorie" to prop("Catégorie (nom ou ID), à la place de « salon ».")), emptyList()),
+        tool("discord_serveur_modifier", "Discord : modifie les réglages du serveur — nom, description, niveau de vérification, notifications par défaut, filtre de contenu, salon système, salon et délai AFK. Confirmation demandée.",
+            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "nom" to prop("Nouveau nom (optionnel)."), "description" to prop("Description (serveur Communauté, optionnel)."),
+                "verification" to prop("aucune | faible | moyenne | elevee | maximale (optionnel)."), "notifications" to prop("tous_les_messages | mentions (optionnel)."),
+                "filtre_contenu" to prop("desactive | membres_sans_role | tous (optionnel)."), "salon_systeme" to prop("Salon des messages de bienvenue (nom/ID, ou « aucun »)."),
+                "salon_afk" to prop("Salon vocal AFK (nom/ID, ou « aucun »)."), "delai_afk_minutes" to prop("1, 5, 15, 30 ou 60.")), emptyList()),
+        tool("discord_invitations", "Discord : liste, crée ou supprime les invitations du serveur.",
+            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "action" to prop("lister (défaut) | creer | supprimer."), "salon" to prop("creer : salon de l'invitation (défaut : le premier salon textuel)."),
+                "duree_heures" to prop("creer : validité en heures (0 = permanente, défaut 24)."), "utilisations_max" to prop("creer : 0 = illimité (défaut)."), "code" to prop("supprimer : code de l'invitation.")), emptyList()),
+        tool("discord_messages_purger", "Discord : supprime d'un coup les derniers messages d'un salon (2 à 100, de moins de 14 jours), avec filtre facultatif par auteur ou par texte. Confirmation obligatoire.",
+            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "salon" to prop("Salon (nom ou ID)."), "nombre" to prop("Nombre de messages récents à examiner (1 à 100)."),
+                "auteur" to prop("Ne supprimer que ceux de cet auteur (optionnel)."), "contenant" to prop("Ne supprimer que ceux qui contiennent ce texte (optionnel).")), listOf("salon", "nombre")),
+        tool("discord_journal_audit", "Discord : journal d'audit du serveur — qui a créé, modifié, supprimé quoi (salons, rôles, membres, permissions), et quand. Lecture seule.",
+            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "limite" to prop("Nombre d'entrées (1 à 100, défaut 25).")), emptyList()),
+        tool("discord_fil_gerer", "Discord : gère un fil (thread) ou une publication de forum — archiver, désarchiver, verrouiller, déverrouiller, renommer, supprimer. Confirmation demandée.",
+            mapOf("serveur" to prop("Nom ou ID du serveur (optionnel si un seul)."), "fil" to prop("ID du fil (ou son nom)."),
+                "action" to prop("archiver | desarchiver | verrouiller | deverrouiller | renommer | supprimer."), "nom" to prop("renommer : nouveau nom.")), listOf("fil", "action"))
     )
 
     private fun guildeObj(a: JSONObject): JSONObject {
@@ -99,6 +144,49 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
     suspend fun execute(name: String, a: JSONObject): ToolResult = withContext(Dispatchers.IO) {
         try { run(name, a) } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) { ToolResult("❌ ${e.message ?: e.javaClass.simpleName}") }
+    }
+
+    private fun vrai(s: String) = s.trim().lowercase() in setOf("true", "oui", "1", "yes", "vrai")
+
+    private fun tous(gid: String): List<JSONObject> = Discord.salons(app, gid).let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) } }
+
+    /** Salon ou catégorie visé : « salon » (puis, à défaut, une catégorie du même nom) ou « categorie » ; ID accepté. */
+    private fun cible(gid: String, salon: String, categorie: String): JSONObject? {
+        val l = tous(gid)
+        if (salon.isNotBlank()) return Discord.trouverSalon(app, gid, salon) ?: Discord.trouverCategorie(app, gid, salon)
+            ?: l.firstOrNull { it.optString("id") == salon.trim() }
+        if (categorie.isNotBlank()) return Discord.trouverCategorie(app, gid, categorie) ?: l.firstOrNull { it.optString("id") == categorie.trim() }
+        return null
+    }
+
+    /** « haut », « bas », « 3 », « avant:général », « après règles » → ancre parmi les voisins ; null si rien de dit. */
+    private fun ancre(gid: String, t: String): DiscordOrganisation.Ancre? {
+        val n = fr.dd.jarvis.societe.core.normaliser(t).trim()
+        if (n.isBlank()) return null
+        return when {
+            n.startsWith("haut") || n.startsWith("premier") || n == "debut" || n == "tout en haut" -> DiscordOrganisation.Ancre.Haut
+            n.startsWith("bas") || n.startsWith("dernier") || n == "fin" || n == "tout en bas" -> DiscordOrganisation.Ancre.Bas
+            n.toIntOrNull() != null -> DiscordOrganisation.Ancre.Index(maxOf(0, n.toInt() - 1))
+            n.startsWith("avant") || n.startsWith("apres") -> {
+                val nom = t.trim().replace(Regex("^(?i)(avant|apr[eè]s)\\s*(de|du|le|la|:)?\\s*"), "").trim()
+                val ref = cible(gid, nom, "") ?: throw IllegalArgumentException("Salon de référence « $nom » introuvable pour la position.")
+                if (n.startsWith("avant")) DiscordOrganisation.Ancre.Avant(ref.getString("id")) else DiscordOrganisation.Ancre.Apres(ref.getString("id"))
+            }
+            else -> throw IllegalArgumentException("Position « $t » non comprise (haut, bas, un nombre, avant:<salon> ou après:<salon>).")
+        }
+    }
+
+    private fun entier(s: String) = s.trim().toIntOrNull()
+
+    /** Réglages communs création / modification (sujet, mode lent, NSFW, vocal). */
+    private fun reglages(a: JSONObject, corps: JSONObject, type: Int) {
+        a.optString("sujet").trim().takeIf { it.isNotBlank() }?.let { corps.put("topic", if (it == "-") "" else it.take(1024)) }
+        entier(a.optString("lent_secondes"))?.let { corps.put("rate_limit_per_user", it.coerceIn(0, 21600)) }
+        a.optString("nsfw").trim().takeIf { it.isNotBlank() }?.let { corps.put("nsfw", vrai(it)) }
+        if (type == 2 || type == 13) {
+            entier(a.optString("limite_utilisateurs"))?.let { corps.put("user_limit", it.coerceIn(0, 99)) }
+            entier(a.optString("debit"))?.let { corps.put("bitrate", (if (it < 1000) it * 1000 else it).coerceIn(8000, 384000)) }
+        }
     }
 
     private fun couleurHex(s: String): Int? {
@@ -134,7 +222,10 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 Discord.Perm.MANAGE_GUILD to "gérer le serveur",
                 Discord.Perm.KICK_MEMBERS to "expulser des membres",
                 Discord.Perm.BAN_MEMBERS to "bannir des membres",
-                Discord.Perm.MODERATE_MEMBERS to "modérer les membres"
+                Discord.Perm.MODERATE_MEMBERS to "modérer les membres",
+                Discord.Perm.MANAGE_THREADS to "gérer les fils",
+                Discord.Perm.VIEW_AUDIT_LOG to "voir les logs du serveur",
+                Discord.Perm.CREATE_INSTANT_INVITE to "créer des invitations"
             )
             for (g in guildes) {
                 val gid = g.optString("id")
@@ -367,9 +458,16 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         "discord_role_modifier" -> {
             val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
             val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult(Discord.introuvable("rôle", a.optString("role"), gnom, Discord.roles(app, gid)))
+            // « ajoute / retire tel droit » : les autres permissions du rôle sont gardées.
+            val plus = a.optString("ajouter_permissions").trim(); val moins = a.optString("retirer_permissions").trim()
             val perms = a.optString("permissions").let { if (it.isBlank()) null else Discord.Perm.parse(it) }
+                ?: if (plus.isNotBlank() || moins.isNotBlank()) {
+                    val actuel = role.optString("permissions", "0").toLongOrNull() ?: 0L
+                    (actuel or Discord.Perm.parse(plus)) and Discord.Perm.parse(moins).inv()
+                } else null
             val admin = perms != null && (perms and Discord.Perm.ADMINISTRATOR) != 0L
-            if (!confirm("Modifier le rôle « ${role.optString("name")} » sur le serveur « $gnom »" + (if (admin) " (ajout d'Administrateur : ignorera alors toujours les restrictions de salon)" else "") + " ?", true))
+            val detail = listOfNotNull(plus.takeIf { it.isNotBlank() }?.let { "ajout : $it" }, moins.takeIf { it.isNotBlank() }?.let { "retrait : $it" }).joinToString(" ; ")
+            if (!confirm("Modifier le rôle « ${role.optString("name")} » sur le serveur « $gnom »" + (if (detail.isNotBlank()) " ($detail)" else "") + (if (admin) " (ajout d'Administrateur : ignorera alors toujours les restrictions de salon)" else "") + " ?", true))
                 return ToolResult("Refusé par l'utilisateur.")
             val r = Discord.roleModifier(app, gid, role.getString("id"), a.optString("nouveau_nom").trim().ifBlank { null },
                 a.optString("couleur").let { couleurHex(it) }, perms,
@@ -573,12 +671,288 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 var erreurs = 0
                 ids.forEach { c -> runCatching { appliquer(c) }.onFailure { erreurs++ } }
                 ToolResult("✅ Accès mis à jour sur ${ids.size - erreurs}/${ids.size} salon(s) pour $cibleNom." + (if (erreurs > 0) " ($erreurs échec(s), probablement un salon où le bot n'a pas la main)." else ""), direct = true)
+            } else if (a.optString("salon").isBlank() && a.optString("categorie").isNotBlank()) {
+                // Permissions d'une CATÉGORIE, puis (si demandé) reprises par tous ses salons.
+                val cat = Discord.trouverCategorie(app, gid, a.optString("categorie")) ?: return ToolResult("Catégorie « ${a.optString("categorie")} » introuvable.")
+                val sync = vrai(a.optString("synchroniser_salons"))
+                val enfants = if (sync) Discord.salons(app, gid).let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) } }.filter { it.optString("parent_id") == cat.optString("id") } else emptyList()
+                if (!confirm("Modifier l'accès de la catégorie « ${cat.optString("name")} » pour $cibleNom ($resumeAcces)" + (if (sync) " puis synchroniser ses ${enfants.size} salon(s) sur elle" else "") + " ?", true)) return ToolResult("Refusé par l'utilisateur.")
+                appliquer(cat)
+                var echecs = 0
+                if (sync) {
+                    val ow = Discord.salons(app, gid).let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) } }.firstOrNull { it.optString("id") == cat.optString("id") }
+                        ?.optJSONArray("permission_overwrites") ?: JSONArray()
+                    enfants.forEach { c -> runCatching { Discord.salonModifier(app, c.getString("id"), JSONObject().put("permission_overwrites", ow), "Synchronisation avec la catégorie") }.onFailure { echecs++ } }
+                }
+                ToolResult("✅ Accès de la catégorie « ${cat.optString("name")} » mis à jour pour $cibleNom." +
+                    (if (sync) " ${enfants.size - echecs}/${enfants.size} salon(s) synchronisé(s) sur elle." else " Ses salons synchronisés suivent ; les autres gardent leurs propres réglages."), direct = true)
             } else {
                 val salon = Discord.trouverSalon(app, gid, a.optString("salon")) ?: return ToolResult("Salon « ${a.optString("salon")} » introuvable. Précise un nom de salon, ou mets tous_les_salons=true pour les appliquer tous d'un coup.")
                 if (!confirm("Modifier l'accès de « ${salon.optString("name")} » pour $cibleNom ($resumeAcces) ?", true)) return ToolResult("Refusé par l'utilisateur.")
                 appliquer(salon)
                 ToolResult("✅ Accès de « ${salon.optString("name")} » mis à jour pour $cibleNom.", direct = true)
             }
+        }
+        "discord_salon_creer" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val nom = a.optString("nom").trim().take(100)
+            if (nom.isBlank()) return ToolResult("Nom du salon manquant.")
+            val type = DiscordOrganisation.type(a.optString("type")) ?: return ToolResult("Type « ${a.optString("type")} » inconnu : texte, vocal, categorie, annonces, forum ou scene.")
+            val corps = JSONObject().put("name", nom).put("type", type)
+            val cat = if (type != DiscordOrganisation.CATEGORIE && a.optString("categorie").isNotBlank())
+                Discord.trouverCategorie(app, gid, a.optString("categorie")) ?: return ToolResult("Catégorie « ${a.optString("categorie")} » introuvable sur « $gnom ».") else null
+            cat?.let { corps.put("parent_id", it.getString("id")) }
+            reglages(a, corps, type)
+            // Salon privé : caché à @everyone, visible par les rôles cités et par le bot lui-même.
+            val prive = vrai(a.optString("prive"))
+            val rolesAcces = a.optString("roles_acces").split(',').map { it.trim() }.filter { it.isNotBlank() }
+            val nomsRoles = mutableListOf<String>()
+            if (prive || rolesAcces.isNotEmpty()) {
+                val ow = JSONArray()
+                if (prive) ow.put(JSONObject().put("id", gid).put("type", 0).put("allow", "0").put("deny", Discord.Perm.VIEW_CHANNEL.toString()))
+                rolesAcces.forEach { r ->
+                    val role = Discord.trouverRole(app, gid, r) ?: return ToolResult(Discord.introuvable("rôle", r, gnom, Discord.roles(app, gid)))
+                    nomsRoles += role.optString("name")
+                    ow.put(JSONObject().put("id", role.getString("id")).put("type", 0).put("allow", Discord.Perm.VIEW_CHANNEL.toString()).put("deny", "0"))
+                }
+                if (prive) ow.put(JSONObject().put("id", Discord.moi(app).getString("id")).put("type", 1).put("allow", Discord.Perm.VIEW_CHANNEL.toString()).put("deny", "0"))
+                corps.put("permission_overwrites", ow)
+            } else cat?.optJSONArray("permission_overwrites")?.let { corps.put("permission_overwrites", it) }   // synchronisé avec sa catégorie
+            val quoi = (if (type == DiscordOrganisation.CATEGORIE) "la catégorie" else "le salon ${DiscordOrganisation.nomType(type)}") + " « $nom »"
+            if (!confirm("Créer $quoi sur « $gnom »" + (cat?.let { " dans « ${it.optString("name")} »" } ?: "") +
+                    (if (prive) " — privé" + (if (nomsRoles.isNotEmpty()) ", visible par ${nomsRoles.joinToString(", ")}" else ", visible seulement par les administrateurs") else "") + " ?", true))
+                return ToolResult("Création annulée.")
+            val cree = Discord.salonCreer(app, gid, corps, "Créé depuis Jarvis")
+            val pos = runCatching { ancre(gid, a.optString("position")) }.getOrElse { return ToolResult("✅ Créé (ID ${cree.optString("id")}), mais ${it.message}") }
+            if (pos != null) runCatching {
+                Discord.salonsPositions(app, gid, DiscordOrganisation.deplacement(tous(gid), cree.getString("id"), cat?.getString("id"), pos), "Position choisie depuis Jarvis")
+            }.onFailure { return ToolResult("✅ ${quoi.replaceFirstChar { it.uppercase() }} créé (ID ${cree.optString("id")}), mais sa position n'a pas pu être réglée : ${it.message}") }
+            ToolResult("✅ ${quoi.replaceFirstChar { it.uppercase() }} créé${if (type == DiscordOrganisation.CATEGORIE) "e" else ""} sur « $gnom »" + (cat?.let { " dans « ${it.optString("name")} »" } ?: "") + " (ID ${cree.optString("id")}).", direct = true)
+        }
+        "discord_salon_modifier" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val salonArg = a.optString("salon").trim(); val catArg = a.optString("categorie_cible").trim()
+            if (salonArg.isBlank() && catArg.isBlank()) return ToolResult("Précise le salon (ou la catégorie) à modifier.")
+            val c = cible(gid, salonArg, catArg) ?: return ToolResult(Discord.introuvable(if (salonArg.isNotBlank()) "salon" else "catégorie", salonArg.ifBlank { catArg }, gnom, Discord.salons(app, gid)))
+            val id = c.getString("id"); val type = c.optInt("type"); val estCat = type == DiscordOrganisation.CATEGORIE
+            val corps = JSONObject()
+            a.optString("nouveau_nom").trim().takeIf { it.isNotBlank() }?.let { corps.put("name", it.take(100)) }
+            if (!estCat) reglages(a, corps, type)
+            val versArg = a.optString("deplacer_vers").trim()
+            val versAucune = Regex("^(aucune?|sans( categorie)?|hors categorie|racine|-)$").matches(fr.dd.jarvis.societe.core.normaliser(versArg))
+            val vers = if (estCat || versArg.isBlank() || versAucune) null else Discord.trouverCategorie(app, gid, versArg)
+                ?: return ToolResult("Catégorie de destination « $versArg » introuvable sur « $gnom ».")
+            val parentActuel = c.optString("parent_id").takeIf { it.isNotBlank() && it != "null" }
+            val nouveauParent = when { estCat -> null; versAucune -> null; vers != null -> vers.getString("id"); else -> parentActuel }
+            val sync = vrai(a.optString("synchroniser"))
+            val pos = ancre(gid, a.optString("position"))
+            val bouge = !estCat && nouveauParent != parentActuel
+            if (corps.length() == 0 && !bouge && pos == null && !sync) return ToolResult("Rien à modifier : précise un nouveau nom, une destination, une position ou un réglage.")
+            val resume = listOfNotNull(
+                corps.optString("name").takeIf { it.isNotBlank() }?.let { "renommer en « $it »" },
+                if (bouge) "déplacer vers " + (vers?.let { "« ${it.optString("name")} »" } ?: "hors catégorie") else null,
+                pos?.let { "position : ${a.optString("position")}" }, if (sync) "synchroniser ses permissions sur la catégorie" else null,
+                corps.keys().asSequence().filter { it != "name" }.toList().takeIf { it.isNotEmpty() }?.let { "réglages : ${it.joinToString(", ")}" }).joinToString(" ; ")
+            if (!confirm("Modifier ${if (estCat) "la catégorie" else "le salon"} « ${c.optString("name")} » sur « $gnom » : $resume ?", true)) return ToolResult("Modification annulée.")
+            if (corps.length() > 0) Discord.salonModifier(app, id, corps, "Modifié depuis Jarvis")
+            // Déplacement / position : sans position dite, le salon déplacé va en bas de sa nouvelle catégorie.
+            if (bouge || pos != null) Discord.salonsPositions(app, gid,
+                DiscordOrganisation.deplacement(tous(gid), id, nouveauParent, pos ?: DiscordOrganisation.Ancre.Bas, synchroniser = sync && bouge), "Déplacé depuis Jarvis")
+            // Synchroniser sans changer de catégorie : il reprend les permissions de sa catégorie actuelle.
+            if (sync && !bouge && !estCat) {
+                val parent = nouveauParent?.let { p -> tous(gid).firstOrNull { it.optString("id") == p } }
+                    ?: return ToolResult("Le salon n'est dans aucune catégorie : rien avec quoi le synchroniser.")
+                Discord.salonModifier(app, id, JSONObject().put("permission_overwrites", parent.optJSONArray("permission_overwrites") ?: JSONArray()), "Synchronisé depuis Jarvis")
+            }
+            ToolResult("✅ ${if (estCat) "Catégorie" else "Salon"} « ${corps.optString("name").ifBlank { c.optString("name") }} » : $resume.", direct = true)
+        }
+        "discord_salon_supprimer" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val salonArg = a.optString("salon").trim(); val catArg = a.optString("categorie").trim()
+            if (salonArg.isBlank() && catArg.isBlank()) return ToolResult("Précise le salon (ou la catégorie) à supprimer.")
+            val c = cible(gid, salonArg, catArg) ?: return ToolResult(Discord.introuvable(if (salonArg.isNotBlank()) "salon" else "catégorie", salonArg.ifBlank { catArg }, gnom, Discord.salons(app, gid)))
+            val estCat = c.optInt("type") == DiscordOrganisation.CATEGORIE
+            val enfants = if (estCat) tous(gid).filter { it.optString("parent_id") == c.optString("id") } else emptyList()
+            val avecContenu = estCat && vrai(a.optString("avec_contenu"))
+            val question = if (!estCat) "Supprimer DÉFINITIVEMENT le salon « ${c.optString("name")} » (${DiscordOrganisation.nomType(c.optInt("type"))}) sur « $gnom », avec tous ses messages ?"
+                else if (avecContenu) "Supprimer DÉFINITIVEMENT la catégorie « ${c.optString("name")} » ET ses ${enfants.size} salon(s) (${enfants.joinToString(", ") { "#" + it.optString("name") }}) sur « $gnom », avec tous leurs messages ?"
+                else "Supprimer la catégorie « ${c.optString("name")} » sur « $gnom » ? Ses ${enfants.size} salon(s) sont gardés, hors catégorie."
+            if (!confirm(question, true)) return ToolResult("Suppression annulée.")
+            var echecs = 0
+            if (avecContenu) enfants.forEach { e -> runCatching { Discord.salonSupprimer(app, e.getString("id"), "Supprimé depuis Jarvis") }.onFailure { echecs++ } }
+            Discord.salonSupprimer(app, c.getString("id"), "Supprimé depuis Jarvis")
+            ToolResult("🗑️ ${if (estCat) "Catégorie" else "Salon"} « ${c.optString("name")} » supprimé${if (estCat) "e" else ""} sur « $gnom »." +
+                (if (avecContenu) " ${enfants.size - echecs}/${enfants.size} salon(s) supprimé(s) avec elle." else if (estCat && enfants.isNotEmpty()) " Ses ${enfants.size} salon(s) sont maintenant hors catégorie." else ""), direct = true)
+        }
+        "discord_salons_reorganiser" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val plan = DiscordOrganisation.plan(a.optString("plan"))
+            if (plan.isEmpty()) return ToolResult("Plan vide : une catégorie par ligne, « Catégorie : salon1, salon2 ».")
+            val creer = vrai(a.optString("creer_categories"))
+            var l = tous(gid)
+            // Tout est résolu AVANT de toucher au serveur : un nom introuvable = rien n'est modifié.
+            val manquantes = plan.mapNotNull { it.categorie }.distinct().filter { Discord.trouverCategorie(app, gid, it) == null }
+            if (manquantes.isNotEmpty() && !creer) return ToolResult("Catégories introuvables : ${manquantes.joinToString(", ") { "« $it »" }}. Rien n'a été modifié. Corrige leur nom, ou relance avec creer_categories=true pour les créer.")
+            val introuvables = mutableListOf<String>()
+            val salonsIds = plan.map { ligne -> ligne.salons.mapNotNull { n -> Discord.trouverSalon(app, gid, n)?.getString("id") ?: run { introuvables += n; null } } }
+            if (introuvables.isNotEmpty()) return ToolResult("Salons introuvables : ${introuvables.joinToString(", ") { "« $it »" }}. Rien n'a été modifié. Salons existants : " + Discord.noms(Discord.salons(app, gid), sansCategories = true) + ".")
+            val doublons = salonsIds.flatten().groupingBy { it }.eachCount().filter { it.value > 1 }.keys
+            if (doublons.isNotEmpty()) return ToolResult("Un même salon est cité plusieurs fois dans le plan (${doublons.mapNotNull { d -> l.firstOrNull { it.optString("id") == d }?.optString("name") }.joinToString(", ")}). Rien n'a été modifié.")
+            // Aperçu et confirmation (catégories à créer comprises).
+            val provisoires = manquantes.mapIndexed { i, n -> JSONObject().put("id", "nouvelle$i").put("name", n).put("type", DiscordOrganisation.CATEGORIE).put("position", 999 + i) }
+            fun idCat(nom: String?, l: List<JSONObject>, map: Map<String, String>): String? = nom?.let { n -> map[n] ?: Discord.trouverCategorie(app, gid, n)?.getString("id") }
+            val provisoireMap = manquantes.mapIndexed { i, n -> n to "nouvelle$i" }.toMap()
+            val lignesApercu = plan.mapIndexed { i, ligne -> idCat(ligne.categorie, l, provisoireMap) to salonsIds[i] }
+            val apercu = DiscordOrganisation.apercu(l + provisoires, DiscordOrganisation.reorganisation(l + provisoires, lignesApercu))
+            val avant = DiscordOrganisation.apercu(l, JSONArray())
+            if (!confirm("Réorganiser « $gnom »" + (if (manquantes.isNotEmpty()) " (création de ${manquantes.size} catégorie(s) : ${manquantes.joinToString(", ")})" else "") +
+                    " ?\n\nAVANT :\n${avant.take(1500)}\n\nAPRÈS :\n${apercu.take(1500)}", true)) return ToolResult("Réorganisation annulée : rien n'a été modifié.")
+            val creees = mutableMapOf<String, String>()
+            manquantes.forEach { n -> creees[n] = Discord.salonCreer(app, gid, JSONObject().put("name", n.take(100)).put("type", DiscordOrganisation.CATEGORIE), "Réorganisation depuis Jarvis").getString("id") }
+            l = tous(gid)
+            val lignes = plan.mapIndexed { i, ligne -> idCat(ligne.categorie, l, creees) to salonsIds[i] }
+            Discord.salonsPositions(app, gid, DiscordOrganisation.reorganisation(l, lignes, vrai(a.optString("synchroniser"))), "Réorganisation depuis Jarvis")
+            ToolResult("✅ Serveur « $gnom » réorganisé.\n\n" + DiscordOrganisation.apercu(tous(gid), JSONArray()), direct = true)
+        }
+        "discord_salon_permissions_voir" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val c = cible(gid, a.optString("salon").trim(), a.optString("categorie").trim()) ?: return ToolResult("Salon ou catégorie introuvable : précise « salon » ou « categorie ».")
+            val roles = Discord.roles(app, gid).let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) } }.associateBy { it.optString("id") }
+            val ow = c.optJSONArray("permission_overwrites") ?: JSONArray()
+            val lignes = mutableListOf("# 🔐 Permissions de « ${Discord.affiche(c.optString("name"))} » (${DiscordOrganisation.nomType(c.optInt("type"))}, $gnom)")
+            val parentId = c.optString("parent_id").takeIf { it.isNotBlank() && it != "null" }
+            if (parentId != null) {
+                val parent = tous(gid).firstOrNull { it.optString("id") == parentId }
+                val synchro = parent != null && (parent.optJSONArray("permission_overwrites") ?: JSONArray()).let { po ->
+                    fun cle(a: JSONArray) = (0 until a.length()).map { a.getJSONObject(it) }.map { it.optString("id") + ":" + it.optString("allow") + ":" + it.optString("deny") }.toSet()
+                    cle(po) == cle(ow) }
+                lignes += "Catégorie : « ${parent?.optString("name") ?: parentId} » — " + if (synchro) "permissions synchronisées avec elle." else "permissions PROPRES (non synchronisées)."
+            }
+            if (ow.length() == 0) lignes += "Aucune permission particulière : il suit les rôles du serveur."
+            for (i in 0 until ow.length()) {
+                val o = ow.getJSONObject(i)
+                val qui = if (o.optInt("type") == 0) (if (o.optString("id") == gid) "@everyone" else "rôle « ${roles[o.optString("id")]?.optString("name") ?: o.optString("id")} »")
+                    else "membre " + (runCatching { Discord.membre(app, gid, o.optString("id")).let { m -> m.optString("nick").ifBlank { m.optJSONObject("user")?.optString("username").orEmpty() } } }.getOrNull() ?: o.optString("id"))
+                val oui = Discord.Perm.noms(o.optString("allow").toLongOrNull() ?: 0L); val non = Discord.Perm.noms(o.optString("deny").toLongOrNull() ?: 0L)
+                lignes += "- $qui : " + listOfNotNull(oui.takeIf { it.isNotEmpty() }?.let { "✅ " + it.joinToString(", ") }, non.takeIf { it.isNotEmpty() }?.let { "⛔ " + it.joinToString(", ") }).joinToString(" · ").ifBlank { "(rien)" }
+            }
+            ToolResult(lignes.joinToString("\n"), direct = true)
+        }
+        "discord_serveur_modifier" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val corps = JSONObject()
+            a.optString("nom").trim().takeIf { it.isNotBlank() }?.let { corps.put("name", it.take(100)) }
+            a.optString("description").trim().takeIf { it.isNotBlank() }?.let { corps.put("description", if (it == "-") JSONObject.NULL else it.take(120)) }
+            a.optString("verification").trim().takeIf { it.isNotBlank() }?.let { v ->
+                corps.put("verification_level", when (fr.dd.jarvis.societe.core.normaliser(v)) { "aucune", "aucun", "0" -> 0; "faible", "basse", "1" -> 1; "moyenne", "moyen", "2" -> 2; "elevee", "haute", "3" -> 3; "maximale", "tres elevee", "max", "4" -> 4
+                    else -> return ToolResult("Niveau de vérification « $v » inconnu : aucune, faible, moyenne, elevee, maximale.") })
+            }
+            a.optString("notifications").trim().takeIf { it.isNotBlank() }?.let { corps.put("default_message_notifications", if (fr.dd.jarvis.societe.core.normaliser(it).contains("mention")) 1 else 0) }
+            a.optString("filtre_contenu").trim().takeIf { it.isNotBlank() }?.let { f ->
+                val n = fr.dd.jarvis.societe.core.normaliser(f)
+                corps.put("explicit_content_filter", when { n.startsWith("desactiv") || n == "aucun" || n == "0" -> 0; n.contains("sans role") || n == "1" -> 1; else -> 2 })
+            }
+            fun salonOuAucun(cle: String, champ: String): ToolResult? {
+                val v = a.optString(cle).trim(); if (v.isBlank()) return null
+                if (Regex("^(aucun|aucune|-|rien)$").matches(fr.dd.jarvis.societe.core.normaliser(v))) { corps.put(champ, JSONObject.NULL); return null }
+                val c = Discord.trouverSalon(app, gid, v) ?: return ToolResult("Salon « $v » introuvable sur « $gnom ».")
+                corps.put(champ, c.getString("id")); return null
+            }
+            salonOuAucun("salon_systeme", "system_channel_id")?.let { return it }
+            salonOuAucun("salon_afk", "afk_channel_id")?.let { return it }
+            entier(a.optString("delai_afk_minutes"))?.let { m -> corps.put("afk_timeout", listOf(60, 300, 900, 1800, 3600).minBy { kotlin.math.abs(it - m * 60) }) }
+            if (corps.length() == 0) return ToolResult("Rien à modifier : précise le nom, la description, la vérification, les notifications, le filtre, le salon système ou AFK.")
+            if (!confirm("Modifier le serveur « $gnom » : ${corps.keys().asSequence().joinToString(", ")} ?", true)) return ToolResult("Modification annulée.")
+            val r = Discord.guildeModifier(app, gid, corps, "Modifié depuis Jarvis")
+            ToolResult("✅ Serveur « ${r.optString("name", gnom)} » mis à jour (${corps.keys().asSequence().joinToString(", ")}).", direct = true)
+        }
+        "discord_invitations" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            when (fr.dd.jarvis.societe.core.normaliser(a.optString("action")).ifBlank { "lister" }) {
+                "creer", "cree", "nouvelle" -> {
+                    val salon = a.optString("salon").trim().takeIf { it.isNotBlank() }?.let { Discord.trouverSalon(app, gid, it) ?: return ToolResult("Salon « $it » introuvable sur « $gnom ».") }
+                        ?: tous(gid).filter { it.optInt("type") == 0 }.minByOrNull { it.optInt("position") } ?: return ToolResult("Aucun salon textuel pour l'invitation.")
+                    val heures = (entier(a.optString("duree_heures")) ?: 24).coerceIn(0, 168)
+                    val usages = (entier(a.optString("utilisations_max")) ?: 0).coerceIn(0, 100)
+                    if (!confirm("Créer une invitation vers #${salon.optString("name")} sur « $gnom » (${if (heures == 0) "permanente" else "$heures h"}, ${if (usages == 0) "utilisations illimitées" else "$usages utilisation(s)"}) ?", true)) return ToolResult("Annulé.")
+                    val inv = Discord.invitationCreer(app, salon.getString("id"), heures * 3600, usages)
+                    ToolResult("✅ Invitation créée : https://discord.gg/${inv.optString("code")}", direct = true)
+                }
+                "supprimer", "revoquer", "annuler" -> {
+                    val code = a.optString("code").trim().substringAfterLast('/')
+                    if (code.isBlank()) return ToolResult("Code de l'invitation manquant (liste-les d'abord).")
+                    if (!confirm("Supprimer l'invitation $code sur « $gnom » ?", true)) return ToolResult("Annulé.")
+                    Discord.invitationSupprimer(app, code)
+                    ToolResult("🗑️ Invitation $code supprimée.", direct = true)
+                }
+                else -> {
+                    val arr = Discord.invitations(app, gid)
+                    if (arr.length() == 0) return ToolResult("Aucune invitation active sur « $gnom ».", direct = true)
+                    ToolResult("# 🔗 Invitations de « $gnom » (${arr.length()})\n" + (0 until arr.length()).joinToString("\n") { i ->
+                        val v = arr.getJSONObject(i)
+                        "- ${v.optString("code")} → #${v.optJSONObject("channel")?.optString("name").orEmpty()} · par ${v.optJSONObject("inviter")?.optString("username") ?: "?"} · ${v.optInt("uses")}/${v.optInt("max_uses").let { if (it == 0) "∞" else it.toString() }} utilisation(s) · " +
+                            (if (v.optInt("max_age") == 0) "permanente" else "expire après ${v.optInt("max_age") / 3600} h")
+                    }, direct = true)
+                }
+            }
+        }
+        "discord_messages_purger" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val salon = Discord.trouverSalon(app, gid, a.optString("salon")) ?: return ToolResult(Discord.introuvable("salon", a.optString("salon"), gnom, Discord.salons(app, gid)))
+            val n = (entier(a.optString("nombre")) ?: return ToolResult("Précise le nombre de messages (1 à 100).")).coerceIn(1, 100)
+            val auteur = a.optString("auteur").trim(); val contenant = a.optString("contenant").trim()
+            val limite14j = java.time.Instant.now().minus(java.time.Duration.ofDays(14)).plusSeconds(3600)
+            val msgs = Discord.messages(app, salon.getString("id"), n).let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) } }.filter { m ->
+                val au = m.optJSONObject("author")?.let { it.optString("global_name") + " " + it.optString("username") }.orEmpty()
+                (auteur.isBlank() || au.contains(auteur, true)) && (contenant.isBlank() || m.optString("content").contains(contenant, true)) &&
+                    runCatching { java.time.Instant.parse(m.optString("timestamp")).isAfter(limite14j) }.getOrDefault(false)
+            }
+            if (msgs.isEmpty()) return ToolResult("Aucun message à supprimer (filtres, ou messages de plus de 14 jours que Discord ne laisse pas supprimer en lot).")
+            if (!confirm("Supprimer DÉFINITIVEMENT ${msgs.size} message(s) de #${salon.optString("name")} sur « $gnom »" + (if (auteur.isNotBlank()) " (auteur : $auteur)" else "") + (if (contenant.isNotBlank()) " (contenant « $contenant »)" else "") + " ?", true)) return ToolResult("Suppression annulée.")
+            Discord.messagesSupprimerLot(app, salon.getString("id"), msgs.map { it.getString("id") })
+            ToolResult("🧹 ${msgs.size} message(s) supprimé(s) de #${salon.optString("name")}.", direct = true)
+        }
+        "discord_journal_audit" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val r = Discord.journalAudit(app, gid, entier(a.optString("limite")) ?: 25)
+            val users = (r.optJSONArray("users") ?: JSONArray()).let { u -> (0 until u.length()).map { u.getJSONObject(it) } }.associate { it.optString("id") to it.optString("global_name").ifBlank { it.optString("username") } }
+            val entrees = r.optJSONArray("audit_log_entries") ?: JSONArray()
+            if (entrees.length() == 0) return ToolResult("Journal d'audit vide sur « $gnom ».", direct = true)
+            val actions = mapOf(1 to "a modifié le serveur", 10 to "a créé un salon", 11 to "a modifié un salon", 12 to "a supprimé un salon", 13 to "a ajouté une permission de salon",
+                14 to "a modifié une permission de salon", 15 to "a retiré une permission de salon", 20 to "a expulsé", 22 to "a banni", 23 to "a débanni", 24 to "a modifié un membre",
+                25 to "a changé les rôles d'un membre", 26 to "a déplacé un membre en vocal", 27 to "a déconnecté un membre du vocal", 28 to "a ajouté un bot", 30 to "a créé un rôle", 31 to "a modifié un rôle",
+                32 to "a supprimé un rôle", 40 to "a créé une invitation", 42 to "a supprimé une invitation", 72 to "a supprimé un message", 73 to "a supprimé des messages en lot", 74 to "a épinglé un message",
+                75 to "a désépinglé un message", 110 to "a créé un fil", 111 to "a modifié un fil", 112 to "a supprimé un fil")
+            val salonsNoms = tous(gid).associate { it.optString("id") to it.optString("name") }
+            val rolesNoms = Discord.roles(app, gid).let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) } }.associate { it.optString("id") to it.optString("name") }
+            ToolResult("# 📜 Journal d'audit de « $gnom »\n" + (0 until entrees.length()).joinToString("\n") { i ->
+                val e = entrees.getJSONObject(i)
+                val quand = runCatching { java.time.Instant.ofEpochMilli((e.optString("id").toLong() shr 22) + 1_420_070_400_000L).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")) }.getOrDefault("")
+                val cibleId = e.optString("target_id")
+                val cible = salonsNoms[cibleId]?.let { "#$it" } ?: rolesNoms[cibleId]?.let { "@$it" } ?: users[cibleId] ?: (e.optJSONArray("changes")?.let { ch -> (0 until ch.length()).map { ch.getJSONObject(it) }.firstOrNull { it.optString("key") == "name" }?.let { it.optString("old_value").ifBlank { it.optString("new_value") } } }) ?: ""
+                "- [$quand] ${users[e.optString("user_id")] ?: "?"} ${actions[e.optInt("action_type")] ?: "action ${e.optInt("action_type")}"}" + (if (cible.isNotBlank()) " : $cible" else "") +
+                    (e.optString("reason").takeIf { it.isNotBlank() }?.let { " — « ${java.net.URLDecoder.decode(it, "UTF-8").take(80)} »" } ?: "")
+            }, direct = true)
+        }
+        "discord_fil_gerer" -> {
+            val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
+            val filArg = a.optString("fil").trim()
+            val fil = if (filArg.matches(Regex("\\d{17,20}"))) JSONObject().put("id", filArg).put("name", "fil $filArg") else Discord.trouverSalon(app, gid, filArg)
+                ?: return ToolResult("Fil « $filArg » introuvable : donne son ID (clic droit › Copier l'identifiant).")
+            val action = fr.dd.jarvis.societe.core.normaliser(a.optString("action"))
+            val corps = JSONObject()
+            val libelle = when {
+                action.startsWith("desarchiv") -> { corps.put("archived", false); "désarchiver" }
+                action.startsWith("archiv") -> { corps.put("archived", true); "archiver" }
+                action.startsWith("deverrouill") -> { corps.put("locked", false); "déverrouiller" }
+                action.startsWith("verrouill") -> { corps.put("locked", true); "verrouiller" }
+                action.startsWith("renomm") -> { val n = a.optString("nom").trim(); if (n.isBlank()) return ToolResult("Nouveau nom manquant."); corps.put("name", n.take(100)); "renommer en « $n »" }
+                action.startsWith("supprim") -> "supprimer définitivement"
+                else -> return ToolResult("Action « ${a.optString("action")} » inconnue : archiver, desarchiver, verrouiller, deverrouiller, renommer, supprimer.")
+            }
+            if (!confirm("${libelle.replaceFirstChar { it.uppercase() }} le fil « ${fil.optString("name")} » sur « $gnom » ?", true)) return ToolResult("Annulé.")
+            if (corps.length() == 0) Discord.salonSupprimer(app, fil.getString("id"), "Supprimé depuis Jarvis") else Discord.salonModifier(app, fil.getString("id"), corps, "Modifié depuis Jarvis")
+            ToolResult("✅ Fil « ${fil.optString("name")} » : $libelle — fait.", direct = true)
         }
         else -> ToolResult("Outil Discord inconnu.")
         }
