@@ -8,7 +8,9 @@ class ServeurFastPathTest {
     @Test fun commandesDomestiquesCourtesSontClasseesCommeSimples() {
         listOf("Allume la lumière du salon", "Éteins la lampe de la cuisine",
             "Mets le chauffage à 20 degrés", "Baisse le volume de la télé",
-            "Ouvre le volet de la chambre", "Active la prise du bureau")
+            "Ouvre le volet de la chambre", "Active la prise du bureau",
+            "Affiche un message sur la télé du salon", "Envoie un message sur l’enceinte Google",
+            "Fais parler Google Home", "Diffuse une annonce sur Nest Audio")
             .forEach { assertTrue("$it devrait être simple", ServeurTools.actionMaisonSimple(it)) }
     }
 
@@ -18,7 +20,8 @@ class ServeurFastPathTest {
             "Diagnostique pourquoi le chauffage ne répond plus",
             "Configure une automatisation pour le poêle",
             "Liste les appareils Home Assistant indisponibles",
-            "Cherche toutes les lampes du salon")
+            "Cherche toutes les lampes du salon", "Affiche un message et allume la télé",
+            "Envoie un message puis baisse le volume de l’enceinte")
             .forEach { assertFalse("$it ne doit pas être simple", ServeurTools.actionMaisonSimple(it)) }
     }
 }
