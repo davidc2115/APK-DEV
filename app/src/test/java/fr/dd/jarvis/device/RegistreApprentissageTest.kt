@@ -65,7 +65,7 @@ class RegistreApprentissageTest {
         val dir = Files.createTempDirectory("registre-retry").toFile()
         try {
             var distant: String? = null
-            var indisponible = true
+            var indisponible = false
             val r = RegistreApprentissage(
                 File(dir, "index.json"),
                 { true },
@@ -75,12 +75,15 @@ class RegistreApprentissageTest {
                     distant = raw
                 }
             )
+            val id = r.creer("habit", "Préférence vocale", "Réponse vocale concise", "conversation")
+            indisponible = true
             assertThrows(java.io.IOException::class.java) {
-                r.creer("habit", "Préférence vocale", "Réponse vocale concise", "conversation")
+                r.ajouterPreuve(id, "Réponse vocale courte et directe", "demande vocale", "conversation")
             }
-            assertNull(distant)
             indisponible = false
-            assertEquals(1, JSONObject(r.snapshot()).getJSONArray("entries").length())
+            val snapshot = JSONObject(r.snapshot())
+            val item = snapshot.getJSONArray("entries").getJSONObject(0)
+            assertEquals(1, item.getJSONArray("evidence").length())
             assertNotNull(distant)
         } finally { dir.deleteRecursively() }
     }
