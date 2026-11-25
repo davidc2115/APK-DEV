@@ -124,10 +124,19 @@ object Discord {
         /** Comme parse, mais refuse toute permission inconnue au lieu de la transformer silencieusement en zéro. */
         fun parseStrict(s: String): Long {
             val t = s.trim()
-            if (t.isBlank() || t.toLongOrNull() != null || t.equals("toutes_sauf_administrateur", true) ||
+            // Les masques numériques restent acceptés pour compatibilité, mais uniquement
+            // s'ils ne contiennent aucun bit inconnu (sinon une faute peut activer un droit futur).
+            t.toLongOrNull()?.let { bits ->
+                val connus = NOMS.values.fold(0L) { acc, bit -> acc or bit }
+                require(bits >= 0L && (bits and connus.inv()) == 0L) {
+                    "Masque de permissions Discord invalide : bits inconnus ou valeur négative."
+                }
+                return bits
+            }
+            if (t.isBlank() || t.equals("toutes_sauf_administrateur", true) ||
                 t.equals("tout_sauf_administrateur", true) || t.equals("admin_sans_administrateur", true) ||
                 t.equals("toutes", true) || t.equals("administrateur", true) || t.equals("admin", true)) return parse(t)
-            val morceaux = t.split(",", ";", "|", "\n").map { it.trim() }.filter { it.isNotBlank() }
+            val morceaux = t.split(",", ";", "|", "\\n").map { it.trim() }.filter { it.isNotBlank() }
             val inconnus = morceaux.filter { trouver(it) == null }
             require(inconnus.isEmpty()) { "Permissions Discord inconnues : ${inconnus.joinToString(", ")}. Noms possibles : ${NOMS.keys.joinToString(", ")}." }
             return morceaux.fold(0L) { acc, nom -> acc or NOMS.getValue(trouver(nom)!!) }
