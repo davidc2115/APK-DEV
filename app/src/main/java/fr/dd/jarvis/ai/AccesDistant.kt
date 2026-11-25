@@ -21,7 +21,7 @@ object AccesDistant {
     private val SENSIBLES = setOf(21, 22, 23, 80, 445, 554, 1883, 3389, 5000, 5555, 5900, 631, 8000, 8009, 8080, 8123, 8883, 9000, 9100)
 
     /** Services qui ne doivent JAMAIS être publiés tels quels : contrôle distant via tunnel SSH ou VPN uniquement. */
-    private val TUNNEL_OBLIGATOIRE = setOf(21, 22, 23, 80, 445, 554, 1883, 3389, 5000, 5555, 5900, 631, 8000, 8009, 8080, 8123, 9100)
+    private val TUNNEL_OBLIGATOIRE = setOf(21, 22, 23, 80, 445, 554, 1883, 3389, 5000, 5555, 5900, 631, 8000, 8009, 8080, 8123, 8883, 9000, 9100)
 
     internal fun tunnelObligatoire(port: Int): Boolean = port in TUNNEL_OBLIGATOIRE
 
