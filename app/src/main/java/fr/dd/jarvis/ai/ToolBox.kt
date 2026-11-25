@@ -1020,6 +1020,8 @@ class ToolBox(
                         }
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) { "❌ Contrôle de synchronisation impossible : ${e.message ?: e.javaClass.simpleName}" }
         })
         "obsidian_doublons" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -1036,6 +1038,8 @@ class ToolBox(
                     }
                     append("\n\nAucune note n'a été supprimée. Dis-moi quel chemin tu souhaites conserver et quelle copie supprimer ; je demanderai confirmation avant chaque suppression.")
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) { "❌ Analyse Obsidian impossible : ${e.message ?: e.javaClass.simpleName}" }
         })
         "obsidian_chercher" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
