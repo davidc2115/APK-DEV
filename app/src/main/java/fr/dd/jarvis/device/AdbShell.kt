@@ -234,6 +234,13 @@ object AdbShell {
                     runCatching { stream.close() }
                     sortie.cancel(true)
                     "⏱️ Commande ADB interrompue après 20 secondes."
+                } catch (e: InterruptedException) {
+                    // Ne pas transformer une interruption du worker en simple erreur métier :
+                    // fermer le flux distant, annuler le lecteur et restaurer le flag du thread.
+                    sortie.cancel(true)
+                    runCatching { stream.close() }
+                    Thread.currentThread().interrupt()
+                    throw CancellationException("Commande ADB interrompue.").also { it.initCause(e) }
                 }
             } finally {
                 runCatching { stream.close() }
