@@ -38,6 +38,10 @@ object Tele {
         Regex("google.?home|google.?nest|chromecast.?audio|nest.?audio|nest.?mini|nest.?hub|home.?mini|speaker|enceinte|haut.?parleur").containsMatchIn(texte.lowercase()) ||
             type.contains("🔊")
 
+    /** Le port ADB seul ne prouve pas qu’un équipement est une télévision : exiger une identité Android TV explicite. */
+    internal fun portAdbIdentifieUneTele(ports: List<Int>, texte: String): Boolean =
+        5555 in ports && Regex("android ?tv|google ?tv|chromecast|shield|mibox|freebox (pop|player)").containsMatchIn(texte.lowercase())
+
     /** Télés trouvées dans l'inventaire du Wi-Fi (ports et noms caractéristiques). */
     fun detecter(app: JarvisApp): List<Candidat> = Registre.tous(app).mapNotNull { e ->
         val ports = e.optJSONArray("ports")?.let { a -> (0 until a.length()).map { a.optInt(it) } }.orEmpty()
@@ -48,7 +52,7 @@ object Tele {
             // Un Nest/Google Home expose lui aussi le port Cast 8009 (parfois 8008) : ne jamais le proposer comme télé.
             enceinteGoogle -> null
             texte.contains("bravia") || texte.contains("sony") && (texte.contains("tv") || texte.contains("tele")) -> Candidat(ip, Registre.nomDe(e), "bravia", "Sony Bravia")
-            5555 in ports -> Candidat(ip, Registre.nomDe(e), "androidtv", "débogage réseau ouvert (port 5555)")
+            portAdbIdentifieUneTele(ports, texte) -> Candidat(ip, Registre.nomDe(e), "androidtv", "Android TV avec débogage réseau ouvert (port 5555)")
             6466 in ports || 6467 in ports || Regex("android ?tv|google ?tv|chromecast|shield|mibox|freebox (pop|player)").containsMatchIn(texte) ->
                 Candidat(ip, Registre.nomDe(e), "androidtv", "Android TV / Google TV")
             8001 in ports || 8002 in ports || texte.contains("samsung") && texte.contains("tv") -> Candidat(ip, Registre.nomDe(e), "samsung", "Samsung (Tizen)")
