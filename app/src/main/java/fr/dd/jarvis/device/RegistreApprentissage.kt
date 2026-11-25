@@ -394,7 +394,7 @@ class RegistreApprentissage(
                 demanderPermissions(id, (0 until scopes.length()).mapNotNull { scopes.optString(it).takeIf(String::isNotBlank) }, acteur)
                 """{"ok":true,"granted":false}"""
             }
-            else -> throw IllegalArgumentException("Action attendue : list, create, evidence, counterexample ou state.")
+            else -> throw IllegalArgumentException("Action attendue : list, read, create, evidence, counterexample, permission_request ou state.")
         }
     }
 }
