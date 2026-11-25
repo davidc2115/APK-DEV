@@ -425,15 +425,30 @@ class SocieteService(
         return n
     }
 
-    /** Image d'un rapport (« idIntervention-nom ») depuis le stockage privé, réduite pour le PDF. */
+    /** Charge une image d'intervention depuis le cache privé temporaire ou le coffre Obsidian. */
     private fun imageRapport(nom: String): android.graphics.Bitmap? {
-        val id = nom.substringBefore('-'); val fichier = nom.substringAfter('-')
-        val f = File(ctx.filesDir, "societe/interventions/$id/$fichier").takeIf { it.isFile } ?: return null
-        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        android.graphics.BitmapFactory.decodeFile(f.path, o)
-        var ech = 1
-        while (o.outWidth / (ech * 2) >= 1200 || o.outHeight / (ech * 2) >= 1200) ech *= 2
-        return android.graphics.BitmapFactory.decodeFile(f.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = ech })
+        val id = nom.substringBefore('-')
+        val fichier = nom.substringAfter('-')
+        val local = File(ctx.filesDir, "societe/interventions/$id/$fichier").takeIf { it.isFile }
+        // Après génération du PDF, les copies privées sont supprimées : le coffre reste la source.
+        val dossier = data.clients.asSequence().flatMap { client ->
+            client.sites.asSequence().mapNotNull { site ->
+                if (site.interventions.any { it.id == id }) dossierIntervention(client, site) else null
+            }
+        }.firstOrNull() ?: return null
+        val temporaire = if (local != null) null else
+            obsidian.versFichierLocal("$dossier/$id-$fichier", File(ctx.cacheDir, "rapport-images"))
+        val source = local ?: temporaire ?: return null
+        return try {
+            val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(source.path, options)
+            var ech = 1
+            while (options.outWidth / (ech * 2) >= 1200 || options.outHeight / (ech * 2) >= 1200) ech *= 2
+            android.graphics.BitmapFactory.decodeFile(source.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = ech })
+        } finally {
+            // Ne jamais effacer le cache de travail d'une autre intervention ni la source locale durable.
+            if (temporaire != null) runCatching { temporaire.delete() }
+        }
     }
 
     /** Écrit la note Obsidian et le PDF (avec les photos et la signature dedans) ; renvoie (note, pdf). */
@@ -520,8 +535,16 @@ class SocieteService(
                 if (s.id != siteId) s else s.copy(interventions = s.interventions.map { i -> if (i.id == interventionId) maj else i })
             })
         }) }
-        val (emplacement, _) = ecrireRapport(client, site, maj)
-        return "${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note mise à jour : $emplacement"
+        val (emplacement, pdf) = try {
+            ecrireRapport(client, site, maj)
+        } finally {
+            // Les originaux sont déjà dans Obsidian ; les fichiers privés n'ont servi qu'à intégrer
+            // les images au PDF courant. Les rapports futurs reliront les originaux dans le coffre.
+            ajoutees.forEach { relatif ->
+                File(ctx.filesDir, "societe/$relatif").let { fichier -> runCatching { fichier.delete() } }
+            }
+        }
+        return "${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note mise à jour : $emplacement — $pdf
     }
 
     // ------------------------------------------------------------------ export (Obsidian + PDF)
