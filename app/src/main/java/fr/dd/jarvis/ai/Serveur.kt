@@ -958,13 +958,16 @@ object Serveur {
      * appareil plus lent (Zigbee, télé, poêle…), l'état est relu jusqu'à ~2,5 s. Le compte rendu dit ce qui est
      * réellement constaté — avant, « exécuté » était annoncé même quand l'appareil, injoignable, n'avait pas bougé.
      */
+    internal fun compteRenduSansEntite(domaine: String, service: String): String =
+        "✅ Appel $domaine.$service accepté par Home Assistant (aucun état cible à relire : l'affichage ou la lecture sur l'appareil n'est pas confirmé)."
+
     fun haService(app: JarvisApp, domaine: String, service: String, entite: String, donnees: JSONObject?): String {
         val corps = donnees ?: JSONObject()
         val ids = entite.split(",").map { it.trim() }.filter { it.isNotBlank() }
         if (ids.isNotEmpty()) corps.put("entity_id", if (ids.size > 1) JSONArray(ids) else ids.first())
         val demandes = JSONObject(corps.toString())
         val reponse = ha(app, "POST", "/api/services/$domaine/$service", corps)
-        if (ids.isEmpty()) return "✅ $domaine.$service exécuté par Home Assistant."
+        if (ids.isEmpty()) return compteRenduSansEntite(domaine, service)
         val changes = HashMap<String, JSONObject>()
         runCatching { JSONArray(reponse) }.getOrNull()?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { changes[it.optString("entity_id")] = it } }
         val limite = System.currentTimeMillis() + 2_500
