@@ -155,7 +155,7 @@ object Reseau {
             554 in p || t.contains("camera") || t.contains("hikvision") || t.contains("dahua") -> "📷 caméra"
             62078 in p -> "📱 iPhone/iPad"
             8009 in p && enceinteGoogle -> "🔊 enceinte Google / Nest"
-            8009 in p && (8008 in p || Regex("chromecast|google.?tv|android.?tv|shield|freebox.?player").containsMatchIn(t)) -> "📺 Chromecast / TV"
+            8009 in p && Regex("chromecast|google.?tv|android.?tv|shield|freebox.?player|bravia").containsMatchIn(t) -> "📺 Chromecast / TV"
             8009 in p -> "📡 appareil Google Cast"
             7000 in p -> "📺 AirPlay"
             32400 in p || 8096 in p -> "🎬 serveur média"
@@ -243,7 +243,7 @@ object Reseau {
             trouves.filter { it.faible && it.ip != i.ip && !upnp.containsKey(it.ip) && !mdns.containsKey(it.ip) }.forEach { parIp.remove(it.ip) }
         }
         parIp.values.map { d ->
-            val info = (upnp[d.ip].orEmpty().ifBlank { mdns[d.ip]?.distinct()?.joinToString(", ").orEmpty() }).take(70)
+            val info = listOf(upnp[d.ip], mdns[d.ip]?.distinct()?.joinToString(", ")).filterNotNull().map { it.trim() }.filter { it.isNotBlank() }.distinct().joinToString(" · ").take(100)
             d.copy(info = info, type = typeDe(d.ports, d.titre, info), faible = d.faible && info.isBlank())
         }.sortedBy { a -> a.ip.split(".").map { it.toInt() }.fold(0L) { acc, x -> acc * 256 + x } }
     }
