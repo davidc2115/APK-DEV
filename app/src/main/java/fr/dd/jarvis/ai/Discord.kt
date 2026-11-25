@@ -121,6 +121,18 @@ object Discord {
                 .fold(0L) { acc, n -> acc or (trouver(n)?.let { NOMS[it] } ?: 0L) }
         }
 
+        /** Comme parse, mais refuse toute permission inconnue au lieu de la transformer silencieusement en zéro. */
+        fun parseStrict(s: String): Long {
+            val t = s.trim()
+            if (t.isBlank() || t.toLongOrNull() != null || t.equals("toutes_sauf_administrateur", true) ||
+                t.equals("tout_sauf_administrateur", true) || t.equals("admin_sans_administrateur", true) ||
+                t.equals("toutes", true) || t.equals("administrateur", true) || t.equals("admin", true)) return parse(t)
+            val morceaux = t.split(",", ";", "|", "\n").map { it.trim() }.filter { it.isNotBlank() }
+            val inconnus = morceaux.filter { trouver(it) == null }
+            require(inconnus.isEmpty()) { "Permissions Discord inconnues : ${inconnus.joinToString(", ")}. Noms possibles : ${NOMS.keys.joinToString(", ")}." }
+            return morceaux.fold(0L) { acc, nom -> acc or NOMS.getValue(trouver(nom)!!) }
+        }
+
         /** Façons courantes de dire une permission → son nom ci-dessus. */
         private val SYNONYMES = mapOf(
             "voir|voir le salon|voir les salons|acceder|acces|lire le salon|afficher le salon" to "voir_salon",
