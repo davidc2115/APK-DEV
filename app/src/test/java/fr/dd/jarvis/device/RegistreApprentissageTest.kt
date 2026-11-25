@@ -23,9 +23,10 @@ class RegistreApprentissageTest {
             val r = registre(dir)
             val id = r.creer("habit", "Préférence de présentation", "Préférence observée", "conversation")
             assertTrue(r.ajouterPreuve(id, "Toujours présenter les températures", "demande maison", "conversation"))
-            assertFalse(r.ajouterPreuve(id, "Toujours   présenter les températures", "autre contexte", "conversation"))
+            assertFalse(r.ajouterPreuve(id, "Toujours   présenter les températures", "demande maison", "conversation"))
+            assertTrue(r.ajouterPreuve(id, "Toujours présenter les températures", "demande cuisine", "conversation"))
             val item = JSONObject(r.snapshot()).getJSONArray("entries").getJSONObject(0)
-            assertEquals(1, item.getJSONArray("evidence").length())
+            assertEquals(2, item.getJSONArray("evidence").length())
         } finally { dir.deleteRecursively() }
     }
 
