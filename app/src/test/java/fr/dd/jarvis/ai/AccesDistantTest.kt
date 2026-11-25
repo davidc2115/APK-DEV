@@ -14,6 +14,11 @@ class AccesDistantTest {
         assertEquals(false, AccesDistant.tunnelObligatoire(443))
     }
 
+    @Test fun inventaireDetecteUneDmzDejaActive() {
+        assertTrue(AccesDistant.dmzActive("DMZ : activée vers 192.168.1.20"))
+        assertTrue(!AccesDistant.dmzActive("DMZ : désactivée"))
+    }
+
     @Test fun inventaireSignaleLesAnciennesRedirectionsNonHttpsSansLesSupprimer() {
         val texte = "🔀 Redirections de ports:\n" +
             "🟢 #1 TCP 8123 → 192.168.1.20:8123 (Home Assistant)\n" +
