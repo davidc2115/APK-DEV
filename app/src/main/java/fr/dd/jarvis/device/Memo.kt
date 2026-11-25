@@ -47,6 +47,13 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         }
     }
 
+    /** Restaure le journal local des preuves si le miroir Obsidian échoue après l'écriture locale. */
+    private fun restaurerPreuvesLocales() {
+        val json = JSONObject()
+        candidates.forEach { (key, values) -> json.put(key, JSONArray(values.toList())) }
+        persisterCopieHermes(habitsFile, json.toString(2))
+    }
+
     private fun persistCandidates() {
         val json = JSONObject()
         candidates.forEach { (key, values) -> json.put(key, JSONArray(values.toList())) }
@@ -87,6 +94,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
                     persistCandidates()
                 } catch (e: Exception) {
                     candidates[key] = proofs
+                    runCatching { restaurerPreuvesLocales() }
                     throw e
                 }
                 return "Habitude confirmée après trois preuves distinctes et ajoutée à la mémoire durable : $value"
@@ -111,6 +119,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
             persistCandidates()
         } catch (e: Exception) {
             candidates[key] = proofs
+            runCatching { restaurerPreuvesLocales() }
             throw e
         }
         return "Habitude confirmée après trois preuves distinctes et ajoutée à la mémoire durable : $value"
