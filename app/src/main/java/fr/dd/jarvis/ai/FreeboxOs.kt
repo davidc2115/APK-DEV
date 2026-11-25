@@ -284,6 +284,8 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
     }
 
     /** Refuse l'activation DMZ : elle expose tous les ports entrants de l'appareil. La désactivation reste permise. */
+    internal fun redirectionPortInterdit(port: Int): Boolean = !AccesDistant.publicationDirecteAutorisee(port)
+
     internal fun dmzActivationInterdite(etatBrute: String, cible: String): Boolean {
         val etat = etatBrute.trim().lowercase()
         val modification = cible.isNotBlank() || etat.isNotBlank()
@@ -331,7 +333,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         if (app.store.freeboxAppToken.value.isBlank()) return "JARVIS n'est pas encore associé à la Freebox : Réglages › Maison › Box Internet › Associer la Freebox (à valider sur l'écran de la box)."
         if (action == "ajouter_redirection") {
             val portLan = a.optString("port").filter { it.isDigit() }.toIntOrNull()
-            if (portLan != null && !AccesDistant.publicationDirecteAutorisee(portLan))
+            if (portLan != null && redirectionPortInterdit(portLan))
                 return "⛔ Redirection refusée : JARVIS n'ouvre directement que les services HTTPS connus (443, 8443, 9443). Pour les autres ports, utilise le tunnel SSH sécurisé ou WireGuard ; Plex utilise son accès distant authentifié."
         }
         if (action == "dmz" && dmzActivationInterdite(a.optString("etat"), a.optString("appareil").ifBlank { a.optString("ip") }))
@@ -1182,10 +1184,18 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
             }
         }
         "supprimer_redirection", "activer_redirection", "desactiver_redirection" -> {
+            val existantes = liste(json(app, "fw/redir/", s))
             val id = a.optString("id").filter { it.isDigit() }.toIntOrNull() ?: run {
                 val port = a.optString("port").filter { it.isDigit() }.toIntOrNull() ?: throw IllegalArgumentException("précise l'identifiant (#) ou le port de la redirection.")
-                liste(json(app, "fw/redir/", s)).filter { it.optInt("wan_port_start") == port || it.optInt("lan_port") == port }
+                existantes.filter { it.optInt("wan_port_start") == port || it.optInt("lan_port") == port }
                     .singleOrNull()?.optInt("id") ?: throw IllegalArgumentException("aucune (ou plusieurs) redirection(s) sur le port $port : précise son identifiant.")
+            }
+            val existante = existantes.firstOrNull { it.optInt("id") == id }
+            if (action == "activer_redirection") {
+                val portLan = existante?.optInt("lan_port")?.takeIf { it > 0 }
+                    ?: throw IllegalArgumentException("redirection #$id introuvable : impossible de vérifier son service.")
+                if (redirectionPortInterdit(portLan))
+                    return "⛔ Activation refusée : le port interne $portLan n'est pas un service HTTPS autorisé. Utilise un tunnel SSH ou WireGuard."
             }
             if (action.startsWith("supprimer")) { json(app, "fw/redir/$id", s, "DELETE"); "🗑️ Redirection #$id supprimée." }
             else { json(app, "fw/redir/$id", s, "PUT", JSONObject().put("enabled", action.startsWith("activer"))); "✅ Redirection #$id ${if (action.startsWith("activer")) "activée" else "désactivée"}." }
