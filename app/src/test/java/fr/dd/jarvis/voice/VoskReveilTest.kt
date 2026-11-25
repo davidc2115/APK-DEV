@@ -66,7 +66,7 @@ class VoskReveilTest {
     }
 
     @Test fun fenetresMusiquePlusCourtes() {
-        // Une fenêtre de 1,5 s, chevauchée par la seconde reconnaissance.
+        // 30 trames de 50 ms = 1,5 s, chevauchées par la seconde reconnaissance.
         assertEquals(30, VoskWake.FENETRE_MUSIQUE)
     }
 }
