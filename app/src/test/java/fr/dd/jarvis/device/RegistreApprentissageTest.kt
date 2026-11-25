@@ -233,6 +233,8 @@ class RegistreApprentissageTest {
             }
 
             val remplace = r.creer("tool", "Outil remplacé", "Ancienne proposition", "revue")
+            r.changerEtat(remplace, RegistreApprentissage.ETAT_CANDIDATE, false)
+            r.changerEtat(remplace, RegistreApprentissage.ETAT_NEEDS_REVIEW, false)
             r.changerEtat(remplace, RegistreApprentissage.ETAT_APPROVED, true)
             r.changerEtat(remplace, RegistreApprentissage.ETAT_TESTING, true)
             r.changerEtat(remplace, RegistreApprentissage.ETAT_ACTIVE, true)
