@@ -123,4 +123,43 @@ class RegistreApprentissageTest {
         } finally { dir.deleteRecursively() }
     }
 
+    @Test
+    fun habitudeDevientCandidateApresTroisPreuvesDistinctes() {
+        val dir = Files.createTempDirectory("registre-habitude-candidate").toFile()
+        try {
+            val r = registre(dir)
+            val id = r.enregistrerPreuveHabitude(
+                "Réponses concises", "Préférence de présentation", "Memo.apprendre",
+                "Je préfère les réponses courtes", "conversation 1", "memo.apprendre"
+            )
+            assertEquals(RegistreApprentissage.ETAT_OBSERVED,
+                JSONObject(r.snapshot()).getJSONArray("entries").getJSONObject(0).getString("state"))
+            r.enregistrerPreuveHabitude("Réponses concises", "Préférence de présentation", "Memo.apprendre",
+                "Va droit au but dans les explications", "conversation 2", "memo.apprendre")
+            r.enregistrerPreuveHabitude("Réponses concises", "Préférence de présentation", "Memo.apprendre",
+                "Privilégie les formulations synthétiques", "conversation 3", "memo.apprendre")
+            val item = JSONObject(r.snapshot()).getJSONArray("entries").getJSONObject(0)
+            assertEquals(id, item.getString("id"))
+            assertEquals(RegistreApprentissage.ETAT_CANDIDATE, item.getString("state"))
+            assertEquals(3, item.getJSONArray("evidence").length())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun memePreuveDansDesContextesDifferentsNeFaitPasProgresserUneHabitude() {
+        val dir = Files.createTempDirectory("registre-habitude-doublons").toFile()
+        try {
+            val r = registre(dir)
+            val id = r.enregistrerPreuveHabitude("Réponses concises", "Préférence", "Memo.apprendre",
+                "Je préfère les réponses courtes", "conversation 1", "memo.apprendre")
+            r.enregistrerPreuveHabitude("Réponses concises", "Préférence", "Memo.apprendre",
+                "Je préfère les réponses courtes", "conversation 2", "memo.apprendre")
+            r.enregistrerPreuveHabitude("Réponses concises", "Préférence", "Memo.apprendre",
+                "Je préfère les réponses courtes", "conversation 3", "memo.apprendre")
+            val item = JSONObject(r.snapshot()).getJSONArray("entries").getJSONObject(0)
+            assertEquals(id, item.getString("id"))
+            assertEquals(RegistreApprentissage.ETAT_OBSERVED, item.getString("state"))
+        } finally { dir.deleteRecursively() }
+    }
+
 }
