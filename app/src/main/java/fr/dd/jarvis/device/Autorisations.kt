@@ -50,7 +50,7 @@ object Autorisations {
     private val DISCORD_CRITIQUE = Regex(
         "discord_(membre_(timeout|expulser|bannir|pseudo)|role_(creer|modifier|supprimer|position|attribuer)|" +
             "salon_(permission|creer|modifier|supprimer)|salons_reorganiser|serveur_modifier|" +
-            "messages_purger|message_supprimer|fil_gerer|invitations)",
+            "messages_purger|message_(modifier|supprimer|epingler)|fil_(creer|gerer)|invitations)",
         RegexOption.IGNORE_CASE
     )
 
