@@ -616,13 +616,13 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
         if (coffreConfigure()) {
             val f = trouverUniquePourLecture(p) ?: return null
-            if (!f.isFile) return null
+            if (!f.isFile) throw java.io.IOException("Le chemin Obsidian « $p » existe mais ne désigne pas un fichier.")
             return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
                 ?: throw java.io.IOException("Impossible de lire la note Obsidian : $p")
         }
         val local = File(localRoot(), p)
         if (!local.exists()) return null
-        if (!local.isFile) return null
+        if (!local.isFile) throw java.io.IOException("Le chemin local Obsidian « $p » existe mais ne désigne pas un fichier.")
         return try { local.readText() } catch (e: Exception) {
             throw java.io.IOException("Impossible de lire la note locale : $p", e)
         }
