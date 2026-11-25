@@ -142,10 +142,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val dossierRelatif = relatif(folder)
             val dossierReel = if (dossierRelatif.isBlank()) "" else resoudre(dossierRelatif)
             val cur = if (dossierReel != null) {
-                if (dossierReel.isBlank()) tree else trouver(dossierReel)?.takeIf { it.isDirectory }
+                if (dossierReel.isBlank()) tree else trouverUnique(dossierReel)?.takeIf { it.isDirectory }
             } else null
             val cheminFichier = if (dossierRelatif.isBlank()) resoudre(name) else resoudre("$dossierRelatif/$name")
-            val cible = cheminFichier?.let { trouver(it)?.takeIf { f -> f.isFile } }
+            val cible = cheminFichier?.let { trouverUnique(it)?.takeIf { f -> f.isFile } }
                 ?: cur?.trouverLooseUnique(name)
             var supprime = false
             if (cible != null) {
@@ -525,6 +525,15 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     private fun trouver(chemin: String): DocumentFile? {
         var cur: DocumentFile? = vaultRoot() ?: return null
         for (part in chemin.trim().trim('/').split('/').filter { it.isNotBlank() }) cur = cur?.trouverLoose(part)
+        return cur
+    }
+
+    /** Résolution stricte réservée aux opérations mutantes : chaque segment doit être unique. */
+    private fun trouverUnique(chemin: String): DocumentFile? {
+        var cur: DocumentFile? = vaultRoot() ?: return null
+        for (part in chemin.trim().trim('/').split('/').filter { it.isNotBlank() }) {
+            cur = cur?.trouverLooseUnique(part) ?: return null
+        }
         return cur
     }
 
