@@ -102,7 +102,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         // Le registre Jarvis/Hermès reçoit les mêmes preuves, sans attendre la migration legacy.
         // Il garde leur contexte et ne passe en candidate qu'après trois preuves distinctes.
         registreApprentissage.enregistrerPreuveHabitude(
-            value,
+            "[$category] $value",
             "Préférence candidate de la rubrique $category",
             "Memo.apprendre",
             evidence,
