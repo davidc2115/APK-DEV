@@ -467,14 +467,19 @@ class SocieteService(
         val client = data.client(clientId) ?: return "Client introuvable."
         val site = client.sites.firstOrNull { it.id == siteId } ?: return "Installation introuvable."
         val inter = site.interventions.firstOrNull { it.id == interventionId } ?: return "Intervention introuvable."
-        File(ctx.filesDir, "societe/interventions/$interventionId").apply { mkdirs() }.let { File(it, "signature.png").writeBytes(png) }
-        runCatching { obsidian.saveBytes(dossierIntervention(client, site), "$interventionId-signature.png", png, "image/png") }
-        val maj = inter.copy(signature = "interventions/$interventionId/signature.png")
-        repo.update { d -> d.copy(clients = d.clients.map { c -> if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
-            if (s.id != siteId) s else s.copy(interventions = s.interventions.map { if (it.id == interventionId) maj else it })
-        }) }) }
-        val (_, pdf) = ecrireRapport(client, site, maj)
-        return "✍️ Signature du client ajoutée au rapport ($pdf)."
+        return try {
+            // L'original est stocké dans le coffre avant de rattacher la signature à l'intervention.
+            // imageRapport relira ensuite directement ce fichier Obsidian pour intégrer le PDF.
+            obsidian.saveBytes(dossierIntervention(client, site), "$interventionId-signature.png", png, "image/png")
+            val maj = inter.copy(signature = "interventions/$interventionId/signature.png")
+            repo.update { d -> d.copy(clients = d.clients.map { c -> if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
+                if (s.id != siteId) s else s.copy(interventions = s.interventions.map { if (it.id == interventionId) maj else it })
+            }) }) }
+            val (_, pdf) = ecrireRapport(client, site, maj)
+            "✍️ Signature du client ajoutée au rapport ($pdf)."
+        } catch (e: Exception) {
+            "Impossible d'enregistrer la signature dans le coffre Obsidian : ${e.message ?: "erreur inconnue"}"
+        }
     }
 
     /** Une fois : régénère les rapports des interventions qui ont des photos (elles n'étaient pas dans les PDF). */
