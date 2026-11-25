@@ -21,7 +21,11 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             if (n.isBlank() || n.length > 140) return false
             if (Regex("\\b(et|puis|ensuite|apres|avant|routine|scenario|automatisation|diagnostic|analyse|cherche|recherche|liste|configure|configuration|historique|pourquoi|comment)\\b").containsMatchIn(n)) return false
             val verbes = Regex("\\b(allume(r)?|eteins?|eteindre|mets?|mettre|regle(r)?|augmente(r)?|baisse(r)?|monte(r)?|descends?|ouvre(r)?|ferme(r)?|active(r)?|desactive(r)?|coupe(r)?|lance(r)?|stoppe(r)?|arrete(r)?|affiche(r)?|envoie(r)?|envoye(r)?|diffuse(r)?|annonce(r)?|parle(r)?)\\b")
-            if (verbes.findAll(n).count() != 1) return false
+            // « annonce » est aussi un nom (« diffuse une annonce ») : ne pas le compter comme second verbe.
+            val nombreVerbes = verbes.findAll(n).count { m ->
+                !(m.value == "annonce" && Regex("\\b(une|un|des) annonce\\b").containsMatchIn(n))
+            }
+            if (nombreVerbes != 1) return false
             return Regex("\\b(lumiere(s)?|lampe(s)?|eclairage|ampoule(s)?|spot(s)?|led|tele|television|televiseur|tv|volume|son|enceinte(s)?|haut parleur(s)?|message(s)?|notification(s)?|ecran(s)?|google home|google nest|nest audio|nest mini|nest hub|google assistant|chromecast|cast|poele|chauffage|radiateur|thermostat|clim(atisation)?|volet(s)?|store(s)?|prise(s)?|interrupteur(s)?|ventilateur)\\b").containsMatchIn(n)
         }
         /** Une demande explicitement Home Assistant + indisponibilité doit rester dans l'API HA, jamais dans le scan Wi-Fi. */
