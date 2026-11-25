@@ -43,5 +43,35 @@ class RegistreApprentissageMigrationTest {
         } finally {
             dir.deleteRecursively()
         }
+
+    @Test
+    fun migrationReprendApresEchecDuMiroirSansReimporter() {
+        val dir = Files.createTempDirectory("registre-migration-reprise").toFile()
+        try {
+            var distant: String? = null
+            var indisponible = false
+            val registre = RegistreApprentissage(
+                File(dir, "index.json"),
+                { true },
+                { distant },
+                { raw ->
+                    if (indisponible) throw java.io.IOException("coffre indisponible")
+                    distant = raw
+                }
+            )
+            registre.snapshot() // initialise le registre et son miroir
+            indisponible = true
+            val anciennes = mapOf("maison|Préférence répétée" to setOf("0123456789abcdef0123"))
+            assertThrows(java.io.IOException::class.java) {
+                registre.importerAnciennesHabitudes(anciennes)
+            }
+            indisponible = false
+            assertEquals(0, registre.importerAnciennesHabitudes(anciennes))
+            val distantJson = JSONObject(distant ?: error("Miroir non rétabli"))
+            assertEquals(1, distantJson.getJSONArray("entries").length())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
     }
 }
