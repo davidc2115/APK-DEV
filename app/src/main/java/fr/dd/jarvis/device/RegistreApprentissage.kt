@@ -308,6 +308,38 @@ class RegistreApprentissage(
         persisterMutation(avant)
     }
 
+    /**
+     * Enregistre les permissions demandées par un skill/outil sans les accorder.
+     * Les scopes sont explicites et bornés ; wildcard, shell, root et exécution de code sont refusés.
+     */
+    @Synchronized
+    fun demanderPermissions(id: String, permissions: List<String>, acteur: String = "jarvis") {
+        synchroniserAvantLecture()
+        val item = entree(id) ?: throw IllegalArgumentException("Entrée inconnue : $id.")
+        if (item.optString("type") !in setOf("skill", "tool"))
+            throw IllegalArgumentException("Les permissions ne concernent que les skills et outils.")
+        if (permissions.isEmpty() || permissions.size > 12)
+            throw IllegalArgumentException("Indique entre 1 et 12 permissions précises.")
+        val autorisees = setOf(
+            "memory:read", "memory:write",
+            "calendar:read", "calendar:write",
+            "files:read", "files:write",
+            "homeassistant:read", "homeassistant:control",
+            "network:read", "network:request",
+            "phone:read", "phone:control",
+            "obsidian:read", "obsidian:write"
+        )
+        val normalisees = permissions.map { it.trim().lowercase() }.distinct()
+        val refusees = normalisees.filter { it !in autorisees }
+        if (refusees.isNotEmpty())
+            throw SecurityException("Permissions inconnues ou trop larges refusées : \${refusees.joinToString(", ")}.")
+        val avant = avantMutation()
+        item.put("requestedPermissions", JSONArray(normalisees.sorted()))
+        item.put("updatedAt", System.currentTimeMillis())
+        journal(id, "permissions_requested", "Permissions demandées : \${normalisees.sorted().joinToString(", ")}", acteur)
+        persisterMutation(avant)
+    }
+
     /** Toute activation exige une validation explicite ; les transitions impossibles sont refusées. */
     @Synchronized
     fun changerEtat(id: String, nouvelEtat: String, confirmationExplicite: Boolean, acteur: String = "jarvis") {
@@ -356,6 +388,11 @@ class RegistreApprentissage(
             "state" -> {
                 changerEtat(id, args.optString("etat"), args.optBoolean("confirmation_explicite", false), acteur)
                 """{"ok":true}"""
+            }
+            "permission_request" -> {
+                val scopes = args.optJSONArray("permissions") ?: JSONArray()
+                demanderPermissions(id, (0 until scopes.length()).mapNotNull { scopes.optString(it).takeIf(String::isNotBlank) }, acteur)
+                """{"ok":true,"granted":false}"""
             }
             else -> throw IllegalArgumentException("Action attendue : list, create, evidence, counterexample ou state.")
         }
