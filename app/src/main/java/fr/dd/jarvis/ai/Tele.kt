@@ -49,7 +49,7 @@ object Tele {
             enceinteGoogle -> null
             texte.contains("bravia") || texte.contains("sony") && (texte.contains("tv") || texte.contains("tele")) -> Candidat(ip, Registre.nomDe(e), "bravia", "Sony Bravia")
             5555 in ports -> Candidat(ip, Registre.nomDe(e), "androidtv", "débogage réseau ouvert (port 5555)")
-            6466 in ports || 6467 in ports || (8009 in ports && 8008 in ports) || Regex("android ?tv|google ?tv|chromecast|shield|mibox|freebox (pop|player)").containsMatchIn(texte) ->
+            6466 in ports || 6467 in ports || Regex("android ?tv|google ?tv|chromecast|shield|mibox|freebox (pop|player)").containsMatchIn(texte) ->
                 Candidat(ip, Registre.nomDe(e), "androidtv", "Android TV / Google TV")
             8001 in ports || 8002 in ports || texte.contains("samsung") && texte.contains("tv") -> Candidat(ip, Registre.nomDe(e), "samsung", "Samsung (Tizen)")
             3000 in ports || 3001 in ports || texte.contains("webos") || texte.contains("lg") && texte.contains("tv") -> Candidat(ip, Registre.nomDe(e), "lg", "LG (webOS)")
