@@ -288,7 +288,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         loadCandidates()
         loaded = true
         if (choix != null && note != null && choix.second) runCatching { obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), render()) }
-        if (choix != null && copie == null) runCatching { local.writeText(render()) }
+        if (choix != null && copie == null) runCatching { persisterCopieHermes(local, render()) }
     }
 
     @Synchronized
