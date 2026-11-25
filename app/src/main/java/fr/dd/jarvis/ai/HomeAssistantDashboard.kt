@@ -71,7 +71,10 @@ object HomeAssistantDashboard {
     /** Ne conserve que les réponses de commande, les messages d'authentification et les erreurs. */
     internal fun estMessageUtile(message: String): Boolean = runCatching {
         val json = JSONObject(message)
-        json.has("id") || json.optString("type").startsWith("auth_") || json.has("_failure")
+        // Les événements HA portent eux aussi un id (celui de l'abonnement) :
+        // les garder permettrait à un flux d'événements de saturer la file et d'évincer une réponse.
+        (json.has("id") && json.optString("type") != "event") ||
+            json.optString("type").startsWith("auth_") || json.has("_failure")
     }.getOrDefault(false)
 
     /** Identifie uniquement la réponse corrélée à la commande ; les événements sans id sont ignorés. */
