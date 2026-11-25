@@ -156,6 +156,8 @@ object HomeAssistantDashboard {
                         .put("icon", a.optString("icone").ifBlank { "mdi:view-dashboard" }).put("show_in_sidebar", true).put("require_admin", false))
                     try {
                         save(s, path, initial)
+                    } catch (annulation: kotlinx.coroutines.CancellationException) {
+                        throw annulation
                     } catch (e: Exception) {
                         // Éviter de laisser un tableau vide si l'enregistrement de sa configuration échoue.
                         try {
