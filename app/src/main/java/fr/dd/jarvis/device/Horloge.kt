@@ -236,9 +236,11 @@ object Horloge {
     }
 
     fun diagnostic(c: Context): String {
-        channels(c)
         val exact = exactAutorise(c)
-        val notifications = notificationsAutorisees(c)
+        val channel = if (android.os.Build.VERSION.SDK_INT >= 26) nm(c).getNotificationChannel(CH_RUN) else null
+        val notifications = androidx.core.app.NotificationManagerCompat.from(c).areNotificationsEnabled() &&
+            (android.os.Build.VERSION.SDK_INT < 33 || c.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) &&
+            (channel == null || channel.importance != NotificationManager.IMPORTANCE_NONE)
         val nextInfo = am(c).nextAlarmClock
         val next = nextInfo?.triggerTime?.let {
             java.time.Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
