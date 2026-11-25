@@ -61,6 +61,31 @@ class RegistreApprentissageTest {
     }
 
     @Test
+    fun echecDuMiroirEstRetenteAuProchainAcces() {
+        val dir = Files.createTempDirectory("registre-retry").toFile()
+        try {
+            var distant: String? = null
+            var indisponible = true
+            val r = RegistreApprentissage(
+                File(dir, "index.json"),
+                { true },
+                { distant },
+                { raw ->
+                    if (indisponible) throw java.io.IOException("coffre indisponible")
+                    distant = raw
+                }
+            )
+            assertThrows(java.io.IOException::class.java) {
+                r.creer("habit", "Préférence vocale", "Réponse vocale concise", "conversation")
+            }
+            assertNull(distant)
+            indisponible = false
+            assertEquals(1, JSONObject(r.snapshot()).getJSONArray("entries").length())
+            assertNotNull(distant)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
     fun registreEstMiroireDansLeCoffreEtRecharge() {
         val dir = Files.createTempDirectory("registre-coffre").toFile()
         try {
