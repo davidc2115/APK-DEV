@@ -76,4 +76,10 @@ class DiscordOrganisationTest {
             Discord.Perm.parseStrict("toutes_sauf_administrateur"))
         assertTrue(runCatching { Discord.Perm.parseStrict("permission_inconnue") }.isFailure)
     }
+
+    @Test fun masqueNumeriqueRefuseBitsInconnusEtValeursNegatives() {
+        assertEquals(Discord.Perm.VIEW_CHANNEL, Discord.Perm.parseStrict(Discord.Perm.VIEW_CHANNEL.toString()))
+        assertTrue(runCatching { Discord.Perm.parseStrict((1L shl 60).toString()) }.isFailure)
+        assertTrue(runCatching { Discord.Perm.parseStrict("-1") }.isFailure)
+    }
 }
