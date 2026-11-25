@@ -63,14 +63,24 @@ object AccesDistant {
             runCatching { Registre.marquerAbsents(app, (freebox.map { it.ip } + retenus.filter { !it.faible }.map { it.ip }).toSet()) }
         }
         val oublies = runCatching { Registre.purger(app) }.getOrDefault(0)
+        val redirections = if (freebox != null) runCatching { FreeboxOs.gerer(app, "redirections", JSONObject()) { _, _ -> true } }.getOrDefault("") else ""
+        val redirectionsDangereuses = lignesRedirectionsDangereuses(redirections)
         (FreeboxOs.ipPublique(app) ?: Reseau.ippPublique()).takeIf { it.isNotBlank() }?.let { Registre.ipPublique(app, it, reseau) }
         val enLigne = Registre.tous(app).filter { Registre.enLigne(it) }
         val wifi = enLigne.count { it.optString("lien") == "wifi" }; val cable = enLigne.count { it.optString("lien") == "ethernet" }
         return "✅ ${enLigne.size} appareil(s) connecté(s) sur $reseau" + (if (wifi + cable > 0) " — $wifi en Wi-Fi, $cable par câble" else "") +
             (if (freebox != null) " (liste de la Freebox)" else " (analyse du téléphone ; associe la Freebox pour une liste exacte)") +
             (if (neufs > 0) " · $neufs nouveau(x)" else "") + (if (oublies > 0) " · $oublies ancien(s) ou fantôme(s) oublié(s)" else "") + "." +
+            (if (redirectionsDangereuses.isNotEmpty()) "\n⚠️ Redirections Freebox existantes non HTTPS détectées (elles ne sont pas supprimées automatiquement) :\n" + redirectionsDangereuses.joinToString("\n") + "\nDésactive-les après vérification ou utilise le tunnel SSH/WireGuard." else "") +
             Reseau.diag.lines().firstOrNull { it.startsWith("⚠️") }?.let { "\n$it" }.orEmpty()
     }
+
+    /** Redirections actives dont le port LAN n'est pas un point d'entrée HTTPS autorisé. Lecture seule : aucune règle n'est supprimée. */
+    internal fun lignesRedirectionsDangereuses(texte: String): List<String> = texte.lineSequence().filter { ligne ->
+        ligne.trimStart().startsWith("🟢") &&
+            Regex("→\\s*[^:]+:(\\d+)").find(ligne)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?.let { !publicationDirecteAutorisee(it) } == true
+    }.toList()
 
     /** Port à ouvrir : celui demandé, sinon le service principal de l'appareil (ou null si plusieurs, à demander). */
     fun portPrincipal(e: JSONObject): Int? {
