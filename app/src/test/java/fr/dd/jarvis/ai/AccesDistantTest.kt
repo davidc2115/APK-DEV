@@ -6,6 +6,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class AccesDistantTest {
+    @Test fun portsAdministrationRestentDansUnTunnelSecurise() {
+        listOf(21, 22, 23, 445, 554, 1883, 3389, 5900, 5555, 631, 8009, 8123, 9100)
+            .forEach { assertEquals("Le port $it doit rester derrière un tunnel", true, AccesDistant.tunnelObligatoire(it)) }
+        assertEquals(false, AccesDistant.tunnelObligatoire(32400))
+        assertEquals(false, AccesDistant.tunnelObligatoire(443))
+    }
+
     @Test fun ports() {
         assertEquals(8123, AccesDistant.portExterne(8123, emptySet()))
         assertEquals(48123, AccesDistant.portExterne(8123, setOf(8123)))
