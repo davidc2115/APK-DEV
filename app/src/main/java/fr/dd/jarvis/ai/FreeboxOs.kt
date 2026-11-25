@@ -283,6 +283,14 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         return runCatching { avecSession(app) { s -> (json(app, "connection/", s) as? JSONObject)?.optString("ipv4")?.takeIf { it.isNotBlank() } } }.getOrNull()
     }
 
+    /** Refuse l'activation DMZ : elle expose tous les ports entrants de l'appareil. La désactivation reste permise. */
+    internal fun dmzActivationInterdite(etatBrute: String, cible: String): Boolean {
+        val etat = etatBrute.trim().lowercase()
+        val modification = cible.isNotBlank() || etat.isNotBlank()
+        val activer = !etat.startsWith("d") && etat != "off" && etat != "non"
+        return modification && activer
+    }
+
     /** Ports externes déjà redirigés (pour en choisir un libre). */
     fun portsRediriges(app: JarvisApp): Set<Int> = runCatching { avecSession(app) { s ->
         liste(json(app, "fw/redir/", s)).flatMap { (it.optInt("wan_port_start")..maxOf(it.optInt("wan_port_start"), it.optInt("wan_port_end"))).toList() }.toSet()
@@ -321,6 +329,13 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
     suspend fun gerer(app: JarvisApp, actionBrute: String, a: JSONObject, confirm: suspend (String, Boolean) -> Boolean): String {
         val action = actionBrute.trim().lowercase().replace(' ', '_').replace('-', '_')
         if (app.store.freeboxAppToken.value.isBlank()) return "JARVIS n'est pas encore associé à la Freebox : Réglages › Maison › Box Internet › Associer la Freebox (à valider sur l'écran de la box)."
+        if (action == "ajouter_redirection") {
+            val portLan = a.optString("port").filter { it.isDigit() }.toIntOrNull()
+            if (portLan != null && !AccesDistant.publicationDirecteAutorisee(portLan))
+                return "⛔ Redirection refusée : JARVIS n'ouvre directement que les services HTTPS connus (443, 8443, 9443). Pour les autres ports, utilise le tunnel SSH sécurisé ou WireGuard ; Plex utilise son accès distant authentifié."
+        }
+        if (action == "dmz" && dmzActivationInterdite(a.optString("etat"), a.optString("appareil").ifBlank { a.optString("ip") }))
+            return "⛔ Activation DMZ refusée : elle exposerait tous les ports de cet appareil sur Internet. Utilise une redirection HTTPS précise ou le tunnel SSH/VPN."
         // Confirmation AVANT d'ouvrir la session (pas de session ouverte pendant que l'utilisateur réfléchit).
         val question = when (action) {
             "ajouter_redirection" -> "Freebox : ouvrir le port ${a.optString("port_externe").ifBlank { a.optString("port") }} (${a.optString("protocole").ifBlank { "tcp" }}) vers ${a.optString("appareil").ifBlank { a.optString("ip") }}:${a.optString("port")} ?"
