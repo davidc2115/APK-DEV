@@ -164,8 +164,8 @@ class VoskWake(
         else when (exigence) { 1 -> 0.88; 2 -> 0.93; else -> 0.97 }
 
     companion object {
-        /** Tranche d'écoute continue pendant la musique, en voiture : 3 s (30 trames de 0,1 s). */
-        internal const val FENETRE_MUSIQUE = 30
+        /** Tranche d'écoute continue pendant la musique, en voiture : 1,5 s (15 trames de 0,1 s). */
+        internal const val FENETRE_MUSIQUE = 15
 
         /** Micro qui écoute « Jarvis » en ce moment (affiché dans Réglages › Écoute), null si aucune écoute. */
         @Volatile var microActuel: String? = null
@@ -315,7 +315,7 @@ class VoskWake(
     /**
      * Micro lu par trames de 0,1 s ; tant que c'est le silence (ou le bruit de fond habituel), rien n'est envoyé au
      * modèle (c'était lui qui consommait : il décodait le silence sans arrêt). Dès qu'un son dépasse le bruit de fond,
-     * les 0,6 s précédentes puis la suite sont analysées, jusqu'à 1,2 s de calme.
+     * les 0,6 s précédentes puis la suite sont analysées, jusqu'à 0,6 s de calme.
      */
     private inner class BoucleEconome(private val rec: Recognizer) {
         @Volatile private var actif = true
@@ -355,7 +355,7 @@ class VoskWake(
          * En voiture : micro plus sensible (gain automatique ×10 au plus, réduction du bruit, seuil plus bas : un « Jarvis »
          * presque chuchoté passe) et écoute CONTINUE sans porte, musique ou pas : la musique et le bruit de la route la
          * gardaient ouverte en permanence, la phrase reconnue ne finissait jamais et « Jarvis » n'était plus en tête →
-         * jamais détecté. Deux reconnaissances décalées de 1,5 s, remises à zéro toutes les 3 s, repèrent « Jarvis »
+         * jamais détecté. Deux reconnaissances décalées d'environ 0,75 s, remises à zéro toutes les 1,5 s, repèrent « Jarvis »
          * n'importe où dans ce qu'elles entendent.
          */
         private fun boucle(ar: android.media.AudioRecord, taille: Int) {
@@ -393,7 +393,7 @@ class VoskWake(
                     // Gain automatique partout (×5 au plus sur le téléphone, ×10 en voiture) : « Jarvis » dit doucement ou de loin.
                     val trame = if (voiture) gain.appliquer(buf, n, rms) else gainTel.appliquer(buf, n, rms)
                     if (musique) {
-                        // Écoute continue : chaque reconnaissance travaille sur des tranches de 3 s, la 2e décalée de 1,5 s.
+                        // Écoute continue : fenêtres de 1,5 s, avec une seconde reconnaissance décalée d'environ 0,75 s pour réduire la latence.
                         if (rec.acceptWaveForm(trame, n)) verifier(rec.result, nImporteOu = true)
                         if (++trames1 >= FENETRE_MUSIQUE) { verifier(rec.finalResult, nImporteOu = true); rec.reset(); trames1 = 0 }
                         rec2?.let { r2 ->
@@ -473,7 +473,7 @@ internal class GainAuto(private val cible: Double = 2500.0, private val max: Dou
 
 /**
  * Porte de silence de l'écoute économe (trames de 0,1 s). Elle suit le bruit de fond (pièce calme, ventilation, télé)
- * et ne s'ouvre que sur un son nettement plus fort ; elle se referme après 1,2 s de calme, ou au bout de 8 s d'un son
+ * et ne s'ouvre que sur un son nettement plus fort ; elle se referme après 0,6 s de calme, ou au bout de 8 s d'un son
  * continu (télé, musique) dont elle prend alors le niveau comme nouveau bruit de fond.
  */
 internal class PorteVocale {
@@ -481,7 +481,7 @@ internal class PorteVocale {
 
     companion object {
         const val PRE_ROULEMENT = 6     // 0,6 s gardées avant l'ouverture (début du mot)
-        const val MAINTIEN = 12         // 1,2 s de calme avant de refermer
+        const val MAINTIEN = 6          // 0,6 s de calme avant de refermer
         const val DUREE_MAX = 80        // 8 s de son continu au plus
 
         fun rms(b: ShortArray, n: Int): Double {
