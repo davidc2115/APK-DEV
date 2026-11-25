@@ -192,7 +192,7 @@ object Horloge {
         return true
     }
 
-    internal fun estPaquetHorloge(pkg: String?): Boolean = pkg in setOf(
+    internal fun estPaquetHorloge(pkg: String?): Boolean = pkg != null && pkg in setOf(
         "com.android.deskclock", "com.miui.clock", "com.xiaomi.clock", "com.google.android.deskclock"
     )
 
