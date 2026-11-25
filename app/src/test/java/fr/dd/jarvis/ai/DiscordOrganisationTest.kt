@@ -74,6 +74,8 @@ class DiscordOrganisationTest {
             Discord.Perm.parseStrict("voir le salon, envoyer des messages"))
         assertEquals(Discord.Perm.TOUT_SAUF_ADMINISTRATEUR,
             Discord.Perm.parseStrict("toutes_sauf_administrateur"))
+        assertEquals(Discord.Perm.VIEW_CHANNEL or Discord.Perm.SEND_MESSAGES,
+            Discord.Perm.parseStrict("voir le salon\\nenvoyer_messages"))
         assertTrue(runCatching { Discord.Perm.parseStrict("permission_inconnue") }.isFailure)
     }
 
