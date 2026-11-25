@@ -164,8 +164,8 @@ class VoskWake(
         else when (exigence) { 1 -> 0.88; 2 -> 0.93; else -> 0.97 }
 
     companion object {
-        /** Tranche d'écoute continue pendant la musique, en voiture : 1,5 s (15 trames de 0,1 s). */
-        internal const val FENETRE_MUSIQUE = 15
+        /** Tranche d'écoute continue pendant la musique, en voiture : 1,5 s (30 trames de 0,05 s). */
+        internal const val FENETRE_MUSIQUE = 30
 
         /** Micro qui écoute « Jarvis » en ce moment (affiché dans Réglages › Écoute), null si aucune écoute. */
         @Volatile var microActuel: String? = null
@@ -334,7 +334,7 @@ class VoskWake(
     }.getOrNull()
 
     /**
-     * Micro lu par trames de 0,1 s ; tant que c'est le silence (ou le bruit de fond habituel), rien n'est envoyé au
+     * Micro lu par trames de 0,05 s ; tant que c'est le silence (ou le bruit de fond habituel), rien n'est envoyé au
      * modèle (c'était lui qui consommait : il décodait le silence sans arrêt). Dès qu'un son dépasse le bruit de fond,
      * les 0,6 s précédentes puis la suite sont analysées, jusqu'à 0,6 s de calme.
      */
@@ -346,7 +346,7 @@ class VoskWake(
 
         @android.annotation.SuppressLint("MissingPermission")
         fun demarrer(): Boolean {
-            val taille = 1600   // 0,1 s à 16 kHz
+            val taille = 800   // 0,05 s à 16 kHz : réduit l'attente maximale avant décodage
             val min = android.media.AudioRecord.getMinBufferSize(16000, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
             val ar = try {
                 android.media.AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000,
@@ -495,7 +495,7 @@ internal class GainAuto(private val cible: Double = 2500.0, private val max: Dou
 }
 
 /**
- * Porte de silence de l'écoute économe (trames de 0,1 s). Elle suit le bruit de fond (pièce calme, ventilation, télé)
+ * Porte de silence de l'écoute économe (trames de 0,05 s). Elle suit le bruit de fond (pièce calme, ventilation, télé)
  * et ne s'ouvre que sur un son nettement plus fort ; elle se referme après 0,6 s de calme, ou au bout de 8 s d'un son
  * continu (télé, musique) dont elle prend alors le niveau comme nouveau bruit de fond.
  */
@@ -503,9 +503,9 @@ internal class PorteVocale {
     enum class Decision { IGNORER, OUVRIR, CONTINUER, FERMER }
 
     companion object {
-        const val PRE_ROULEMENT = 6     // 0,6 s gardées avant l'ouverture (début du mot)
-        const val MAINTIEN = 6          // 0,6 s de calme avant de refermer
-        const val DUREE_MAX = 80        // 8 s de son continu au plus
+        const val PRE_ROULEMENT = 12    // 0,6 s gardées avant l'ouverture (début du mot)
+        const val MAINTIEN = 12         // 0,6 s de calme avant de refermer
+        const val DUREE_MAX = 160       // 8 s de son continu au plus
 
         fun rms(b: ShortArray, n: Int): Double {
             var somme = 0.0
