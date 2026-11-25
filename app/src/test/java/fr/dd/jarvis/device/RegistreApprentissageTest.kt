@@ -338,4 +338,32 @@ class RegistreApprentissageTest {
             assertFalse(entries.getJSONObject(1).has("manifest"))
         } finally { dir.deleteRecursively() }
     }
+
+    @Test
+    fun manifesteRefuseLesContenusTropLongsAvantFiltrage() {
+        val dir = Files.createTempDirectory("registre-manifeste-longueurs").toFile()
+        try {
+            val r = registre(dir)
+            val source = r.creer("skill", "Skill source trop longue", "Proposition", "revue")
+            assertThrows(IllegalArgumentException::class.java) {
+                r.declarerManifest(source, "1.0.0", "x".repeat(500) + " api_key=supersecret",
+                    emptyList(), "low", "Vérifier le résultat en lecture seule sans action externe.")
+            }
+
+            val plan = r.creer("tool", "Outil plan trop long", "Proposition", "revue")
+            assertThrows(IllegalArgumentException::class.java) {
+                r.declarerManifest(plan, "1.0.0", "catalogue interne", emptyList(), "low",
+                    "x".repeat(1500) + " password=supersecret")
+            }
+
+            val dependency = r.creer("tool", "Outil dépendance trop longue", "Proposition", "revue")
+            assertThrows(IllegalArgumentException::class.java) {
+                r.declarerManifest(dependency, "1.0.0", "catalogue interne",
+                    listOf("x".repeat(100) + " api_key=supersecret"), "low",
+                    "Vérifier le résultat en lecture seule sans action externe.")
+            }
+            val entries = JSONObject(r.snapshot()).getJSONArray("entries")
+            for (i in 0 until entries.length()) assertFalse(entries.getJSONObject(i).has("manifest"))
+        } finally { dir.deleteRecursively() }
+    }
 }
