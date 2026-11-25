@@ -65,6 +65,8 @@ object AccesDistant {
         val oublies = runCatching { Registre.purger(app) }.getOrDefault(0)
         val redirections = if (freebox != null) runCatching { FreeboxOs.gerer(app, "redirections", JSONObject()) { _, _ -> true } }.getOrDefault("") else ""
         val redirectionsDangereuses = lignesRedirectionsDangereuses(redirections)
+        val dmzEtat = if (freebox != null) runCatching { FreeboxOs.gerer(app, "dmz", JSONObject()) { _, _ -> true } }.getOrDefault("") else ""
+        val dmzDejaActive = dmzActive(dmzEtat)
         (FreeboxOs.ipPublique(app) ?: Reseau.ippPublique()).takeIf { it.isNotBlank() }?.let { Registre.ipPublique(app, it, reseau) }
         val enLigne = Registre.tous(app).filter { Registre.enLigne(it) }
         val wifi = enLigne.count { it.optString("lien") == "wifi" }; val cable = enLigne.count { it.optString("lien") == "ethernet" }
@@ -72,8 +74,11 @@ object AccesDistant {
             (if (freebox != null) " (liste de la Freebox)" else " (analyse du téléphone ; associe la Freebox pour une liste exacte)") +
             (if (neufs > 0) " · $neufs nouveau(x)" else "") + (if (oublies > 0) " · $oublies ancien(s) ou fantôme(s) oublié(s)" else "") + "." +
             (if (redirectionsDangereuses.isNotEmpty()) "\n⚠️ Redirections Freebox existantes non HTTPS détectées (elles ne sont pas supprimées automatiquement) :\n" + redirectionsDangereuses.joinToString("\n") + "\nDésactive-les après vérification ou utilise le tunnel SSH/WireGuard." else "") +
+            (if (dmzDejaActive) "\n⚠️ " + dmzEtat + " : tous les ports entrants sont exposés. Dis « désactive la DMZ » pour fermer cet accès." else "") +
             Reseau.diag.lines().firstOrNull { it.startsWith("⚠️") }?.let { "\n$it" }.orEmpty()
     }
+
+    internal fun dmzActive(texte: String): Boolean = texte.trimStart().startsWith("DMZ : activée")
 
     /** Redirections actives dont le port LAN n'est pas un point d'entrée HTTPS autorisé. Lecture seule : aucune règle n'est supprimée. */
     internal fun lignesRedirectionsDangereuses(texte: String): List<String> = texte.lineSequence().filter { ligne ->
