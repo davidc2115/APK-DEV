@@ -169,16 +169,10 @@ object Horloge {
         }
     }
 
+    /** Aucune suppression d'alarme interne : seul le réveil de l'Horloge native est concerné. */
     fun supprimerAlarme(c: Context, heure: String, libelle: String): String {
-        val l = load(c)
-        val m = Regex("(\\d{1,2})\\s*[:hH]\\s*(\\d{0,2})").find(heure)
-        val cibles = l.filter { it.optString("kind") == "alarm" && (
-            (m != null && it.optInt("h") == m.groupValues[1].toInt() && it.optInt("m") == (m.groupValues[2].toIntOrNull() ?: 0)) ||
-            (libelle.isNotBlank() && it.optString("label").contains(libelle, true)) || (m == null && libelle.isBlank())) }
-        if (cibles.isEmpty()) return "Aucune alarme ne correspond."
-        cibles.forEach { annuler(c, it.getInt("id")) }
-        save(c, l.filter { it !in cibles })
-        return "🗑️ ${cibles.size} alarme(s) supprimée(s)."
+        if (heure.isBlank() && libelle.isBlank()) return "Précise l'heure ou le libellé exact du réveil natif à supprimer."
+        return "La suppression du réveil natif Xiaomi en arrière-plan n'est pas encore prise en charge de façon vérifiable. Aucun réveil interne n'a été touché et aucune action n'a été lancée."
     }
 
     private fun annuler(c: Context, id: Int) { runCatching { am(c).cancel(pi(c, id, ACT_FIRE)) }; runCatching { nm(c).cancel(id) } }
@@ -253,8 +247,6 @@ object Horloge {
                 .format(java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm:ss"))
         } ?: "aucune alarme système"
         val origine = nextInfo?.showIntent?.creatorPackage ?: "inconnue"
-        val chrono = prefs(c).getLong("chrono", 0L)
-        val saved = load(c)
         return buildString {
             appendLine("Diagnostic Horloge JARVIS")
             appendLine("Android API : ${android.os.Build.VERSION.SDK_INT}")
@@ -262,8 +254,6 @@ object Horloge {
             appendLine("Shizuku : ${if (!ShizukuShell.installed(c)) "non installé" else if (!ShizukuShell.running()) "installé, non démarré" else if (!ShizukuShell.granted()) "démarré, accès JARVIS refusé" else "prêt"}")
             appendLine("Notifications : ${if (notifications) "autorisées" else "bloquées"}")
             appendLine("Prochaine alarme système : $next · application propriétaire : $origine")
-            appendLine("Alarmes/minuteurs JARVIS internes : ${saved.size} (ce nombre ne représente pas la liste de l'Horloge Xiaomi)")
-            appendLine("Chronomètre JARVIS : ${if (chrono == 0L) "arrêté" else "actif depuis " + formater(System.currentTimeMillis() - chrono)}")
             appendLine()
             append(diagnosticHorlogeNative(c))
         }
@@ -272,11 +262,14 @@ object Horloge {
     /** Alarmes et minuteurs enregistrés (page « Rappels et automatisations ») : {id, kind, at, label, days}. */
     fun elements(c: Context): List<JSONObject> = load(c)
 
+    /** Android ne permet de lire publiquement que la prochaine alarme système, pas toute la liste Xiaomi. */
     fun liste(c: Context): String {
-        val f = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM HH:mm", java.util.Locale.FRENCH)
-        val l = load(c).sortedBy { it.optLong("at") }
-        if (l.isEmpty()) return "Aucune alarme ni minuteur interne JARVIS en cours. Cette liste ne consulte pas les réveils natifs Xiaomi ; utilise horloge_diagnostic pour connaître uniquement la prochaine alarme système."
-        return "Alarmes et minuteurs internes JARVIS uniquement (pas la liste native Xiaomi) :\n" + l.joinToString("\n") { (if (it.optString("kind") == "alarm") "⏰ " else "⏳ ") + java.time.Instant.ofEpochMilli(it.optLong("at")).atZone(ZoneId.systemDefault()).format(f) + (it.optString("label").takeIf { s -> s.isNotBlank() }?.let { s -> " — $s" } ?: "") }
+        val next = am(c).nextAlarmClock
+            ?: return "Aucune prochaine alarme système n'est signalée par Android. Jarvis ne dispose pas d'une API publique permettant de lister toutes les alarmes de l'Horloge Xiaomi."
+        val heure = java.time.Instant.ofEpochMilli(next.triggerTime).atZone(ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM à HH:mm", java.util.Locale.FRENCH))
+        val origine = next.showIntent?.creatorPackage ?: "application Horloge non identifiée"
+        return "Prochaine alarme native signalée par Android : $heure · application propriétaire : $origine. Android ne fournit pas à Jarvis l'accès public à la liste complète des réveils Xiaomi."
     }
 
     // ---- Chronomètre natif : Android ne définit pas d'action publique standard pour démarrer le chrono.
