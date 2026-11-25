@@ -30,10 +30,12 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         candidates.clear()
         // Obsidian et la copie locale peuvent être momentanément désynchronisés :
         // fusionner les preuves évite de perdre un apprentissage récent au redémarrage.
-        val sources = listOfNotNull(
-            runCatching { obsidian.read(FOLDER, "Apprentissage en cours.md") }.getOrNull(),
-            runCatching { habitsFile.takeIf { it.exists() }?.readText() }.getOrNull()
-        ).distinct()
+        // Comme pour la mémoire principale, une erreur SAF ne signifie pas « journal absent ».
+        // Si le coffre est configuré mais inaccessible, load() doit échouer et rester réessayable :
+        // ne jamais valider un apprentissage incomplet à partir de la seule copie locale.
+        val note = obsidian.lireAvecDateStrict(FOLDER, "Apprentissage en cours.md")?.first
+        val copieLocale = habitsFile.takeIf { it.isFile }?.readText()
+        val sources = listOfNotNull(note, copieLocale).distinct()
         sources.forEach { raw ->
             runCatching {
                 val json = JSONObject(raw)
