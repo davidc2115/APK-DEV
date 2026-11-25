@@ -223,13 +223,19 @@ object Horloge {
         }
         appendLine("Horloge native installée : ${trouves.joinToString(" ; ").ifBlank { "aucun paquet connu détecté" }}")
         val service = fr.dd.jarvis.service.JarvisAccessibilityService.instance
-        val ecran = runCatching { service?.readScreen().orEmpty() }.getOrDefault("")
-        val pkgActif = Regex("APPLICATION AU PREMIER PLAN : ([^\\n]+)").find(ecran)?.groupValues?.get(1)?.trim()
+        // Vérifie d'abord uniquement le paquet de la fenêtre : ne parcourt pas l'arbre d'une autre application.
+        val pkgActif = runCatching { service?.activePackageName() }.getOrNull()
         appendLine("Accessibilité JARVIS : ${if (service == null) "inactive ou non connectée" else "connectée"}")
         appendLine("Fenêtre active : ${pkgActif ?: "non accessible"}")
         if (estPaquetHorloge(pkgActif)) {
-            appendLine("Écran Horloge lu sans interaction :")
-            append(ecran.take(7000))
+            val ecran = runCatching { service?.readScreen().orEmpty() }.getOrDefault("")
+            val pkgRelu = Regex("APPLICATION AU PREMIER PLAN : ([^\\n]+)").find(ecran)?.groupValues?.get(1)?.trim()
+            if (estPaquetHorloge(pkgRelu)) {
+                appendLine("Écran Horloge lu sans interaction :")
+                append(ecran.take(7000))
+            } else {
+                appendLine("La fenêtre a changé pendant le diagnostic ; aucun contenu d'écran n'a été conservé.")
+            }
         } else {
             appendLine("Horloge non affichée : aucun écran n'a été ouvert et aucune action n'a été effectuée.")
         }
