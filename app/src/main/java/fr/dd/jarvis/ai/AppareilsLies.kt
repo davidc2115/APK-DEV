@@ -73,7 +73,7 @@ object AppareilsLies {
                 ?: ouverts.firstOrNull { it.startsWith("http") }
                 ?: if (haLan != null && Serveur.ipPrivee(haLan) && ssh && (haLan == s.sshHost.value.trim() || haLan == s.serveurIpLocale.value.trim())) "tunnel SSH par le serveur (dernier recours)" else null
             val autres = ouverts.filter { it != distant }
-            l += Lien("ha", "🏠", "Home Assistant", "lumières, volets, prises, chauffage, télé, positions — par son API avec le jeton",
+            l += Lien("ha", "🏠", "Home Assistant", "lumières, volets, prises, chauffage, téléviseurs, enceintes Google/Cast, annonces vocales TTS et notifications compatibles, positions — par son API avec le jeton",
                 local?.let { "$it (API + jeton)" } ?: "—",
                 (distant ?: "aucune adresse extérieure : dis « rends Home Assistant accessible à distance »") +
                     (if (autres.isNotEmpty()) " · aussi : ${autres.joinToString(", ")}" else ""),
