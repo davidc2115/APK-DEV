@@ -118,15 +118,23 @@ object HomeAssistantDashboard {
         } catch (annulation: kotlinx.coroutines.CancellationException) {
             throw annulation
         } catch (e: Exception) {
+            // Distinguer le résultat du rollback par le flot de contrôle, jamais par le texte d'une exception.
             try {
                 save(s, path, ancienne)
-                throw IllegalStateException("Échec de la modification Lovelace : ${e.message ?: "erreur inconnue"}. Configuration précédente restaurée.", e)
             } catch (annulation: kotlinx.coroutines.CancellationException) {
                 throw annulation
             } catch (rollback: Exception) {
-                if (rollback.message?.contains("Configuration précédente restaurée") == true) throw rollback
-                throw IllegalStateException("Échec de la modification Lovelace : ${e.message ?: "erreur inconnue"}. La restauration automatique a échoué : ${rollback.message ?: "erreur inconnue"}. La sauvegarde locale reste disponible.", e)
+                throw IllegalStateException(
+                    "Échec de la modification Lovelace : ${e.message ?: "erreur inconnue"}. " +
+                        "La restauration automatique a échoué : ${rollback.message ?: "erreur inconnue"}. " +
+                        "La sauvegarde locale reste disponible.",
+                    e
+                )
             }
+            throw IllegalStateException(
+                "Échec de la modification Lovelace : ${e.message ?: "erreur inconnue"}. Configuration précédente restaurée.",
+                e
+            )
         }
     }
 
