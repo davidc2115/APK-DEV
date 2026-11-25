@@ -313,14 +313,14 @@ class ToolBox(
         put(tool("alarme_creer", "Règle une alarme (sonnerie répétée jusqu'à l'arrêt) SANS ouvrir aucune application ; visible dans la barre d'état.",
             mapOf("heure" to prop("Heure au format HH:MM (24 h)."), "libelle" to prop("Nom de l'alarme (optionnel)."),
                 "jours" to prop("Répétition (optionnel) : « lun mar ven », « semaine », « tous les jours ». Vide = une seule fois.")), listOf("heure")))
-        put(tool("alarme_supprimer", "Supprime une alarme de l'Horloge native. Aucune permission Android spéciale n'est nécessaire ; cela dépend du support de l'action standard DISMISS_ALARM par l'application Horloge installée. Si elle ne le prend pas en charge, ouvre sa liste pour une suppression manuelle.",
+        put(tool("alarme_supprimer", "Désactive/supprime une alarme native uniquement si l'action standard est prise en charge et confirmable. Si le résultat n'est pas vérifiable, ne rien modifier et ne pas ouvrir l'Horloge automatiquement.",
             mapOf("heure" to prop("Heure de l'alarme (optionnel)."), "libelle" to prop("Libellé de l'alarme (optionnel)."))))
-        put(tool("alarme_modifier", "Modifie un réveil existant sans créer un doublon. Ne jamais appeler alarme_creer pour une demande de modification. Si l'édition exacte et vérifiable n'est pas disponible, ne rien modifier et ne pas ouvrir l'Horloge.",
+        put(tool("alarme_modifier", "Modifie uniquement le réveil existant explicitement ciblé. Ne jamais appeler alarme_creer ni supprimer/recréer pour une modification. Si l'édition et la relecture de vérification ne sont pas disponibles, ne rien modifier et ne pas ouvrir l'Horloge. horloge_diagnostic peut lire l'écran si l'utilisateur a déjà ouvert l'Horloge lui-même.",
             mapOf("ancienne_heure" to prop("Heure actuelle HH:MM de l'alarme à remplacer."), "ancien_libelle" to prop("Libellé actuel (optionnel, si l'heure n'est pas connue)."), "nouvelle_heure" to prop("Nouvelle heure HH:MM."), "nouveau_libelle" to prop("Nouveau libellé (optionnel)."), "jours" to prop("Répétition de la nouvelle alarme : lun, mar, semaine, tous les jours… (optionnel).")), listOf("nouvelle_heure")))
         put(tool("minuteur_creer", "Lance un minuteur avec compte à rebours en notification, SANS ouvrir aucune application.",
             mapOf("secondes" to prop("Durée totale en secondes (ex. 10 min = 600)."), "libelle" to prop("Nom du minuteur (optionnel).")), listOf("secondes")))
         put(tool("chronometre", "Chronomètre sans ouvrir d'application (notification avec compteur).", mapOf("action" to prop("demarrer (défaut) | arreter | etat"))))
-        put(tool("alarmes_liste", "Liste les alarmes et minuteurs en cours."))
+        put(tool("alarmes_liste", "Liste les alarmes et minuteurs internes de JARVIS uniquement ; ne prétend pas lire toutes les alarmes natives de l'Horloge Xiaomi. Pour l'alarme système suivante et un diagnostic de l'Horloge, utilise horloge_diagnostic. "))
         put(tool("rappel_creer", "Programme un RAPPEL (« rappelle-moi de … ») : notification sur le téléphone à l'heure exacte, avec « Fait » et « Plus tard », une fois ou en répétition. À utiliser pour tout rappel simple, plutôt qu'une alarme (réservée au réveil / à une sonnerie) ou un évènement d'agenda (sauf demande explicite). Termine ta réponse par le lien renvoyé.",
             mapOf(
                 "texte" to prop("Ce qu'il faut rappeler, formulé pour l'utilisateur (ex. « Appeler Martin pour le devis »)."),
@@ -331,7 +331,7 @@ class ToolBox(
             mapOf("passes" to prop("« true » pour inclure ce qui s'est déclenché ces 7 derniers jours."))))
         put(tool("rappel_supprimer", "Supprime un ou plusieurs rappels à venir dont le texte contient les mots donnés (demande confirmation s'il y en a plusieurs).",
             mapOf("texte" to prop("Mots du rappel à supprimer (ex. « Martin »).")), listOf("texte")))
-         put(tool("horloge_diagnostic", "Vérifie les alarmes, minuteurs, notifications et Shizuku en cas de panne."))
+         put(tool("horloge_diagnostic", "Diagnostic en lecture seule : prochaine alarme système, paquet/version de l'Horloge, visibilité/export du fournisseur d'alarmes, état Shizuku/accessibilité et écran Xiaomi Clock s'il est DÉJÀ au premier plan. N'ouvre jamais l'Horloge et ne modifie aucune alarme."))
         put(tool("applis_musique", "Liste les applications de musique RÉELLEMENT installées sur le téléphone (jamais une liste inventée)."))
         put(tool("jouer_musique", "Lance la lecture d'un titre, artiste ou playlist dans une application de musique du téléphone, en arrière-plan. Si l'application n'est pas précisée et qu'aucune n'est mémorisée et qu'il y en a plusieurs d'installées, l'outil demande laquelle (liste réelle) : repose alors la question à l'utilisateur (et s'il veut « toujours » ou « une seule fois »), puis rappelle l'outil.",
             mapOf("requete" to prop("Titre, artiste ou style à écouter."), "appli" to prop("Nom exact d'une application RENVOYÉE PAR applis_musique ou déjà mémorisée (jamais une application supposée sans l'avoir vérifiée)."), "toujours" to prop("« true » pour toujours utiliser cette application pour la musique."))))
