@@ -88,7 +88,8 @@ object CarBridge {
     fun repondre(ctx: Context, texte: String, apres: (() -> Unit)? = null) {
         val app = ctx.applicationContext as JarvisApp
         replyScope.launch {
-            replyMutex.withLock {
+            try {
+                replyMutex.withLock {
             withContext(Dispatchers.Main) {
                 app.chatCharger()
                 if (contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { ajouter(it) }
@@ -98,14 +99,20 @@ object CarBridge {
             val rep = try {
                 // Les opérations qui exigent une confirmation explicite restent bloquées depuis l’interface voiture.
                 Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(contexte(), vocal = true) { }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Throwable) { "Désolé, je n’ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
             val propre = rep.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim().ifBlank { "C’est fait." }
             ajouter(ChatMsg(false, propre))
             post(ctx, propre)
             withContext(Dispatchers.Main) {
                 app.chatAjouter(ChatMsg(false, propre))
-                apres?.invoke()
             }
+                }
+            } finally {
+                // Le BroadcastReceiver a appelé goAsync() : libérer son PendingResult même
+                // si le tour vocal est annulé pendant une réponse ou une attente d'outil.
+                runCatching { apres?.invoke() }
             }
         }
     }
