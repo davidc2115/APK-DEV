@@ -12,6 +12,9 @@ import java.io.File
  */
 class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
+    /** Indique si l'utilisateur a choisi un coffre externe comme source de référence. */
+    fun coffreConfigure(): Boolean = store.obsidianUri.value.isNotBlank()
+
     private fun safe(name: String, def: String) =
         name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { def }
 
