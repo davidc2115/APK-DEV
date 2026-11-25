@@ -384,12 +384,16 @@ object PontMcp {
                     .toString())
             }
             chemin == "/memoire/jarvis" && r.methode == "GET" -> {
-                val lecture = runCatching { f.memoireJarvis() }
-                if (lecture.isSuccess) repondre(s, 200, lecture.getOrThrow(), type = "text/plain")
-                else repondre(s, 500, JSONObject()
-                    .put("error", "jarvis_memory_unavailable")
-                    .put("message", lecture.exceptionOrNull()?.message ?: "Impossible de lire la mémoire Jarvis.")
-                    .toString())
+                try {
+                    repondre(s, 200, f.memoireJarvis(), type = "text/plain")
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    repondre(s, 500, JSONObject()
+                        .put("error", "jarvis_memory_unavailable")
+                        .put("message", e.message ?: "Impossible de lire la mémoire Jarvis.")
+                        .toString())
+                }
             }
             chemin == "/memoire/hermes-capacites" && r.methode == "POST" -> {
                 val erreur = runCatching { f.capacitesHermes(r.corps) }.exceptionOrNull()
