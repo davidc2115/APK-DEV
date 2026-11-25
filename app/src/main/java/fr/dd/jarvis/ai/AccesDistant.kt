@@ -18,7 +18,12 @@ object AccesDistant {
         631 to "Imprimante (IPP)", 9100 to "Imprimante", 8009 to "Chromecast", 21 to "FTP",
     )
     /** Services dangereux à ouvrir sur Internet (préférer le VPN WireGuard de la Freebox). */
-    private val SENSIBLES = setOf(22, 3389, 5900, 445, 5555, 21, 1883, 631, 9100, 8009)
+    private val SENSIBLES = setOf(22, 3389, 5900, 445, 5555, 21, 1883, 631, 9100, 8009, 8123)
+
+    /** Services qui ne doivent JAMAIS être publiés tels quels : contrôle distant via tunnel SSH ou VPN uniquement. */
+    private val TUNNEL_OBLIGATOIRE = setOf(21, 22, 23, 445, 554, 1883, 3389, 5900, 5555, 631, 8009, 8123, 9100)
+
+    internal fun tunnelObligatoire(port: Int): Boolean = port in TUNNEL_OBLIGATOIRE
 
     fun service(port: Int) = SERVICES[port] ?: "port $port"
 
@@ -91,6 +96,7 @@ object AccesDistant {
         val p = port ?: portPrincipal(e)
             ?: return "CHOIX_REQUIS : quel service de « $nom » rendre accessible ? Ports ouverts : " +
                 (if (ports.isEmpty()) "aucun détecté (précise le port)" else ports.joinToString { "$it (${service(it)})" }) + "."
+        if (tunnelObligatoire(p)) return "⛔ Le port $p (${service(p)}) ne sera pas redirigé directement sur Internet : il expose une interface d’administration ou un protocole insuffisamment protégé. Utilise le tunnel SSH sécurisé du serveur ou le VPN WireGuard. Pour Home Assistant, configure une URL distante HTTPS dans Réglages › Maison › Home Assistant."
         val publique = (FreeboxOs.ipPublique(app) ?: Reseau.ippPublique()).ifBlank { Registre.derniereIpPublique(app) }
         if (app.store.freeboxAppToken.value.isBlank())
             return "Pour ouvrir l'accès automatiquement, associe d'abord JARVIS à la Freebox (Réglages › Maison › Box Internet). " +
