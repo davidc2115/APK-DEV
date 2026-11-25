@@ -288,4 +288,28 @@ class RegistreApprentissageTest {
             assertEquals("2.1.0", item.getJSONObject("manifest").getString("version"))
         } finally { dir.deleteRecursively() }
     }
+
+    @Test
+    fun manifesteRefuseEntreeTerminaleEtDependancesExcessives() {
+        val dir = Files.createTempDirectory("registre-manifeste-limites").toFile()
+        try {
+            val r = registre(dir)
+            val refuse = r.creer("skill", "Skill abandonné", "Proposition refusée", "revue")
+            r.changerEtat(refuse, RegistreApprentissage.ETAT_REJECTED, false)
+            assertThrows(IllegalStateException::class.java) {
+                r.declarerManifest(refuse, "1.0.0", "catalogue interne", emptyList(), "low",
+                    "Vérifier les résultats simulés sans aucune action externe.")
+            }
+
+            val skill = r.creer("tool", "Outil dépendances", "Proposition de test", "revue")
+            assertThrows(IllegalArgumentException::class.java) {
+                r.declarerManifest(skill, "../1.0", "catalogue interne",
+                    (1..21).map { "dependance-$it" }, "low",
+                    "Vérifier les résultats simulés sans aucune action externe.")
+            }
+            val entries = JSONObject(r.snapshot()).getJSONArray("entries")
+            assertFalse(entries.getJSONObject(0).has("manifest"))
+            assertFalse(entries.getJSONObject(1).has("manifest"))
+        } finally { dir.deleteRecursively() }
+    }
 }
