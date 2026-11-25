@@ -43,6 +43,7 @@ class RegistreApprentissageMigrationTest {
         } finally {
             dir.deleteRecursively()
         }
+    }
 
     @Test
     fun migrationReprendApresEchecDuMiroirSansReimporter() {
@@ -72,6 +73,5 @@ class RegistreApprentissageMigrationTest {
         } finally {
             dir.deleteRecursively()
         }
-    }
     }
 }
