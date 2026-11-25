@@ -90,8 +90,18 @@ object ShizukuShell {
                 if (!p.waitFor(500, TimeUnit.MILLISECONDS)) p.destroyForcibly()
                 p.waitFor(2, TimeUnit.SECONDS)
             }
-            val out = runCatching { stdout.get(2, TimeUnit.SECONDS) }.getOrDefault("")
-            val err = runCatching { stderr.get(2, TimeUnit.SECONDS) }.getOrDefault("")
+            val out = try {
+                stdout.get(2, TimeUnit.SECONDS)
+            } catch (_: java.util.concurrent.TimeoutException) {
+                stdout.cancel(true)
+                ""
+            }
+            val err = try {
+                stderr.get(2, TimeUnit.SECONDS)
+            } catch (_: java.util.concurrent.TimeoutException) {
+                stderr.cancel(true)
+                ""
+            }
             val brut = listOf(out, err).filter { it.isNotBlank() }.joinToString("\n").trim()
             val texte = if (brut.length > LIMITE_SORTIE) brut.take(LIMITE_SORTIE) + "\n… (sortie totale limitée à $LIMITE_SORTIE caractères)" else brut
             val resultat = texte.ifEmpty { "(commande exécutée)" }
