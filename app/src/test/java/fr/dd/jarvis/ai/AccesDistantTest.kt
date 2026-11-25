@@ -15,9 +15,9 @@ class AccesDistantTest {
     }
 
     @Test fun inventaireSignaleLesAnciennesRedirectionsNonHttpsSansLesSupprimer() {
-        val texte = "🔀 Redirections de ports:\\n" +
-            "🟢 #1 TCP 8123 → 192.168.1.20:8123 (Home Assistant)\\n" +
-            "🟢 #2 TCP 443 → 192.168.1.10:443 (reverse proxy)\\n" +
+        val texte = "🔀 Redirections de ports:\n" +
+            "🟢 #1 TCP 8123 → 192.168.1.20:8123 (Home Assistant)\n" +
+            "🟢 #2 TCP 443 → 192.168.1.10:443 (reverse proxy)\n" +
             "⚪ #3 TCP 5555 → 192.168.1.30:5555 (ADB désactivé)"
         val dangereuses = AccesDistant.lignesRedirectionsDangereuses(texte)
         assertEquals(1, dangereuses.size)
