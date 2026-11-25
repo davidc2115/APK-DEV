@@ -10,7 +10,8 @@ class ServeurFastPathTest {
             "Mets le chauffage à 20 degrés", "Baisse le volume de la télé",
             "Ouvre le volet de la chambre", "Active la prise du bureau",
             "Affiche un message sur la télé du salon", "Envoie un message sur l’enceinte Google",
-            "Fais parler Google Home", "Diffuse une annonce sur Nest Audio")
+            "Fais parler Google Home", "Diffuse une annonce sur Nest Audio", "Fais une annonce sur Google Home",
+            "Montre un message sur la télé du salon")
             .forEach { assertTrue("$it devrait être simple", ServeurTools.actionMaisonSimple(it)) }
     }
 
@@ -21,7 +22,8 @@ class ServeurFastPathTest {
             "Configure une automatisation pour le poêle",
             "Liste les appareils Home Assistant indisponibles",
             "Cherche toutes les lampes du salon", "Affiche un message et allume la télé",
-            "Envoie un message puis baisse le volume de l’enceinte")
+            "Envoie un message puis baisse le volume de l’enceinte",
+            "Fais une annonce et allume la télé")
             .forEach { assertFalse("$it ne doit pas être simple", ServeurTools.actionMaisonSimple(it)) }
     }
 }
