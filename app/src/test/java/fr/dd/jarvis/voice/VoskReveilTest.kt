@@ -58,15 +58,15 @@ class VoskReveilTest {
         val porte = PorteVocale().apply { sensible = true }
         assertEquals(PorteVocale.Decision.IGNORER, porte.trame(100.0))
         assertEquals(PorteVocale.Decision.OUVRIR, porte.trame(300.0))
-        repeat(5) {
+        repeat(11) {
             assertEquals(PorteVocale.Decision.CONTINUER, porte.trame(100.0))
         }
         assertEquals(PorteVocale.Decision.FERMER, porte.trame(100.0))
-        assertEquals(6, PorteVocale.MAINTIEN)
+        assertEquals(12, PorteVocale.MAINTIEN)
     }
 
     @Test fun fenetresMusiquePlusCourtes() {
         // Une fenêtre de 1,5 s, chevauchée par la seconde reconnaissance.
-        assertEquals(15, VoskWake.FENETRE_MUSIQUE)
+        assertEquals(30, VoskWake.FENETRE_MUSIQUE)
     }
 }
