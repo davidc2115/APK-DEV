@@ -861,14 +861,16 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                     ToolResult("⚠️ Discord a accepté la réorganisation de « $gnom », mais Jarvis n’a pas pu relire la structure pour la vérifier : ${e.message ?: e.javaClass.simpleName}. Aucune catégorie n’a été supprimée.", direct = true)
                 } else {
                     var nettoyees = 0
-                    val echecsNettoyage = mutableListOf<String>()
+                    val conservees = mutableListOf<String>()
+                    val etatActuel = runCatching { tous(gid) }.getOrNull()
                     creees.values.toList().asReversed().forEach { id ->
-                        runCatching { Discord.salonSupprimer(app, id, "Nettoyage après échec de réorganisation Jarvis") }
-                            .onSuccess { nettoyees++ }
-                            .onFailure { echecsNettoyage += id }
+                        // Ne jamais supprimer une catégorie si Discord a malgré tout déplacé des salons dedans.
+                        val occupee = etatActuel?.any { it.optInt("type") != DiscordOrganisation.CATEGORIE && it.optString("parent_id") == id }
+                        if (etatActuel == null || occupee == true) conservees += id
+                        else runCatching { Discord.salonSupprimer(app, id, "Nettoyage après échec de réorganisation Jarvis") }.onSuccess { nettoyees++ }.onFailure { conservees += id }
                     }
-                    ToolResult("❌ Réorganisation non terminée sur « $gnom » : ${e.message ?: e.javaClass.simpleName}. Rien n’a été annoncé comme réorganisé. Catégories provisoires supprimées : $nettoyees/${creees.size}." +
-                        (if (echecsNettoyage.isNotEmpty()) " Nettoyage impossible pour les ID : ${echecsNettoyage.joinToString(", ")}." else ""), direct = true)
+                    ToolResult("❌ Réorganisation non terminée sur « $gnom » : ${e.message ?: e.javaClass.simpleName}. Catégories provisoires vides supprimées : $nettoyees/${creees.size}." +
+                        (if (conservees.isNotEmpty()) " Catégories conservées par sécurité (salons déplacés ou état non vérifiable) : ${conservees.joinToString(", ")}." else ""), direct = true)
                 }
             }
         }
