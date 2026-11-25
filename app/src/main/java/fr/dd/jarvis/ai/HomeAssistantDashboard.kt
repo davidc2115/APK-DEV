@@ -110,6 +110,26 @@ object HomeAssistantDashboard {
         s.command("lovelace/config/save", a)
     }
 
+    /** En cas d'échec de sauvegarde, tente de restaurer la configuration précédente.
+     * Une annulation de coroutine reste une annulation et n'est jamais transformée en erreur métier. */
+    private fun saveAvecRollback(s: Session, path: String, nouvelle: JSONObject, ancienne: JSONObject) {
+        try {
+            save(s, path, nouvelle)
+        } catch (annulation: kotlinx.coroutines.CancellationException) {
+            throw annulation
+        } catch (e: Exception) {
+            try {
+                save(s, path, ancienne)
+                throw IllegalStateException("Échec de la modification Lovelace : ${e.message ?: "erreur inconnue"}. Configuration précédente restaurée.", e)
+            } catch (annulation: kotlinx.coroutines.CancellationException) {
+                throw annulation
+            } catch (rollback: Exception) {
+                if (rollback.message?.contains("Configuration précédente restaurée") == true) throw rollback
+                throw IllegalStateException("Échec de la modification Lovelace : ${e.message ?: "erreur inconnue"}. La restauration automatique a échoué : ${rollback.message ?: "erreur inconnue"}. La sauvegarde locale reste disponible.", e)
+            }
+        }
+    }
+
     fun execute(app: JarvisApp, action: String, a: JSONObject): String {
         Session(app).use { s ->
             s.connect()
@@ -167,14 +187,14 @@ object HomeAssistantDashboard {
                     val old = config(s, path)
                     val replacement = JSONObject(raw)
                     if ((replacement.optJSONArray("views")?.length() ?: 0) < 1) return "Configuration refusée : au moins une vue est requise."
-                    backup(app, path, old); save(s, path, replacement)
+                    backup(app, path, old); saveAvecRollback(s, path, replacement, old)
                     return "Présentation de /$path remplacée. Une sauvegarde locale de l'ancienne version a été créée."
                 }
                 "carte_ajouter" -> {
                     if (path.isBlank()) return "url_path obligatoire."
                     val raw = a.optString("carte").trim()
                     if (raw.isBlank()) return "JSON de la carte requis."
-                    val c = config(s, path); val views = c.optJSONArray("views") ?: return "Aucune vue dans ce tableau."
+                    val c = config(s, path); val ancienne = JSONObject(c.toString()); val views = c.optJSONArray("views") ?: return "Aucune vue dans ce tableau."
                     if (views.length() == 0) return "Aucune vue disponible dans ce tableau : ajoute d'abord une vue avant d'y placer une carte."
                     val vi = a.optInt("vue", 0)
                     if (vi !in 0 until views.length()) return "Indice de vue invalide : ce tableau contient ${views.length()} vue(s), indices autorisés de 0 à ${views.length() - 1}."
@@ -195,16 +215,16 @@ object HomeAssistantDashboard {
                     } else {
                         (view.optJSONArray("cards") ?: JSONArray().also { view.put("cards", it) }).put(JSONObject(raw))
                     }
-                    save(s, path, c)
+                    saveAvecRollback(s, path, c, ancienne)
                     return "Carte ajoutée à la vue ${view.optString("title", vi.toString())} de /$path. Sauvegarde créée."
                 }
                 "vue_ajouter" -> {
                     if (path.isBlank()) return "url_path obligatoire."
                     val raw = a.optString("vue_json").trim()
                     if (raw.isBlank()) return "JSON de la nouvelle vue requis."
-                    val c = config(s, path); backup(app, path, c)
+                    val c = config(s, path); val ancienne = JSONObject(c.toString()); backup(app, path, c)
                     (c.optJSONArray("views") ?: JSONArray().also { c.put("views", it) }).put(JSONObject(raw))
-                    save(s, path, c)
+                    saveAvecRollback(s, path, c, ancienne)
                     return "Nouvelle vue ajoutée à /$path. Sauvegarde créée."
                 }
                 else -> return "Actions : lister, lire, creer, modifier, refaire, carte_ajouter, vue_ajouter, supprimer."
