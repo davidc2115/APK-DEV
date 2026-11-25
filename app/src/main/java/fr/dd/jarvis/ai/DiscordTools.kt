@@ -10,7 +10,7 @@ import org.json.JSONObject
 class DiscordTools(private val app: JarvisApp, private val confirm: suspend (String, Boolean) -> Boolean) {
 
     companion object {
-        val KEYWORDS = Regex("discord|r[ôo]le\\b|r[ôo]les\\b|mod[ée]rateur|mod[ée]ration|serveur discord|salon\\b|salons\\b|channels?\\b|cat[ée]gorie discord|cat[ée]gories? (de|des|du) salons?|lien d.invitation|invitations? (du|au) serveur", RegexOption.IGNORE_CASE)
+        val KEYWORDS = Regex("discord|r[ôo]le\\b|r[ôo]les\\b|mod[ée]rateur|mod[ée]ration|serveur discord|salon\\b|salons\\b|canaux?\\b|channels?\\b|cat[ée]gorie discord|cat[ée]gories? (de|des|du) salons?|r[ée]organis\\w*.*(salons?|canaux?|channels?|cat[ée]gories?)|permissions? discord|lien d.invitation|invitations? (du|au) serveur", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t) || DiscordNoms.cite(t)
         val NAMES = setOf(
             "discord_diagnostic", "discord_guildes", "discord_serveur_info", "discord_conseils_serveur", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
