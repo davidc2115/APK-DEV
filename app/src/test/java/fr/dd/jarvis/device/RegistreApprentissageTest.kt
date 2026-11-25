@@ -220,4 +220,26 @@ class RegistreApprentissageTest {
         } finally { dir.deleteRecursively() }
     }
 
+
+    @Test
+    fun permissionsSontRefuseesPourUnSkillRejeteOuRemplace() {
+        val dir = Files.createTempDirectory("registre-permissions-etat-terminal").toFile()
+        try {
+            val r = registre(dir)
+            val refuse = r.creer("skill", "Skill refusé", "Proposition refusée", "revue")
+            r.changerEtat(refuse, RegistreApprentissage.ETAT_REJECTED, false)
+            assertThrows(IllegalStateException::class.java) {
+                r.demanderPermissions(refuse, listOf("calendar:read"))
+            }
+
+            val remplace = r.creer("tool", "Outil remplacé", "Ancienne proposition", "revue")
+            r.changerEtat(remplace, RegistreApprentissage.ETAT_SUPERSEDED, false)
+            assertThrows(IllegalStateException::class.java) {
+                r.demanderPermissions(remplace, listOf("files:read"))
+            }
+            val entries = JSONObject(r.snapshot()).getJSONArray("entries")
+            assertFalse(entries.getJSONObject(0).has("requestedPermissions"))
+            assertFalse(entries.getJSONObject(1).has("requestedPermissions"))
+        } finally { dir.deleteRecursively() }
+    }
 }
