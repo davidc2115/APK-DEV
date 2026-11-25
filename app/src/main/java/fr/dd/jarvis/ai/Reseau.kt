@@ -144,14 +144,19 @@ object Reseau {
 
     private val PORTS = listOf(80, 443, 22, 445, 139, 9100, 631, 515, 8611, 8080, 8123, 5000, 554, 1883, 8009, 7000, 62078, 53, 23, 3389, 5900, 8000, 32400, 8096)
 
-    private fun typeDe(p: List<Int>, titre: String): String {
-        val t = titre.lowercase()
+    internal fun typeDe(p: List<Int>, titre: String, info: String = ""): String {
+        // Le port Cast 8009 est partagé par les téléviseurs/Chromecast ET les enceintes Google/Nest.
+        // Le nom d'instance mDNS (_googlecast._tcp) aide à distinguer une enceinte d'un écran.
+        val t = "$titre $info".lowercase()
+        val enceinteGoogle = Regex("google.?home|google.?nest|chromecast.?audio|nest.?audio|nest.?mini|nest.?hub|home.?mini|speaker|enceinte|haut.?parleur").containsMatchIn(t)
         return when {
             9100 in p || 631 in p || 515 in p || 8611 in p || listOf("printer", "imprim", "canon", "epson", "brother", "laserjet", "officejet", "pixma", "ecotank").any { t.contains(it) } -> "🖨️ imprimante"
             8123 in p || t.contains("home assistant") -> "🏠 Home Assistant"
             554 in p || t.contains("camera") || t.contains("hikvision") || t.contains("dahua") -> "📷 caméra"
             62078 in p -> "📱 iPhone/iPad"
-            8009 in p -> "📺 Chromecast / TV"
+            8009 in p && enceinteGoogle -> "🔊 enceinte Google / Nest"
+            8009 in p && Regex("chromecast|google.?tv|android.?tv|shield|freebox.?player|bravia").containsMatchIn(t) -> "📺 Chromecast / TV"
+            8009 in p -> "📡 appareil Google Cast"
             7000 in p -> "📺 AirPlay"
             32400 in p || 8096 in p -> "🎬 serveur média"
             445 in p && 22 !in p && 80 !in p -> "💻 PC Windows / NAS"
@@ -225,7 +230,7 @@ object Reseau {
         val icmpOk = java.util.concurrent.atomic.AtomicInteger(); val tcpOk = java.util.concurrent.atomic.AtomicInteger()
         val trouves = coroutineScope { hosts.map { h -> async { sonder(h, icmpOk, tcpOk) } }.awaitAll() }.filterNotNull()
         val upnp = runCatching { ssdp(ctx) }.getOrDefault(emptyMap())
-        val mdns = runCatching { decouvrir(ctx, listOf("_http._tcp", "_googlecast._tcp", "_airplay._tcp", "_smb._tcp", "_ssh._tcp", "_hap._tcp", "_workstation._tcp", "_ipp._tcp", "_ipps._tcp", "_printer._tcp", "_pdl-datastream._tcp", "_canon-bjnp1._tcp", "_companion-link._tcp", "_spotify-connect._tcp", "_fbx-api._tcp"), 3500) }.getOrDefault(emptyList()).groupBy({ it.host }, { it.nom })
+        val mdns = runCatching { decouvrir(ctx, listOf("_http._tcp", "_googlecast._tcp", "_airplay._tcp", "_smb._tcp", "_ssh._tcp", "_hap._tcp", "_workstation._tcp", "_ipp._tcp", "_ipps._tcp", "_printer._tcp", "_pdl-datastream._tcp", "_canon-bjnp1._tcp", "_companion-link._tcp", "_spotify-connect._tcp", "_fbx-api._tcp"), 3500) }.getOrDefault(emptyList()).groupBy({ it.host }, { "${it.nom} ${it.type}" })
         val parIp = trouves.associateBy { it.ip }.toMutableMap()
         for (ip in (upnp.keys + mdns.keys)) if (!parIp.containsKey(ip) && prive(ip)) parIp[ip] = Appareil(ip, nomHote(ip), emptyList(), "", "❔ appareil")
         diag = "Sous-réseau ${hosts.first().substringBeforeLast('.')}.0/$pref (${hosts.size} adresses testées, liées au Wi-Fi ${if (wifiNet != null) "✔" else "✘ (réseau actif par défaut)"}) · réponses ICMP : ${icmpOk.get()} · TCP : ${tcpOk.get()} · UPnP : ${upnp.size} · mDNS : ${mdns.size}"
@@ -238,8 +243,8 @@ object Reseau {
             trouves.filter { it.faible && it.ip != i.ip && !upnp.containsKey(it.ip) && !mdns.containsKey(it.ip) }.forEach { parIp.remove(it.ip) }
         }
         parIp.values.map { d ->
-            val info = (upnp[d.ip].orEmpty().ifBlank { mdns[d.ip]?.distinct()?.joinToString(", ").orEmpty() }).take(70)
-            d.copy(info = info, faible = d.faible && info.isBlank())
+            val info = listOf(upnp[d.ip], mdns[d.ip]?.distinct()?.joinToString(", ")).filterNotNull().map { it.trim() }.filter { it.isNotBlank() }.distinct().joinToString(" · ").take(100)
+            d.copy(info = info, type = typeDe(d.ports, d.titre, info), faible = d.faible && info.isBlank())
         }.sortedBy { a -> a.ip.split(".").map { it.toInt() }.fold(0L) { acc, x -> acc * 256 + x } }
     }
 
