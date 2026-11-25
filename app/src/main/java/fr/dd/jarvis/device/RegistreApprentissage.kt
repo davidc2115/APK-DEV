@@ -251,8 +251,8 @@ class RegistreApprentissage(
             val texte = preuves.optJSONObject(i)?.optString("content").orEmpty()
             if (texte.isBlank()) continue
             val normalise = java.text.Normalizer.normalize(texte.lowercase(), java.text.Normalizer.Form.NFD)
-                .replace(Regex("\\\\p{M}"), "")
-                .replace(Regex("[^\\\\p{L}\\\\p{N}]+"), " ")
+                .replace(Regex("\\p{M}"), "")
+                .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
                 .trim()
             if (normalise.isNotBlank()) contenusDistincts.add(empreinte(normalise))
         }
