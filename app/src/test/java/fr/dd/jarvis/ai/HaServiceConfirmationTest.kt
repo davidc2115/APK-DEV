@@ -24,6 +24,13 @@ class HaServiceConfirmationTest {
         assertTrue(Serveur.confirmeService("media_player", "volume_set", v, etat("on", JSONObject().put("volume_level", 0.35))))
     }
 
+    @Test fun appelSansEntiteConfirmeSeulementLAcceptationDeHomeAssistant() {
+        val r = Serveur.compteRenduSansEntite("tts", "speak")
+        assertTrue(r.contains("accepté par Home Assistant"))
+        assertTrue(r.contains("aucun état cible à relire"))
+        assertTrue(r.contains("n'est pas confirmé"))
+    }
+
     @Test fun compteRenduHonnete() {
         val ok = Serveur.compteRenduService("light", "turn_on", "light.salon", JSONObject(), etat("on", JSONObject().put("friendly_name", "Salon")))
         assertTrue(ok.startsWith("✅") && ok.contains("Salon"))
