@@ -246,13 +246,13 @@ class VoskWake(
             }
             return false
         }
+
+        /** Même validation sur les mots partiels Vosk : confiance, durée et position restent obligatoires. */
+        internal fun detectePartiel(mots: org.json.JSONArray?, seuil: Double, partout: Boolean = false): Boolean =
+            if (partout) contientMot(mots, seuil) else estReveil(mots, seuil)
     }
 
     private fun detecte(mots: org.json.JSONArray?) = if (partout) contientMot(mots, seuil()) else estReveil(mots, seuil())
-
-    /** Valide les mots partiels Vosk dès que leur durée et leur confiance sont suffisantes, sans attendre le silence. */
-    internal fun detectePartiel(mots: org.json.JSONArray?, seuil: Double, partout: Boolean = false): Boolean =
-        if (partout) contientMot(mots, seuil) else estReveil(mots, seuil)
 
     override fun start(): Boolean {
         if (!VoskModel.ready(ctx)) return false
