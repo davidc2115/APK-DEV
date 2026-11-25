@@ -109,6 +109,9 @@ class RegistreApprentissage(
         if (raw.length > 1_000_000) throw IOException("Registre d'apprentissage trop volumineux.")
         ecrireLocalAtomique(raw)
         if (coffreConfigure()) {
+            // Marquer la synchronisation en attente AVANT l'appel SAF : si l'écriture échoue,
+            // la prochaine lecture ou mutation retentera le miroir depuis la copie locale durable.
+            miroirEnAttente = true
             ecrireCoffre(raw)
             miroirEnAttente = false
         }
