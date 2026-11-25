@@ -17,6 +17,8 @@ class FreeboxSecurityTest {
         listOf(443, 8443, 9443).forEach { assertTrue(AccesDistant.publicationDirecteAutorisee(it)) }
         listOf(80, 8123, 32400, 5555, 8009, 445, 3389, 8081).forEach {
             assertFalse(AccesDistant.publicationDirecteAutorisee(it))
+            assertTrue(FreeboxOs.redirectionPortInterdit(it))
         }
+        assertFalse(FreeboxOs.redirectionPortInterdit(443))
     }
 }
