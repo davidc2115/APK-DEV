@@ -29,6 +29,17 @@ class AccesDistantTest {
         assertTrue(dangereuses.single().contains("8123"))
     }
 
+    @Test fun inventaireSignaleAussiQueLeTlsDesPortsHttpsResteAControler() {
+        val texte = "🟢 #1 TCP 443 → 192.168.1.10:443 (reverse proxy)\\n" +
+            "🟢 #2 TCP 8443 → 192.168.1.11:8443 (service inconnu)\\n" +
+            "🟢 #3 TCP 8123 → 192.168.1.20:8123 (Home Assistant)"
+        val aVerifier = AccesDistant.lignesRedirectionsTlsAControler(texte)
+        assertEquals(2, aVerifier.size)
+        assertTrue(aVerifier.any { it.contains(":443") })
+        assertTrue(aVerifier.any { it.contains(":8443") })
+        assertEquals(1, AccesDistant.lignesRedirectionsDangereuses(texte).size)
+    }
+
     @Test fun seulesLesEntreesHttpsConnuesPeuventEtrePubliees() {
         listOf(443, 8443, 9443).forEach { assertEquals(true, AccesDistant.publicationDirecteAutorisee(it)) }
         listOf(80, 8080, 8123, 32400, 5555, 8081).forEach { assertEquals(false, AccesDistant.publicationDirecteAutorisee(it)) }
