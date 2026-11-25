@@ -472,40 +472,69 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         signalerFilPrincipal("analyserDoublons")
         if (coffreConfigure() && !coffreLisible())
             throw java.io.IOException("Le coffre Obsidian est configuré mais illisible. Vérifie les autorisations Android avant de lancer l'analyse.")
-        val notes = mutableListOf<Pair<String, String>>()
+
+        // Ne jamais conserver le texte de toutes les notes en mémoire : 3 000 notes de 1 Mo
+        // pourraient sinon représenter plusieurs gigaoctets. On ne garde que les chemins et empreintes.
         val maxTailleNote = 1_000_000L
-        if (coffreConfigure()) {
-            if (vaultRoot() == null) throw java.io.IOException("Autorisation de lecture du coffre perdue.")
-            allNotes(limite.coerceIn(1, 3000)).forEach { (path, fichier) ->
-                if (fichier.length() > maxTailleNote) return@forEach
-                val contenu = ctx.contentResolver.openInputStream(fichier.uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8)
-                    ?: throw java.io.IOException("Lecture impossible pour la note : $path")
-                val normalise = contenu.replace("\r\n", "\n").replace('\r', '\n').trim()
-                if (normalise.isNotBlank()) notes += path to normalise
+        val cheminsParEmpreinte = linkedMapOf<String, MutableList<String>>()
+        val cheminsParNom = linkedMapOf<String, MutableList<String>>()
+        val maximum = limite.coerceIn(1, 3000)
+
+        fun empreinte(fichier: java.io.InputStream): String? {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            var total = 0L
+            fichier.buffered().use { flux ->
+                val tampon = ByteArray(8192)
+                while (true) {
+                    val n = flux.read(tampon)
+                    if (n < 0) break
+                    total += n
+                    if (total > maxTailleNote) return null
+                    digest.update(tampon, 0, n)
+                }
             }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
+
+        val notes: List<Pair<String, Any>> = if (coffreConfigure()) {
+            if (vaultRoot() == null) throw java.io.IOException("Autorisation de lecture du coffre perdue.")
+            allNotes(maximum).map { it.first to it.second }
         } else {
             localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
-                .take(limite.coerceIn(1, 3000)).forEach { fichier ->
-                    if (fichier.length() > maxTailleNote) return@forEach
-                    val normalise = fichier.readText().replace("\r\n", "\n").replace('\r', '\n').trim()
-                    if (normalise.isNotBlank()) notes += fichier.relativeTo(localRoot()).path to normalise
-                }
+                .take(maximum).map { it.relativeTo(localRoot()).path to it }.toList()
         }
+
+        notes.forEach { (path, fichier) ->
+            val taille = when (fichier) {
+                is DocumentFile -> fichier.length()
+                is File -> fichier.length()
+                else -> -1L
+            }
+            if (taille > maxTailleNote) return@forEach
+            val flux = when (fichier) {
+                is DocumentFile -> ctx.contentResolver.openInputStream(fichier.uri)
+                is File -> fichier.inputStream()
+                else -> null
+            } ?: throw java.io.IOException("Lecture impossible pour la note : $path")
+            val hash = empreinte(flux) ?: return@forEach
+            cheminsParEmpreinte.getOrPut(hash) { mutableListOf() }.add(path)
+            val nom = normaliseNom(path.substringAfterLast('/').removeSuffix(".md"))
+            if (nom.isNotBlank()) cheminsParNom.getOrPut(nom) { mutableListOf() }.add(path)
+        }
+
         val groupes = mutableListOf<DoublonObsidian>()
-        val contenus = notes.groupBy { (_, body) ->
-            val digest = java.security.MessageDigest.getInstance("SHA-256").digest(body.toByteArray(Charsets.UTF_8))
-            digest.joinToString("") { "%02x".format(it) }
+        cheminsParEmpreinte.filterValues { it.size > 1 }.forEach { (hash, paths) ->
+            groupes += DoublonObsidian("contenu identique", paths.distinct().sorted(), hash.take(12))
         }
-        contenus.filterValues { it.size > 1 }.forEach { (hash, entries) ->
-            groupes += DoublonObsidian("contenu identique", entries.map { it.first }.sorted(), hash.take(12))
-        }
-        val noms = notes.groupBy { (path, _) -> normaliseNom(path.substringAfterLast('/').removeSuffix(".md")) }
-        noms.filter { (key, entries) -> key.isNotBlank() && entries.size > 1 }.forEach { (key, entries) ->
-            val paths = entries.map { it.first }.distinct().sorted()
+        cheminsParNom.forEach { (nom, pathsBruts) ->
+            val paths = pathsBruts.distinct().sorted()
             if (paths.size > 1 && groupes.none { it.chemins.containsAll(paths) && it.chemins.size == paths.size })
-                groupes += DoublonObsidian("même nom, contenu à comparer", paths, key)
+                groupes += DoublonObsidian("même nom, contenu à comparer", paths, nom)
         }
-        return groupes.sortedWith(compareBy<DoublonObsidian> { if (it.type == "contenu identique") 0 else 1 }.thenBy { it.chemins.firstOrNull().orEmpty() })
+        return groupes.sortedWith(
+            compareBy<DoublonObsidian> { if (it.type == "contenu identique") 0 else 1 }
+                .thenBy { it.chemins.firstOrNull().orEmpty() }
+        )
     }
 
     /** Notes du coffre (chemins relatifs), éventuellement dans un dossier. */
