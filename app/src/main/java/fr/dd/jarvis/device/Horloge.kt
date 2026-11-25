@@ -276,7 +276,7 @@ object Horloge {
         val f = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM HH:mm", java.util.Locale.FRENCH)
         val l = load(c).sortedBy { it.optLong("at") }
         if (l.isEmpty()) return "Aucune alarme ni minuteur interne JARVIS en cours. Cette liste ne consulte pas les réveils natifs Xiaomi ; utilise horloge_diagnostic pour connaître uniquement la prochaine alarme système."
-        return l.joinToString("\n") { (if (it.optString("kind") == "alarm") "⏰ " else "⏳ ") + java.time.Instant.ofEpochMilli(it.optLong("at")).atZone(ZoneId.systemDefault()).format(f) + (it.optString("label").takeIf { s -> s.isNotBlank() }?.let { s -> " — $s" } ?: "") }
+        return "Alarmes et minuteurs internes JARVIS uniquement (pas la liste native Xiaomi) :\n" + l.joinToString("\n") { (if (it.optString("kind") == "alarm") "⏰ " else "⏳ ") + java.time.Instant.ofEpochMilli(it.optLong("at")).atZone(ZoneId.systemDefault()).format(f) + (it.optString("label").takeIf { s -> s.isNotBlank() }?.let { s -> " — $s" } ?: "") }
     }
 
     // ---- Chronomètre natif : Android ne définit pas d'action publique standard pour démarrer le chrono.
