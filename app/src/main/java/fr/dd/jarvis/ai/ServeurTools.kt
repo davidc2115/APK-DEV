@@ -20,7 +20,7 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             val n = fr.dd.jarvis.societe.core.normaliser(texte).trim()
             if (n.isBlank() || n.length > 140) return false
             if (Regex("\\b(et|puis|ensuite|apres|avant|routine|scenario|automatisation|diagnostic|analyse|cherche|recherche|liste|configure|configuration|historique|pourquoi|comment)\\b").containsMatchIn(n)) return false
-            val verbes = Regex("\\b(allume(r)?|eteins?|eteindre|mets?|mettre|regle(r)?|augmente(r)?|baisse(r)?|monte(r)?|descends?|ouvre(r)?|ferme(r)?|active(r)?|desactive(r)?|coupe(r)?|lance(r)?|stoppe(r)?|arrete(r)?|affiche(r)?|envoie(r)?|envoye(r)?|diffuse(r)?|annonce(r)?|parle(r)?)\\b")
+            val verbes = Regex("\\b(allume(r)?|eteins?|eteindre|mets?|mettre|regle(r)?|augmente(r)?|baisse(r)?|monte(r)?|descends?|ouvre(r)?|ferme(r)?|active(r)?|desactive(r)?|coupe(r)?|lance(r)?|stoppe(r)?|arrete(r)?|affiche(r)?|montre(r)?|envoie(r)?|envoye(r)?|diffuse(r)?|annonce(r)?|parle(r)?|fai[st])\\b")
             // « annonce » est aussi un nom (« diffuse une annonce ») : ne pas le compter comme second verbe.
             val nombreVerbes = verbes.findAll(n).count { m ->
                 !(m.value == "annonce" && Regex("\\b(une|un|des) annonce\\b").containsMatchIn(n))
