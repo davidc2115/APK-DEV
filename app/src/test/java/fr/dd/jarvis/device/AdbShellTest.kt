@@ -16,7 +16,7 @@ class AdbShellTest {
         val entree = "z".repeat(10000)
         val resultat = AdbShell.lireSortieLimitee(ByteArrayInputStream(entree.toByteArray()), 100)
         assertTrue(resultat.startsWith("z".repeat(100)))
-        assertTrue(resultat.contains("sortie tronquée"))
+        assertTrue(resultat.contains("\n… (sortie tronquée)"))
         assertTrue(resultat.length < 150)
     }
 }
