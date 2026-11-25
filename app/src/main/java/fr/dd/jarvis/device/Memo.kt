@@ -309,7 +309,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     @Synchronized
     private fun ensure() {
-        if (!loaded) load()
+        if (!loaded) runCatching { load() }.onFailure { loadError = it.message ?: it.javaClass.simpleName }
         if (!loaded) throw IOException("Mémoire Obsidian indisponible : ${loadError ?: "lecture non confirmée"}. Aucune ancienne copie locale n'a été utilisée.")
     }
 
