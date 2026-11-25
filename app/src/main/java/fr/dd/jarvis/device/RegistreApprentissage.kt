@@ -61,6 +61,20 @@ class RegistreApprentissage(
     private var charge = false
     private var miroirEnAttente = false
 
+    private class EcritureLocaleException(cause: Exception) :
+        IOException("Impossible de persister localement le registre d'apprentissage.", cause)
+
+    private fun avantMutation() = JSONObject(donnees.toString())
+
+    private fun persisterMutation(avant: JSONObject) {
+        try { persister() } catch (e: EcritureLocaleException) {
+            // Une panne du disque local annule la mutation ; une panne SAF après l'écriture locale
+            // conserve au contraire la version durable et laisse miroirEnAttente actif.
+            donnees = avant
+            throw e
+        }
+    }
+
     @Synchronized
     private fun charger() {
         if (charge) return
@@ -107,7 +121,8 @@ class RegistreApprentissage(
         donnees.put("updatedAt", System.currentTimeMillis())
         val raw = donnees.toString(2)
         if (raw.length > 1_000_000) throw IOException("Registre d'apprentissage trop volumineux.")
-        ecrireLocalAtomique(raw)
+        try { ecrireLocalAtomique(raw) }
+        catch (e: Exception) { throw EcritureLocaleException(e) }
         if (coffreConfigure()) {
             // Marquer la synchronisation en attente AVANT l'appel SAF : si l'écriture échoue,
             // la prochaine lecture ou mutation retentera le miroir depuis la copie locale durable.
@@ -176,6 +191,7 @@ class RegistreApprentissage(
                 return existante.optString("id")
             }
         }
+        val avant = avantMutation()
         val id = UUID.randomUUID().toString()
         val item = JSONObject()
             .put("id", id)
@@ -192,7 +208,7 @@ class RegistreApprentissage(
             .put("version", 1)
         donnees.getJSONArray("entries").put(item)
         journal(id, "created", "Création en état observed", acteur)
-        persister()
+        persisterMutation(avant)
         return id
     }
 
@@ -210,6 +226,7 @@ class RegistreApprentissage(
             .joinToString("|") { it.lowercase().replace(Regex("\\s+"), " ").trim() })
         val preuves = item.optJSONArray("evidence") ?: JSONArray().also { item.put("evidence", it) }
         if ((0 until preuves.length()).any { preuves.optJSONObject(it)?.optString("hash") == hash }) return false
+        val avant = avantMutation()
         preuves.put(JSONObject()
             .put("hash", hash)
             .put("content", texte)
@@ -218,7 +235,7 @@ class RegistreApprentissage(
             .put("at", System.currentTimeMillis()))
         item.put("updatedAt", System.currentTimeMillis())
         journal(id, "evidence_added", "Preuve contextualisée ajoutée", acteur)
-        persister()
+        persisterMutation(avant)
         return true
     }
 
@@ -231,11 +248,12 @@ class RegistreApprentissage(
         val exemples = item.optJSONArray("counterexamples") ?: JSONArray().also { item.put("counterexamples", it) }
         val hash = empreinte(texte.lowercase().replace(Regex("\\s+"), " "))
         if ((0 until exemples.length()).any { exemples.optJSONObject(it)?.optString("hash") == hash }) return
+        val avant = avantMutation()
         exemples.put(JSONObject().put("hash", hash).put("content", texte)
             .put("context", contexte.trim().take(500)).put("at", System.currentTimeMillis()))
         item.put("updatedAt", System.currentTimeMillis())
         journal(id, "counterexample_added", "Contre-exemple enregistré", acteur)
-        persister()
+        persisterMutation(avant)
     }
 
     /** Toute activation exige une validation explicite ; les transitions impossibles sont refusées. */
@@ -250,11 +268,12 @@ class RegistreApprentissage(
             throw IllegalStateException("Transition interdite : $actuel → $cible.")
         if (cible in setOf(ETAT_APPROVED, ETAT_TESTING, ETAT_ACTIVE) && !confirmationExplicite)
             throw SecurityException("Confirmation explicite requise pour passer à l'état $cible.")
+        val avant = avantMutation()
         item.put("state", cible)
         item.put("updatedAt", System.currentTimeMillis())
         item.put("version", item.optInt("version", 1) + 1)
         journal(id, "state_changed", "$actuel → $cible", acteur)
-        persister()
+        persisterMutation(avant)
     }
 
     @Synchronized
