@@ -215,7 +215,7 @@ object AdbShell {
                 if (n > restant) tronque = true
             }
         }
-        if (tronque) texte.append("\\n… (sortie tronquée)")
+        if (tronque) texte.append("\n… (sortie tronquée)")
         return texte.toString().trim()
     }
 
