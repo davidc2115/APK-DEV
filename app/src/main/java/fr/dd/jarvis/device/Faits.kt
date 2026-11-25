@@ -126,7 +126,10 @@ object Faits {
 
     fun texte(app: JarvisApp): String {
         val o = runCatching { lire(app) }.getOrElse { return "⚠️ Mémoire des faits inaccessible dans le coffre Obsidian ; aucune donnée locale de remplacement n'a été utilisée." }
-        return if (o.optJSONObject("lieux")?.length() == 0 && o.optJSONArray("surnoms")?.length() == 0 && o.optJSONObject("faits")?.length() == 0)
+        val nbLieux = o.optJSONObject("lieux")?.length() ?: 0
+        val nbSurnoms = o.optJSONArray("surnoms")?.length() ?: 0
+        val nbFaits = o.optJSONObject("faits")?.length() ?: 0
+        return if (nbLieux == 0 && nbSurnoms == 0 && nbFaits == 0)
             "Aucun fait mémorisé pour l'instant." else markdown(o)
     }
 
