@@ -56,7 +56,7 @@ class RegistreApprentissage(
         // Le registre est partagé avec Hermès : appliquer ici aussi le filtre de confidentialité,
         // sans dépendre du chemin historique Memo.apprendre().
         private val DONNEES_SENSIBLES = Regex(
-            "\\\\b(mot de passe|password|passphrase|api[ _-]?key|cle[ _-]?api|access[ _-]?token|refresh[ _-]?token|bearer|secret|carte bancaire|numero de carte|cvv|cryptogramme|iban|rib|numero de securite sociale|securite sociale|maladie|diagnostic medical|medicament|traitement medical|orientation sexuelle|vie sexuelle|religion|appartenance politique|syndicat)\\\\b",
+            "\\b(mot de passe|password|passphrase|api[ _-]?key|cl[eé][ _-]?api|access[ _-]?token|refresh[ _-]?token|bearer|secret|carte bancaire|num[eé]ro de carte|cvv|cryptogramme|iban|rib|num[eé]ro de s[eé]curit[eé] sociale|s[eé]curit[eé] sociale|maladie|diagnostic m[eé]dical|m[eé]dicament|traitement m[eé]dical|orientation sexuelle|vie sexuelle|religion|appartenance politique|syndicat)\\b",
             RegexOption.IGNORE_CASE
         )
 
