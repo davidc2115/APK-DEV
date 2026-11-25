@@ -656,7 +656,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 else -> return ToolResult("Précise un rôle ou un membre.")
             }
             val acces = a.optString("acces").trim().lowercase()
-            val accesNormalise = fr.dd.jarvis.societe.core.normaliser(acces).replace(' ', '_')
+            val accesNormalise = acces.replace(' ', '_')
             val profilsAccesAutorises = setOf(
                 "voir_salon", "voir_salon_seulement", "toutes_permissions",
                 "refuser_voir_salon", "defaut", "default"
