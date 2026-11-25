@@ -66,14 +66,14 @@ internal object DiscordConseils {
             }
         }
 
-        val rolesAdmin = roles.filter { it.optString("id") != guildId && permissions(it) and Discord.Perm.ADMINISTRATOR != 0L }
+        val rolesAdmin = roles.filter { it.optString("id") != guildId && (permissions(it) and Discord.Perm.ADMINISTRATOR) != 0L }
         if (rolesAdmin.isNotEmpty()) {
             conseils += "🔴 ${rolesAdmin.size} rôle(s) disposent de la permission Administrateur : ${rolesAdmin.joinToString { "@" + it.optString("name") }}. Cette permission contourne les restrictions de salons ; réduire les droits si elle n'est pas indispensable. Action : discord_role_modifier."
         }
 
         val rolesGestion = roles.filter { it.optString("id") != guildId &&
-            permissions(it) and (Discord.Perm.MANAGE_GUILD or Discord.Perm.MANAGE_ROLES or Discord.Perm.MANAGE_CHANNELS or Discord.Perm.BAN_MEMBERS or Discord.Perm.KICK_MEMBERS) != 0L &&
-            permissions(it) and Discord.Perm.ADMINISTRATOR == 0L
+            (permissions(it) and (Discord.Perm.MANAGE_GUILD or Discord.Perm.MANAGE_ROLES or Discord.Perm.MANAGE_CHANNELS or Discord.Perm.BAN_MEMBERS or Discord.Perm.KICK_MEMBERS)) != 0L &&
+            (permissions(it) and Discord.Perm.ADMINISTRATOR) == 0L
         }
         if (rolesGestion.isNotEmpty()) {
             conseils += "🔵 Vérifier la portée des rôles de gestion : ${rolesGestion.joinToString { "@" + it.optString("name") }}. Garder uniquement les droits nécessaires à chaque fonction. Action : discord_roles puis discord_role_modifier."
