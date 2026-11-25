@@ -18,7 +18,15 @@ object AccesDistant {
         631 to "Imprimante (IPP)", 9100 to "Imprimante", 8009 to "Chromecast", 21 to "FTP",
     )
     /** Services dangereux à ouvrir sur Internet (préférer le VPN WireGuard de la Freebox). */
-    private val SENSIBLES = setOf(22, 3389, 5900, 445, 5555, 21, 1883, 631, 9100, 8009)
+    private val SENSIBLES = setOf(21, 22, 23, 80, 445, 554, 1883, 3389, 5000, 5555, 5900, 631, 8000, 8009, 8080, 8123, 8883, 9000, 9100, 32400)
+
+    /** Services qui ne doivent JAMAIS être publiés tels quels : contrôle distant via tunnel SSH ou VPN uniquement. */
+    private val TUNNEL_OBLIGATOIRE = setOf(21, 22, 23, 80, 445, 554, 1883, 3389, 5000, 5555, 5900, 631, 8000, 8009, 8080, 8123, 8883, 9000, 9100, 32400)
+
+    internal fun tunnelObligatoire(port: Int): Boolean = port in TUNNEL_OBLIGATOIRE
+
+    /** Seuls les points d'entrée HTTPS connus peuvent recevoir une redirection directe. */
+    internal fun publicationDirecteAutorisee(port: Int): Boolean = port in setOf(443, 8443, 9443)
 
     fun service(port: Int) = SERVICES[port] ?: "port $port"
 
@@ -91,6 +99,8 @@ object AccesDistant {
         val p = port ?: portPrincipal(e)
             ?: return "CHOIX_REQUIS : quel service de « $nom » rendre accessible ? Ports ouverts : " +
                 (if (ports.isEmpty()) "aucun détecté (précise le port)" else ports.joinToString { "$it (${service(it)})" }) + "."
+        if (tunnelObligatoire(p)) return "⛔ Le port $p (${service(p)}) ne sera pas redirigé directement sur Internet : il expose une interface d’administration ou un protocole insuffisamment protégé. Utilise le tunnel SSH sécurisé du serveur ou le VPN WireGuard. Pour Home Assistant, configure une URL distante HTTPS dans Réglages › Maison › Home Assistant."
+        if (!publicationDirecteAutorisee(p)) return "⛔ La publication directe du port $p (${service(p)}) n'est pas autorisée. JARVIS n'ouvre directement que les services HTTPS connus (443, 8443, 9443). Pour les autres appareils, utilise le tunnel SSH sécurisé ou WireGuard ; pour Plex, utilise l'accès distant Plex."
         val publique = (FreeboxOs.ipPublique(app) ?: Reseau.ippPublique()).ifBlank { Registre.derniereIpPublique(app) }
         if (app.store.freeboxAppToken.value.isBlank())
             return "Pour ouvrir l'accès automatiquement, associe d'abord JARVIS à la Freebox (Réglages › Maison › Box Internet). " +
