@@ -45,11 +45,13 @@ object Faits {
 
     private fun cle(s: String) = normaliser(s).replace(Regex("^(le|la|les|l|mon|ma|mes|notre|nos|un|une|du|des|au|aux|a la|a l)\\s+"), "").trim()
 
-    fun lieux(app: JarvisApp): Map<String, String> = runCatching { lire(app).optJSONObject("lieux")?.let { o -> o.keys().asSequence().associateWith { o.optString(it) } }.orEmpty() }.getOrDefault(emptyMap())
-    fun surnoms(app: JarvisApp): List<Surnom> = runCatching { lire(app).optJSONArray("surnoms")?.let { a ->
+    // Ne jamais convertir une panne de lecture en collections vides : les appelants
+    // peuvent alors distinguer « aucun fait » de « mémoire momentanément indisponible ».
+    fun lieux(app: JarvisApp): Map<String, String> = lire(app).optJSONObject("lieux")?.let { o -> o.keys().asSequence().associateWith { o.optString(it) } }.orEmpty()
+    fun surnoms(app: JarvisApp): List<Surnom> = lire(app).optJSONArray("surnoms")?.let { a ->
         (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Surnom(it.optString("surnom"), it.optString("cible"), it.optString("domaine", "autre")) }
-    }.orEmpty() }.getOrDefault(emptyList())
-    fun faits(app: JarvisApp): Map<String, String> = runCatching { lire(app).optJSONObject("faits")?.let { o -> o.keys().asSequence().associateWith { o.optString(it) } }.orEmpty() }.getOrDefault(emptyMap())
+    }.orEmpty()
+    fun faits(app: JarvisApp): Map<String, String> = lire(app).optJSONObject("faits")?.let { o -> o.keys().asSequence().associateWith { o.optString(it) } }.orEmpty()
 
     @Synchronized fun definirLieu(app: JarvisApp, nom: String, adresse: String): String {
         val n = nomLieu(nom); val v = adresse.trim().trimEnd('.', ' ')
@@ -114,7 +116,11 @@ object Faits {
 
     /** Bloc donné à Jarvis et à Hermès à CHAQUE demande (vide s'il n'y a rien). */
     fun bloc(app: JarvisApp): String {
-        val l = lieux(app); val s = surnoms(app); val fa = faits(app)
+        val donnees = try { Triple(lieux(app), surnoms(app), faits(app)) }
+        catch (e: Exception) {
+            return "MÉMOIRE DURABLE TEMPORAIREMENT INACCESSIBLE : le coffre Obsidian n'a pas pu être lu. Ne prétends pas qu'aucun lieu, surnom ou fait n'est enregistré ; n'invente aucune valeur et demande de réessayer après rétablissement de l'accès."
+        }
+        val (l, s, fa) = donnees
         if (l.isEmpty() && s.isEmpty() && fa.isEmpty()) return ""
         return buildString {
             append("MÉMOIRE FIABLE de l'utilisateur (à utiliser sans la redemander ; les outils remplacent déjà eux-mêmes un surnom par sa cible) :")
@@ -142,7 +148,10 @@ object Faits {
     fun appliquer(app: JarvisApp, outil: String, a: JSONObject): JSONObject {
         // Outils qui manipulent la mémoire ou les noms eux-mêmes : jamais de remplacement.
         if (outil.startsWith("memoire") || outil.startsWith("note") || outil.contains("nommer") || outil.startsWith("carnet") || outil == "modes_jarvis") return a
-        val l by lazy { lieux(app) }; val s by lazy { surnoms(app) }
+        // Si le coffre est indisponible, ne bloque pas l'outil demandé : on laisse ses
+        // arguments inchangés. Le bloc mémoire signale séparément l'indisponibilité à l'IA.
+        val l by lazy { runCatching { lieux(app) }.getOrDefault(emptyMap()) }
+        val s by lazy { runCatching { surnoms(app) }.getOrDefault(emptyList()) }
         var copie: JSONObject? = null
         for (k in a.keys().asSequence().toList()) {
             val v = a.opt(k) as? String ?: continue
