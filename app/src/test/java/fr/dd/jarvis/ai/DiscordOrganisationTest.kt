@@ -84,4 +84,16 @@ class DiscordOrganisationTest {
         assertTrue(runCatching { Discord.Perm.parseStrict((1L shl 60).toString()) }.isFailure)
         assertTrue(runCatching { Discord.Perm.parseStrict("-1") }.isFailure)
     }
+    @Test fun reorganisationResynchroniseAussiLesSalonsDejaDansLeurCategorie() {
+        val positions = DiscordOrganisation.reorganisation(
+            tous,
+            listOf("200" to listOf("3"), "100" to listOf("1")),
+            synchroniser = true
+        )
+        val parId = pos(positions)
+        assertTrue(parId.getValue("3").getBoolean("lock_permissions"))
+        assertTrue(parId.getValue("1").getBoolean("lock_permissions"))
+        assertFalse(parId.getValue("4").has("lock_permissions"))
+    }
+
 }
