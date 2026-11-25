@@ -123,14 +123,13 @@ object AccesDistant {
                 (if (publique.isNotBlank()) " Adresse publique actuelle : $publique." else "")
         val sensible = p in SENSIBLES
         val externe = portExterne(p, FreeboxOs.portsRediriges(app))
-        if (!confirm("Rendre « $nom » ($ip, ${service(p)}) accessible depuis Internet ? JARVIS va réserver son adresse IP et ouvrir le port $externe de la Freebox vers $ip:$p." +
-                (if (sensible) "\n⚠️ ${service(p)} exposé sur Internet est risqué : le VPN WireGuard de la Freebox est plus sûr." else ""), true))
+        if (!confirm("Rendre « $nom » ($ip, ${service(p)}) accessible depuis Internet ? JARVIS va réserver son adresse IP et ouvrir le port $externe de la Freebox vers $ip:$p.\n\nVÉRIFICATION OBLIGATOIRE : confirme uniquement si tu as configuré un reverse proxy HTTPS/TLS réel sur ce port, avec certificat valide et sans accès HTTP non chiffré. Le numéro 443/8443/9443 ne garantit pas le chiffrement du service derrière la box.", true))
             return "Annulé : rien n'a été modifié."
         val oui: suspend (String, Boolean) -> Boolean = { _, _ -> true }
         val bail = if (mac.isNotBlank()) runCatching { FreeboxOs.gerer(app, "ajouter_bail", JSONObject().put("mac", mac).put("ip", ip).put("commentaire", "JARVIS · $nom"), oui) }
             .getOrElse { "⚠️ ${it.message}" } else "⚠️ Adresse MAC inconnue : IP non réservée (elle pourrait changer)."
         val redir = FreeboxOs.gerer(app, "ajouter_redirection", JSONObject().put("ip", ip).put("port", p.toString()).put("port_externe", externe.toString())
-            .put("protocole", if (p == 554) "les deux" else "tcp").put("commentaire", "JARVIS · $nom · ${service(p)}"), oui)
+            .put("https_verifie", true).put("protocole", "tcp").put("commentaire", "JARVIS · $nom · ${service(p)}"), oui)
         if (!redir.contains("✅")) return "❌ La redirection n'a pas pu être créée : $redir"
         val schema = when (p) { 443, 8443, 9443 -> "https"; 80, 8123, 32400, 8080, 8000, 5000, 9000 -> "http"; 554 -> "rtsp"; 22 -> "ssh"; else -> "" }
         val adresse = if (publique.isBlank()) "" else (if (schema == "ssh") "ssh -p $externe utilisateur@$publique" else (if (schema.isBlank()) "" else "$schema://") + "$publique:$externe")
