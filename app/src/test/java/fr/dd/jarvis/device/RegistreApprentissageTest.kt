@@ -233,6 +233,9 @@ class RegistreApprentissageTest {
             }
 
             val remplace = r.creer("tool", "Outil remplacé", "Ancienne proposition", "revue")
+            r.changerEtat(remplace, RegistreApprentissage.ETAT_APPROVED, true)
+            r.changerEtat(remplace, RegistreApprentissage.ETAT_TESTING, true)
+            r.changerEtat(remplace, RegistreApprentissage.ETAT_ACTIVE, true)
             r.changerEtat(remplace, RegistreApprentissage.ETAT_SUPERSEDED, false)
             assertThrows(IllegalStateException::class.java) {
                 r.demanderPermissions(remplace, listOf("files:read"))
