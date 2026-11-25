@@ -486,6 +486,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             fichier.buffered().use { flux ->
                 val tampon = ByteArray(8192)
                 while (true) {
+                    if (Thread.currentThread().isInterrupted) {
+                        throw java.io.InterruptedIOException("Analyse Obsidian interrompue.")
+                    }
                     val n = flux.read(tampon)
                     if (n < 0) break
                     total += n
@@ -505,6 +508,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
 
         notes.forEach { (path, fichier) ->
+            if (Thread.currentThread().isInterrupted) {
+                throw java.io.InterruptedIOException("Analyse Obsidian interrompue.")
+            }
             val taille = when (fichier) {
                 is DocumentFile -> fichier.length()
                 is File -> fichier.length()
