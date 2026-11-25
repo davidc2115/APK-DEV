@@ -163,6 +163,8 @@ object HomeAssistantDashboard {
                         try {
                             s.command("lovelace/dashboards/delete", JSONObject().put("url_path", path))
                             throw IllegalStateException("Configuration non enregistrée : tableau créé puis supprimé automatiquement. ${e.message ?: ""}", e)
+                        } catch (annulation: kotlinx.coroutines.CancellationException) {
+                            throw annulation
                         } catch (rollback: Exception) {
                             if (rollback.message?.startsWith("Configuration non enregistrée :") == true) throw rollback
                             throw IllegalStateException("Configuration non enregistrée et suppression automatique impossible : /$path peut rester vide. ${e.message ?: ""}", e)
