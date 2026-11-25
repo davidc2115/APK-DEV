@@ -355,7 +355,7 @@ class VoskWake(
          * En voiture : micro plus sensible (gain automatique ×10 au plus, réduction du bruit, seuil plus bas : un « Jarvis »
          * presque chuchoté passe) et écoute CONTINUE sans porte, musique ou pas : la musique et le bruit de la route la
          * gardaient ouverte en permanence, la phrase reconnue ne finissait jamais et « Jarvis » n'était plus en tête →
-         * jamais détecté. Deux reconnaissances décalées de 1,5 s, remises à zéro toutes les 3 s, repèrent « Jarvis »
+         * jamais détecté. Deux reconnaissances décalées de 1 s, remises à zéro toutes les 2 s, repèrent « Jarvis »
          * n'importe où dans ce qu'elles entendent.
          */
         private fun boucle(ar: android.media.AudioRecord, taille: Int) {
@@ -393,7 +393,7 @@ class VoskWake(
                     // Gain automatique partout (×5 au plus sur le téléphone, ×10 en voiture) : « Jarvis » dit doucement ou de loin.
                     val trame = if (voiture) gain.appliquer(buf, n, rms) else gainTel.appliquer(buf, n, rms)
                     if (musique) {
-                        // Écoute continue : chaque reconnaissance travaille sur des tranches de 3 s, la 2e décalée de 1,5 s.
+                        // Écoute continue : chaque reconnaissance travaille sur des tranches de 2 s, la 2e décalée de 1 s.
                         if (rec.acceptWaveForm(trame, n)) verifier(rec.result, nImporteOu = true)
                         if (++trames1 >= FENETRE_MUSIQUE) { verifier(rec.finalResult, nImporteOu = true); rec.reset(); trames1 = 0 }
                         rec2?.let { r2 ->
