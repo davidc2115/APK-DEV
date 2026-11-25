@@ -19,7 +19,7 @@ class DiscordConseilsTest {
         assertTrue(rapport.contains("hors catégorie"))
         assertTrue(rapport.contains("permission Administrateur"))
         assertTrue(rapport.contains("discord_salons_reorganiser"))
-        assertTrue(rapport.contains("Aucune modification n'a été effectuée"))
+        assertTrue(rapport.contains("aucune modification n'a été effectuée"))
     }
 
     @Test
