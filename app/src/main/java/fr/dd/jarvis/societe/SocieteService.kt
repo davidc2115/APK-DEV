@@ -519,10 +519,16 @@ class SocieteService(
                 if (totalOctets > 40L * 1024 * 1024) return@runCatching
                 val numero = existantes.size + ajoutees.size + 1
                 val nom = (if (avant) "avant" else "apres") + "-%02d.%s".format(numero, extension)
-                File(dossierLocal, nom).writeBytes(bytes)
-                val relatif = "interventions/$interventionId/$nom"
-                ajoutees += relatif
-                obsidian.saveBytes(dossierObsidian, "$interventionId-$nom", bytes, mime)
+                val copieTemporaire = File(dossierLocal, nom)
+                copieTemporaire.writeBytes(bytes)
+                try {
+                    // Ne rattacher la photo à l'intervention qu'après confirmation de son écriture Obsidian.
+                    obsidian.saveBytes(dossierObsidian, "$interventionId-$nom", bytes, mime)
+                    ajoutees += "interventions/$interventionId/$nom"
+                } catch (e: Exception) {
+                    runCatching { copieTemporaire.delete() }
+                    throw e
+                }
             }
         }
         if (ajoutees.isEmpty()) return "Aucune image exploitable. Formats image uniquement, 15 Mo maximum par photo et 40 Mo par ajout."
