@@ -39,8 +39,12 @@ object Tele {
         val ports = e.optJSONArray("ports")?.let { a -> (0 until a.length()).map { a.optInt(it) } }.orEmpty()
         val texte = listOf("alias", "hote", "titre", "info", "type").joinToString(" ") { e.optString(it) }.lowercase()
         val ip = e.optString("ip")
+        val enceinteGoogle = Regex("google.?home|google.?nest|nest.?audio|nest.?mini|nest.?hub|home.?mini|speaker|enceinte|haut.?parleur").containsMatchIn(texte) ||
+            e.optString("type").contains("🔊")
         when {
-            texte.contains("bravia") || texte.contains("sony") && (texte.contains("tv") || 8009 in ports) -> Candidat(ip, Registre.nomDe(e), "bravia", "Sony Bravia")
+            // Un Nest/Google Home expose lui aussi le port Cast 8009 (parfois 8008) : ne jamais le proposer comme télé.
+            enceinteGoogle -> null
+            texte.contains("bravia") || texte.contains("sony") && (texte.contains("tv") || texte.contains("tele")) -> Candidat(ip, Registre.nomDe(e), "bravia", "Sony Bravia")
             5555 in ports -> Candidat(ip, Registre.nomDe(e), "androidtv", "débogage réseau ouvert (port 5555)")
             6466 in ports || 6467 in ports || (8009 in ports && 8008 in ports) || Regex("android ?tv|google ?tv|chromecast|shield|mibox|freebox (pop|player)").containsMatchIn(texte) ->
                 Candidat(ip, Registre.nomDe(e), "androidtv", "Android TV / Google TV")
