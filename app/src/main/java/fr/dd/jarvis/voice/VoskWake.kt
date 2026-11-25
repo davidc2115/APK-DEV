@@ -250,6 +250,10 @@ class VoskWake(
 
     private fun detecte(mots: org.json.JSONArray?) = if (partout) contientMot(mots, seuil()) else estReveil(mots, seuil())
 
+    /** Valide les mots partiels Vosk dès que leur durée et leur confiance sont suffisantes, sans attendre le silence. */
+    internal fun detectePartiel(mots: org.json.JSONArray?, seuil: Double, partout: Boolean = false): Boolean =
+        if (partout) contientMot(mots, seuil) else estReveil(mots, seuil)
+
     override fun start(): Boolean {
         if (!VoskModel.ready(ctx)) return false
         stop()   // jamais deux écoutes en parallèle sur le micro
@@ -262,6 +266,7 @@ class VoskWake(
             if (model == null) model = VoskModel.partage(ctx) ?: return false
             val rec = Recognizer(model, 16000f, (if (francais) GRAMMAIRE_FR else GRAMMAIRE).joinToString(", ", "[", "]") { "\"$it\"" })
             rec.setWords(true)
+            rec.setPartialWords(true)
             fired = false
             if (econome) {
                 // Écoute économe : le modèle ne travaille que quand il y a du son (porte de silence), pas en continu.
@@ -296,6 +301,18 @@ class VoskWake(
         boucle?.arreter(); boucle = null
     }
 
+    private fun verifierPartiel(j: String?, nImporteOu: Boolean = false) {
+        if (fired || j == null) return
+        try {
+            val mots = org.json.JSONObject(j).optJSONArray("partial_result")
+            if (detectePartiel(mots, seuil(), nImporteOu)) {
+                fired = true
+                JournalVoix.noter("Vosk", "« Jarvis » détecté dès le résultat partiel${if (nImporteOu) " malgré la musique" else ""}")
+                onWake()
+            }
+        } catch (_: Throwable) {}
+    }
+
     private fun verifier(j: String?, nImporteOu: Boolean = false) {
         if (fired || j == null) return
         try {
@@ -309,7 +326,10 @@ class VoskWake(
     }
 
     private fun nouveauRecognizer(): Recognizer? = runCatching {
-        Recognizer(model, 16000f, (if (francais) GRAMMAIRE_FR else GRAMMAIRE).joinToString(", ", "[", "]") { "\"$it\"" }).apply { setWords(true) }
+        Recognizer(model, 16000f, (if (francais) GRAMMAIRE_FR else GRAMMAIRE).joinToString(", ", "[", "]") { "\"$it\"" }).apply {
+            setWords(true)
+            setPartialWords(true)
+        }
     }.getOrNull()
 
     /**
@@ -395,11 +415,13 @@ class VoskWake(
                     if (musique) {
                         // Écoute continue : fenêtres de 1,5 s, avec une seconde reconnaissance décalée d'environ 0,75 s pour réduire la latence.
                         if (rec.acceptWaveForm(trame, n)) verifier(rec.result, nImporteOu = true)
+                        else verifierPartiel(rec.partialResult, nImporteOu = true)
                         if (++trames1 >= FENETRE_MUSIQUE) { verifier(rec.finalResult, nImporteOu = true); rec.reset(); trames1 = 0 }
                         rec2?.let { r2 ->
                             if (trames2 < 0) trames2++
                             else {
                                 if (r2.acceptWaveForm(trame, n)) verifier(r2.result, nImporteOu = true)
+                                else verifierPartiel(r2.partialResult, nImporteOu = true)
                                 if (++trames2 >= FENETRE_MUSIQUE) { verifier(r2.finalResult, nImporteOu = true); r2.reset(); trames2 = 0 }
                             }
                         }
@@ -409,11 +431,11 @@ class VoskWake(
                     when (porte.trame(rms)) {
                         PorteVocale.Decision.IGNORER -> { avant.addLast(trame.copyOf(n)); while (avant.size > PorteVocale.PRE_ROULEMENT) avant.removeFirst() }
                         PorteVocale.Decision.OUVRIR -> {
-                            avant.forEach { if (rec.acceptWaveForm(it, it.size)) verifier(rec.result) }
+                            avant.forEach { if (rec.acceptWaveForm(it, it.size)) verifier(rec.result) else verifierPartiel(rec.partialResult) }
                             avant.clear()
-                            if (rec.acceptWaveForm(trame, n)) verifier(rec.result)
+                            if (rec.acceptWaveForm(trame, n)) verifier(rec.result) else verifierPartiel(rec.partialResult)
                         }
-                        PorteVocale.Decision.CONTINUER -> if (rec.acceptWaveForm(trame, n)) verifier(rec.result)
+                        PorteVocale.Decision.CONTINUER -> if (rec.acceptWaveForm(trame, n)) verifier(rec.result) else verifierPartiel(rec.partialResult)
                         PorteVocale.Decision.FERMER -> {
                             rec.acceptWaveForm(trame, n)
                             verifier(rec.finalResult)
