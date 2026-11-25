@@ -50,6 +50,15 @@
         <intent><action android:name="android.intent.action.DISMISS_ALARM" /></intent>
         <intent><action android:name="android.intent.action.SET_ALARM" /></intent>
         <intent><action android:name="android.intent.action.SHOW_ALARMS" /></intent>
+        <!-- Détection en lecture seule des variantes d'Horloge ; aucune activité n'est lancée par cette visibilité. -->
+        <package android:name="com.android.deskclock" />
+        <package android:name="com.miui.clock" />
+        <package android:name="com.xiaomi.clock" />
+        <package android:name="com.google.android.deskclock" />
+        <provider android:authorities="com.android.deskclock" />
+        <provider android:authorities="com.miui.clock" />
+        <provider android:authorities="com.xiaomi.clock" />
+        <provider android:authorities="com.google.android.deskclock" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
