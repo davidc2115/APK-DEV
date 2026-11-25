@@ -333,14 +333,17 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         if (app.store.freeboxAppToken.value.isBlank()) return "JARVIS n'est pas encore associé à la Freebox : Réglages › Maison › Box Internet › Associer la Freebox (à valider sur l'écran de la box)."
         if (action == "ajouter_redirection") {
             val portLan = a.optString("port").filter { it.isDigit() }.toIntOrNull()
-            if (portLan != null && redirectionPortInterdit(portLan))
-                return "⛔ Redirection refusée : JARVIS n'ouvre directement que les services HTTPS connus (443, 8443, 9443). Pour les autres ports, utilise le tunnel SSH sécurisé ou WireGuard ; Plex utilise son accès distant authentifié."
+                ?: return "⛔ Redirection refusée : précise le port interne à vérifier."
+            if (redirectionPortInterdit(portLan))
+                return "⛔ Redirection refusée : JARVIS n'ouvre directement que les points d'entrée HTTPS connus (443, 8443, 9443). Pour les autres ports, utilise le tunnel SSH sécurisé ou WireGuard ; Plex utilise son accès distant authentifié."
+            if (!a.optBoolean("https_verifie", false))
+                return "⛔ Confirmation de sécurité requise : vérifie que le service interne sur le port $portLan est réellement protégé par HTTPS/TLS (certificat valide, reverse proxy configuré et HTTP non exposé), puis relance avec https_verifie=true. Le numéro de port seul ne prouve pas le chiffrement."
         }
         if (action == "dmz" && dmzActivationInterdite(a.optString("etat"), a.optString("appareil").ifBlank { a.optString("ip") }))
             return "⛔ Activation DMZ refusée : elle exposerait tous les ports de cet appareil sur Internet. Utilise une redirection HTTPS précise ou le tunnel SSH/VPN."
         // Confirmation AVANT d'ouvrir la session (pas de session ouverte pendant que l'utilisateur réfléchit).
         val question = when (action) {
-            "ajouter_redirection" -> "Freebox : ouvrir le port ${a.optString("port_externe").ifBlank { a.optString("port") }} (${a.optString("protocole").ifBlank { "tcp" }}) vers ${a.optString("appareil").ifBlank { a.optString("ip") }}:${a.optString("port")} ?"
+            "ajouter_redirection" -> "Freebox : ouvrir le port ${a.optString("port_externe").ifBlank { a.optString("port") }} (${a.optString("protocole").ifBlank { "tcp" }}) vers ${a.optString("appareil").ifBlank { a.optString("ip") }}:${a.optString("port")} ? Confirme uniquement si ce service est réellement servi en HTTPS/TLS avec certificat valide (reverse proxy sécurisé) ; le port 443/8443/9443 seul ne le garantit pas."
             "supprimer_redirection" -> "Freebox : supprimer la redirection ${a.optString("id").ifBlank { "du port " + a.optString("port") }} ?"
             "activer_redirection", "desactiver_redirection" -> "Freebox : ${if (action.startsWith("activer")) "activer" else "désactiver"} la redirection ${a.optString("id")} ?"
             "activer_vpn", "desactiver_vpn" -> "Freebox : ${if (action.startsWith("activer")) "activer" else "désactiver"} le serveur VPN ${a.optString("serveur").ifBlank { "(WireGuard par défaut)" }} ?"
@@ -1195,7 +1198,9 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
                 val portLan = existante?.optInt("lan_port")?.takeIf { it > 0 }
                     ?: throw IllegalArgumentException("redirection #$id introuvable : impossible de vérifier son service.")
                 if (redirectionPortInterdit(portLan))
-                    return "⛔ Activation refusée : le port interne $portLan n'est pas un service HTTPS autorisé. Utilise un tunnel SSH ou WireGuard."
+                    return "⛔ Activation refusée : le port interne $portLan n'est pas un point d'entrée HTTPS autorisé. Utilise un tunnel SSH ou WireGuard."
+                if (!a.optBoolean("https_verifie", false))
+                    return "⛔ Activation refusée : vérifie d'abord que le service interne sur le port $portLan utilise réellement HTTPS/TLS avec un certificat valide, puis relance avec https_verifie=true. Le numéro de port seul ne prouve pas le chiffrement."
             }
             if (action.startsWith("supprimer")) { json(app, "fw/redir/$id", s, "DELETE"); "🗑️ Redirection #$id supprimée." }
             else { json(app, "fw/redir/$id", s, "PUT", JSONObject().put("enabled", action.startsWith("activer"))); "✅ Redirection #$id ${if (action.startsWith("activer")) "activée" else "désactivée"}." }
