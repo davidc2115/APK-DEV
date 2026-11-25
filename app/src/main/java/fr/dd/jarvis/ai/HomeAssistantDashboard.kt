@@ -5,7 +5,7 @@ import okhttp3.*
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -15,11 +15,24 @@ object HomeAssistantDashboard {
     private val client = OkHttpClient.Builder().connectTimeout(12, TimeUnit.SECONDS).readTimeout(35, TimeUnit.SECONDS).build()
 
     private class Session(private val app: JarvisApp) : WebSocketListener(), AutoCloseable {
-        private val incoming = LinkedBlockingQueue<String>()
+        private val incoming = ArrayBlockingQueue<String>(32)
         private var ws: WebSocket? = null
-        override fun onMessage(webSocket: WebSocket, text: String) { incoming.offer(text) }
-        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { incoming.offer(JSONObject().put("_failure", t.message ?: "WebSocket indisponible").toString()) }
-        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { incoming.offer(JSONObject().put("_failure", "Connexion fermée : $reason").toString()) }
+        private fun enqueue(message: String) {
+            // Les événements HA ne sont pas des réponses de commande : les ignorer évite
+            // qu'un flux d'événements remplisse la file et consomme inutilement la mémoire.
+            if (!estMessageUtile(message)) return
+            if (!incoming.offer(message)) {
+                incoming.poll()
+                incoming.offer(message)
+            }
+        }
+        override fun onMessage(webSocket: WebSocket, text: String) { enqueue(text) }
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            enqueue(JSONObject().put("_failure", t.message ?: "WebSocket indisponible").toString())
+        }
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            enqueue(JSONObject().put("_failure", "Connexion fermée : $reason").toString())
+        }
         private fun next(timeoutMs: Long = 35_000): JSONObject {
             val o = JSONObject(incoming.poll(timeoutMs.coerceAtLeast(1), TimeUnit.MILLISECONDS)
                 ?: throw IllegalStateException("Home Assistant ne répond pas à l'API WebSocket."))
@@ -54,6 +67,12 @@ object HomeAssistantDashboard {
         }
         override fun close() { ws?.close(1000, "Jarvis terminé") }
     }
+
+    /** Ne conserve que les réponses de commande, les messages d'authentification et les erreurs. */
+    internal fun estMessageUtile(message: String): Boolean = runCatching {
+        val json = JSONObject(message)
+        json.has("id") || json.optString("type").startsWith("auth_") || json.has("_failure")
+    }.getOrDefault(false)
 
     /** Identifie uniquement la réponse corrélée à la commande ; les événements sans id sont ignorés. */
     internal fun correspondCommande(message: String, id: Int): Boolean = runCatching {
