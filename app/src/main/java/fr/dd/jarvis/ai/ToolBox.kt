@@ -1056,10 +1056,13 @@ class ToolBox(
             // En voiture : Android Auto lance son propre GPS (Waze / Maps de la voiture), sans question ni écran du téléphone.
             // Vérifié : « guidage lancé » seulement si Waze / Maps l'a vraiment démarré (sinon réponse honnête + notification).
             if (app.enVoiture && a.optString("destination").isNotBlank()) {
-                val pt = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    fr.dd.jarvis.societe.Geo.localiser(a.optString("destination"))
-                        ?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.RUE.rang }?.point
-                } }.getOrNull()
+                val pt = try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        fr.dd.jarvis.societe.Geo.localiser(a.optString("destination"))
+                            ?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.RUE.rang }?.point
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (_: Exception) { null }
                 // Réponse directe : le modèle ne « termine » pas le guidage en pilotant l'écran de Waze (appuis à confirmer).
                 return ToolResult(fr.dd.jarvis.car.GuidageVoiture.lancer(app, a.optString("destination"), pt?.let { it.lat to it.lon }, a.optString("appli").trim()), direct = true)
             }
@@ -1074,10 +1077,13 @@ class ToolBox(
             else {
                 if (appli.isBlank()) appli = dispo.firstOrNull().orEmpty()
                 if (toujours && a.optString("appli").isNotBlank()) app.store.setAppPref("navigation", a.optString("appli").trim())
-                val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) runCatching {
-                    fr.dd.jarvis.societe.Geo.localiser(a.optString("destination"))
-                        ?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.RUE.rang }?.point
-                }.getOrNull() else null
+                val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) {
+                    try {
+                        fr.dd.jarvis.societe.Geo.localiser(a.optString("destination"))
+                            ?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.RUE.rang }?.point
+                    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (_: Exception) { null }
+                } else null
                 ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     app.phone.navigate(a.optString("destination"), a.optString("mode"), appli, pt?.let { it.lat to it.lon }) +
                         (if (toujours && a.optString("appli").isNotBlank()) " (${a.optString("appli")} mémorisé pour les itinéraires)" else "")
