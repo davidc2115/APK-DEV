@@ -318,6 +318,8 @@ class RegistreApprentissage(
         val item = entree(id) ?: throw IllegalArgumentException("Entrée inconnue : $id.")
         if (item.optString("type") !in setOf("skill", "tool"))
             throw IllegalArgumentException("Les permissions ne concernent que les skills et outils.")
+        if (item.optString("state") in setOf(ETAT_REJECTED, ETAT_FAILED, ETAT_SUPERSEDED))
+            throw IllegalStateException("Impossible de demander des permissions pour un skill refusé, échoué ou remplacé.")
         if (permissions.isEmpty() || permissions.size > 12)
             throw IllegalArgumentException("Indique entre 1 et 12 permissions précises.")
         val autorisees = setOf(
@@ -394,7 +396,7 @@ class RegistreApprentissage(
                 demanderPermissions(id, (0 until scopes.length()).mapNotNull { scopes.optString(it).takeIf(String::isNotBlank) }, acteur)
                 """{"ok":true,"granted":false}"""
             }
-            else -> throw IllegalArgumentException("Action attendue : list, create, evidence, counterexample ou state.")
+            else -> throw IllegalArgumentException("Action attendue : list, create, evidence, counterexample, permission_request ou state.")
         }
     }
 }
