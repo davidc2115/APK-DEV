@@ -303,7 +303,11 @@ class RegistreApprentissageTest {
 
             val skill = r.creer("tool", "Outil dépendances", "Proposition de test", "revue")
             assertThrows(IllegalArgumentException::class.java) {
-                r.declarerManifest(skill, "../1.0", "catalogue interne",
+                r.declarerManifest(skill, "../1.0", "catalogue interne", emptyList(), "low",
+                    "Vérifier les résultats simulés sans aucune action externe.")
+            }
+            assertThrows(IllegalArgumentException::class.java) {
+                r.declarerManifest(skill, "1.0.0", "catalogue interne",
                     (1..21).map { "dependance-$it" }, "low",
                     "Vérifier les résultats simulés sans aucune action externe.")
             }
