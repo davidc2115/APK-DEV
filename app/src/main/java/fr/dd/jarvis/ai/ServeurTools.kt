@@ -14,6 +14,16 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
     companion object {
         val KEYWORDS = Regex("home ?assistant|domotique|\\bha\\b|hacs|int[ée]gration|entit[ée]s?\\b|helper|\\baides?\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|vpn|wireguard|openvpn|redirection|\\bnat\\b|dmz|dhcp|disque|nas|\\bftp\\b|\\bsmb\\b|plex|bagbot|diagnostic (du )?(bot )?discord|diagnostic bagbot|pm2.{0,24}(discord|bot)|bot discord.{0,32}(serveur|debian|ssh|pm2)|discord.{0,32}(pm2|serveur debian|journaux|processus)|media server|transcodage|transcoder|biblioth[èe]que multim[ée]dia|r[ée]seau|wifi|wi-fi|imprim|scann|indisponible|injoignable|hors ligne|offline|unavailable|inaccessible|déconnecté|deconnecte|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée](?!\\p{L})|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|localis|o[uù] (est|se trouve)|position d|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
+
+        /** Une commande domestique courte ne nécessite que trois outils HA, pas le catalogue serveur complet. */
+        internal fun actionMaisonSimple(texte: String): Boolean {
+            val n = fr.dd.jarvis.societe.core.normaliser(texte).trim()
+            if (n.isBlank() || n.length > 140) return false
+            if (Regex("\\b(et|puis|ensuite|apres|avant|routine|scenario|automatisation|diagnostic|analyse|cherche|recherche|liste|configure|configuration|historique|pourquoi|comment)\\b").containsMatchIn(n)) return false
+            val verbes = Regex("\\b(allume(r)?|eteins?|eteindre|mets?|mettre|regle(r)?|augmente(r)?|baisse(r)?|monte(r)?|descends?|ouvre(r)?|ferme(r)?|active(r)?|desactive(r)?|coupe(r)?|lance(r)?|stoppe(r)?|arrete(r)?)\\b")
+            if (verbes.findAll(n).count() != 1) return false
+            return Regex("\\b(lumiere(s)?|lampe(s)?|eclairage|ampoule(s)?|spot(s)?|led|tele|television|televiseur|tv|volume|son|enceinte(s)?|poele|chauffage|radiateur|thermostat|clim(atisation)?|volet(s)?|store(s)?|prise(s)?|interrupteur(s)?|ventilateur)\\b").containsMatchIn(n)
+        }
         /** Une demande explicitement Home Assistant + indisponibilité doit rester dans l'API HA, jamais dans le scan Wi-Fi. */
         fun prioriteHaDisponibilite(t: String): Boolean {
             val n = fr.dd.jarvis.societe.core.normaliser(t)
