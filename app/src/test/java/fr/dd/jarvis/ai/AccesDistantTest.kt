@@ -3,6 +3,7 @@ package fr.dd.jarvis.ai
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AccesDistantTest {
@@ -11,6 +12,16 @@ class AccesDistantTest {
             .forEach { assertEquals("Le port $it doit rester derrière un tunnel", true, AccesDistant.tunnelObligatoire(it)) }
         assertEquals(true, AccesDistant.tunnelObligatoire(32400))
         assertEquals(false, AccesDistant.tunnelObligatoire(443))
+    }
+
+    @Test fun inventaireSignaleLesAnciennesRedirectionsNonHttpsSansLesSupprimer() {
+        val texte = "🔀 Redirections de ports:\\n" +
+            "🟢 #1 TCP 8123 → 192.168.1.20:8123 (Home Assistant)\\n" +
+            "🟢 #2 TCP 443 → 192.168.1.10:443 (reverse proxy)\\n" +
+            "⚪ #3 TCP 5555 → 192.168.1.30:5555 (ADB désactivé)"
+        val dangereuses = AccesDistant.lignesRedirectionsDangereuses(texte)
+        assertEquals(1, dangereuses.size)
+        assertTrue(dangereuses.single().contains("8123"))
     }
 
     @Test fun seulesLesEntreesHttpsConnuesPeuventEtrePubliees() {
