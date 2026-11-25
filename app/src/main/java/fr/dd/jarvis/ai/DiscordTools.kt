@@ -13,7 +13,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         val KEYWORDS = Regex("discord|r[ôo]le\\b|r[ôo]les\\b|mod[ée]rateur|mod[ée]ration|serveur discord|salon\\b|salons\\b|channels?\\b|cat[ée]gorie discord|cat[ée]gories? (de|des|du) salons?|lien d.invitation|invitations? (du|au) serveur", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t) || DiscordNoms.cite(t)
         val NAMES = setOf(
-            "discord_diagnostic", "discord_guildes", "discord_serveur_info", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
+            "discord_diagnostic", "discord_guildes", "discord_serveur_info", "discord_conseils_serveur", "discord_roles", "discord_salons", "discord_audit_serveur", "discord_role_creer", "discord_role_modifier",
             "discord_role_supprimer", "discord_role_position", "discord_role_attribuer", "discord_salon_permission", "discord_message_envoyer", "discord_messages_lire", "discord_messages_rechercher", "discord_fil_lire", "discord_message_modifier", "discord_message_supprimer", "discord_message_epingler", "discord_reaction", "discord_fil_creer", "discord_membre_info", "discord_membre_timeout", "discord_membre_expulser", "discord_membre_bannir", "discord_membre_pseudo",
             "discord_salon_creer", "discord_salon_modifier", "discord_salon_supprimer", "discord_salons_reorganiser", "discord_salon_permissions_voir",
             "discord_serveur_modifier", "discord_invitations", "discord_messages_purger", "discord_journal_audit", "discord_fil_gerer"
@@ -34,6 +34,8 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
         tool("discord_diagnostic", "Discord : diagnostic en lecture seule du bot JARVIS. Vérifie le jeton, l'identité du bot, les serveurs accessibles, son membre et ses rôles sur chaque serveur, la hiérarchie de ses rôles, les permissions cumulées et l'inventaire des salons. Signale les permissions Discord utiles manquantes. Les intents privilégiés du portail développeur ne sont pas lisibles par l'API : ils ne sont pas déclarés comme vérifiés.", mapOf("serveur" to prop("Nom ou ID d'un serveur précis ; vide pour examiner tous les serveurs accessibles au bot."))),
         tool("discord_guildes", "Discord : liste les serveurs (guildes) où le bot JARVIS est présent.", emptyMap()),
         tool("discord_serveur_info", "Discord : affiche la fiche détaillée d’un serveur (description, nombre approximatif de membres et de membres en ligne, vérification, boosts, langue et fonctionnalités). Lecture seule.", mapOf("serveur" to prop("Nom, surnom ou ID du serveur Discord (optionnel si un seul)."))),
+        tool("discord_conseils_serveur", "AUDIT ET CONSEILS DISCORD EN LECTURE SEULE : analyse les catégories, salons, permissions, synchronisations et rôles ; détecte les points à vérifier et propose des améliorations concrètes avec les outils Jarvis correspondants. Ne modifie rien sans demande et confirmation distinctes.",
+            mapOf("serveur" to prop("Nom, surnom ou ID du serveur Discord (optionnel si un seul)."))),
         tool("discord_roles", "Discord : liste les rôles d'un serveur (nom, couleur, permissions, position).",
             mapOf("serveur" to prop("Nom ou ID du serveur Discord (optionnel si le bot n'est que sur un seul)."))),
         tool("discord_salons", "Discord : liste les salons (textuels, vocaux, catégories) d'un serveur.",
@@ -331,6 +333,13 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             lines += ""
             lines += "Pour lire, écrire ou régler un salon, donne simplement son nom (entre parenthèses ci-dessus) : emojis, séparateurs et polices décoratives sont ignorés."
             ToolResult(lines.joinToString("\n"), direct = true)
+        }
+        "discord_conseils_serveur" -> {
+            val g = guildeObj(a)
+            val gid = g.getString("id")
+            val salons = Discord.salons(app, gid)
+            val roles = Discord.roles(app, gid)
+            ToolResult(DiscordConseils.analyser(g.optString("name"), gid, salons, roles), direct = true)
         }
         "discord_messages_lire", "discord_messages_rechercher", "discord_fil_lire" -> {
             val g = guildeObj(a); val gid = g.getString("id")
