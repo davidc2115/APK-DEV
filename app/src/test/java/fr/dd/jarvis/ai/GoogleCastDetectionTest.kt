@@ -23,6 +23,12 @@ class GoogleCastDetectionTest {
             Reseau.typeDe(listOf(8009), "", "_googlecast._tcp"))
     }
 
+    @Test fun lePortAdbSeulNeClassePasUnTelephoneCommeTele() {
+        assertTrue(Tele.portAdbIdentifieUneTele(listOf(5555), "Android TV Salon"))
+        assertFalse(Tele.portAdbIdentifieUneTele(listOf(5555), "Xiaomi 15T Pro"))
+        assertFalse(Tele.portAdbIdentifieUneTele(listOf(5555), "Nest Mini Salon"))
+    }
+
     @Test fun uneEnceinteGoogleNeDevientJamaisUneTeleADB() {
         assertTrue(Tele.estEnceinteGoogle("Nest Mini Salon _googlecast._tcp", "🔊 enceinte Google / Nest"))
         assertTrue(Tele.estEnceinteGoogle("Google Home", ""))
