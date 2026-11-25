@@ -19,6 +19,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     private val habitsFile get() = File(ctx.filesDir, "habits-learning.json")
     private val candidates = linkedMapOf<String, MutableSet<String>>()
     @Volatile private var loaded = false
+    @Volatile private var loadError: String? = null
 
     private val sensitivePattern = Regex(
         "\\b(sant[eé]|m[eé]dical|maladie|diagnostic|m[eé]dicament|banque|bancaire|carte bancaire|mot de passe|password|secret|cl[eé] api|token|religion|politique|orientation sexuelle|sexualit[eé]|syndicat)\\b",
@@ -281,18 +282,36 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      */
     @Synchronized
     fun load() {
-        val note = runCatching { obsidian.lireAvecDate(FOLDER, FILE) }.getOrNull()
+        // Une erreur SAF ne doit jamais être interprétée comme une note absente : sinon une
+        // copie locale plus ancienne pourrait remplacer la mémoire réelle du coffre.
+        val note = try { obsidian.lireAvecDateStrict(FOLDER, FILE) }
+        catch (e: Exception) {
+            loadError = e.message ?: e.javaClass.simpleName
+            return // loaded reste false : le prochain accès pourra réessayer après rétablissement du coffre.
+        }
         val copie = runCatching { local.takeIf { it.exists() }?.let { it.readText() to it.lastModified() } }.getOrNull()
         val choix = choisirSource(note, copie)
-        if (choix != null) parse(choix.first)
+        if (choix != null) {
+            if (note == null && obsidian.coffreConfigure()) {
+                // Note réellement absente : migration unique de la copie de secours, uniquement
+                // après une lecture du coffre réussie et une écriture vérifiée.
+                obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), choix.first)
+            } else if (note != null && choix.second) {
+                obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), choix.first)
+            }
+            parse(choix.first)
+        }
         loadCandidates()
         loaded = true
-        if (choix != null && note != null && choix.second) runCatching { obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), render()) }
+        loadError = null
         if (choix != null && copie == null) runCatching { persisterCopieHermes(local, render()) }
     }
 
     @Synchronized
-    private fun ensure() { if (!loaded) load() }
+    private fun ensure() {
+        if (!loaded) load()
+        if (!loaded) throw IOException("Mémoire Obsidian indisponible : ${loadError ?: "lecture non confirmée"}. Aucune ancienne copie locale n'a été utilisée.")
+    }
 
     @Synchronized
     private fun persist(): String {
@@ -518,7 +537,12 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      * déjà, en entier, dans le bloc « notes utiles » (NotesPertinentes).
      */
     @Synchronized
-    fun pourPrompt(): String { ensure(); return blocPrompt(items, vocal = fr.dd.jarvis.ai.CanalDemande.vocal) }
+    fun pourPrompt(): String = try {
+        ensure()
+        blocPrompt(items, vocal = fr.dd.jarvis.ai.CanalDemande.vocal)
+    } catch (e: Exception) {
+        "\n\nMÉMOIRE DURABLE TEMPORAIREMENT INACCESSIBLE : le coffre Obsidian n'a pas pu être lu. N'affirme pas qu'aucune consigne n'existe et ne remplace pas la mémoire par une ancienne copie locale. Réessaie lorsque l'accès sera rétabli."
+    }
 
     /** Consignes (de JARVIS et d'Hermès) qui concernent cette demande, à placer en fin de prompt ; vide sinon. */
     fun consignesPour(demande: String): String {
