@@ -264,6 +264,38 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         }
     }
 
+    /**
+     * Lecture de mémoire avec résultat non ambigu : null signifie uniquement « note absente ».
+     * Une permission SAF expirée, un fournisseur indisponible ou un flux illisible lève une erreur.
+     */
+    fun lireAvecDateStrict(folder: String, fileName: String): Pair<String, Long>? {
+        val name = safe(fileName, "Fichier")
+        val uriStr = store.obsidianUri.value
+        if (uriStr.isBlank()) {
+            val f = File(File(ctx.getExternalFilesDir(null), folder), name)
+            return if (f.isFile) f.readText() to f.lastModified() else null
+        }
+        val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
+            ?: throw IOException("Le coffre Obsidian sélectionné n'est plus accessible.")
+        if (!tree.canRead()) throw IOException("Autorisation de lecture Obsidian absente.")
+        var current: DocumentFile = tree
+        val chemin = (relatif(folder).trim('/') + "/" + name).trim('/')
+        for (part in chemin.split('/').filter { it.isNotBlank() }) {
+            val enfants = try { current.listFiles().toList() }
+                catch (e: Exception) { throw IOException("Impossible de parcourir le coffre Obsidian ($part).", e) }
+            val exacts = enfants.filter { it.name == part }
+            val matches = if (exacts.isNotEmpty()) exacts else enfants.filter {
+                it.name?.let { n -> normaliseNom(n) == normaliseNom(part) } == true
+            }
+            if (matches.size > 1) throw IOException("Plusieurs éléments Obsidian correspondent à « $part ».")
+            current = matches.singleOrNull() ?: return null
+        }
+        if (!current.isFile) return null
+        val contenu = ctx.contentResolver.openInputStream(current.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+            ?: throw IOException("Impossible de lire la note Obsidian : $chemin")
+        return contenu to runCatching { current.lastModified() }.getOrDefault(0L)
+    }
+
     // ------------------------------------------------------------------ lecture / recherche dans le coffre
 
     private fun vaultRoot(): DocumentFile? = store.obsidianUri.value.takeIf { it.isNotBlank() }?.let {
