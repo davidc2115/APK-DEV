@@ -280,7 +280,24 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
      * empêche de recréer une note que l'utilisateur aurait ensuite supprimée dans Obsidian.
      */
     fun lireOuMigrer(folder: String, fileName: String, ancienneCopie: String?, mime: String = "text/markdown"): String? {
-        read(folder, fileName)?.let { return it }
+        // Distingue impérativement une note absente d'une erreur SAF : une lecture en échec
+        // ne doit jamais déclencher la réimportation d'une ancienne copie locale.
+        if (coffreConfigure()) {
+            val distante = try {
+                readNoteStrict("$folder/$fileName")
+            } catch (e: Exception) {
+                runCatching {
+                    fr.dd.jarvis.voice.JournalVoix.noter(
+                        "diagnostic",
+                        "⚠️ Lecture Obsidian impossible pour $fileName ; migration locale suspendue : ${e.message ?: e.javaClass.simpleName}"
+                    )
+                }
+                return null
+            }
+            if (distante != null) return distante
+        } else {
+            read(folder, fileName)?.let { return it }
+        }
         if (!coffreConfigure()) return ancienneCopie
         if (!coffreDisponible()) return null
         val cle = "$folder/$fileName"
@@ -536,13 +553,30 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     private fun withMd(path: String) = path.trim().trim('/').let { if (it.endsWith(".md", true)) it else "$it.md" }
 
+    /** Résout chaque segment sans jamais choisir arbitrairement entre deux noms homonymes. */
+    private fun trouverUniquePourLecture(chemin: String): DocumentFile? {
+        var cur: DocumentFile? = vaultRoot()
+            ?: throw java.io.IOException("Le coffre Obsidian n'est plus accessible.")
+        for (part in chemin.trim().trim('/').split('/').filter { it.isNotBlank() }) {
+            val enfants = try { cur!!.listFiles().filter { it.name != null } }
+                catch (e: Exception) { throw java.io.IOException("Impossible de parcourir le coffre Obsidian : $part", e) }
+            val exacts = enfants.filter { it.name == part }
+            val correspondances = if (exacts.isNotEmpty()) exacts else enfants.filter {
+                it.name?.let { nom -> normaliseNom(nom) == normaliseNom(part) } == true
+            }
+            if (correspondances.size > 1)
+                throw java.io.IOException("Plusieurs éléments Obsidian correspondent à « $part » ; précise le chemin ou corrige les doublons.")
+            cur = correspondances.singleOrNull() ?: return null
+        }
+        return cur
+    }
+
     /** Lecture stricte : null signifie réellement absent ; une perte d'accès ou une erreur de lecture lève une exception. */
     fun readNoteStrict(path: String): String? {
         signalerFilPrincipal("readNoteStrict")
         val p = withMd(path)
         if (coffreConfigure()) {
-            if (vaultRoot() == null) throw java.io.IOException("Le coffre Obsidian n'est plus accessible.")
-            val f = trouver(p) ?: return null
+            val f = trouverUniquePourLecture(p) ?: return null
             if (!f.isFile) return null
             return ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
                 ?: throw java.io.IOException("Impossible de lire la note Obsidian : $p")
