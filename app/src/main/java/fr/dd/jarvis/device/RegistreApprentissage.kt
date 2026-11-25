@@ -166,6 +166,16 @@ class RegistreApprentissage(
         if (nom.length < 3) throw IllegalArgumentException("Titre trop court.")
         val details = description.trim().take(2000)
         val source = provenance.trim().take(500)
+        val entries = donnees.getJSONArray("entries")
+        // Une même proposition ouverte ne doit pas se multiplier si Jarvis et Hermès la détectent ensemble.
+        for (i in 0 until entries.length()) {
+            val existante = entries.optJSONObject(i) ?: continue
+            if (existante.optString("type") == kind &&
+                existante.optString("title").equals(nom, ignoreCase = true) &&
+                existante.optString("state") !in setOf(ETAT_REJECTED, ETAT_SUPERSEDED)) {
+                return existante.optString("id")
+            }
+        }
         val id = UUID.randomUUID().toString()
         val item = JSONObject()
             .put("id", id)
@@ -195,7 +205,9 @@ class RegistreApprentissage(
         if (texte.length < 8) throw IllegalArgumentException("Preuve trop courte.")
         val contexteNet = contexte.trim().take(500)
         val origine = source.trim().take(200)
-        val hash = empreinte(texte.lowercase().replace(Regex("\\s+"), " "))
+        // La preuve est identique seulement si son contenu, son contexte et sa source le sont.
+        val hash = empreinte(listOf(texte, contexteNet, origine)
+            .joinToString("|") { it.lowercase().replace(Regex("\\s+"), " ").trim() })
         val preuves = item.optJSONArray("evidence") ?: JSONArray().also { item.put("evidence", it) }
         if ((0 until preuves.length()).any { preuves.optJSONObject(it)?.optString("hash") == hash }) return false
         preuves.put(JSONObject()
