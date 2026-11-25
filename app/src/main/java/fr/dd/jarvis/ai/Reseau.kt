@@ -148,7 +148,7 @@ object Reseau {
         // Le port Cast 8009 est partagé par les téléviseurs/Chromecast ET les enceintes Google/Nest.
         // Le nom d'instance mDNS (_googlecast._tcp) aide à distinguer une enceinte d'un écran.
         val t = "$titre $info".lowercase()
-        val enceinteGoogle = Regex("google.?home|google.?nest|nest.?audio|nest.?mini|nest.?hub|home.?mini|speaker|enceinte|haut.?parleur").containsMatchIn(t)
+        val enceinteGoogle = Regex("google.?home|google.?nest|chromecast.?audio|nest.?audio|nest.?mini|nest.?hub|home.?mini|speaker|enceinte|haut.?parleur").containsMatchIn(t)
         return when {
             9100 in p || 631 in p || 515 in p || 8611 in p || listOf("printer", "imprim", "canon", "epson", "brother", "laserjet", "officejet", "pixma", "ecotank").any { t.contains(it) } -> "🖨️ imprimante"
             8123 in p || t.contains("home assistant") -> "🏠 Home Assistant"
