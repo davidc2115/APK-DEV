@@ -292,7 +292,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                         "⚠️ Lecture Obsidian impossible pour $fileName ; migration locale suspendue : ${e.message ?: e.javaClass.simpleName}"
                     )
                 }
-                return null
+                throw java.io.IOException("Lecture Obsidian impossible pour $fileName ; migration locale suspendue.", e)
             }
             if (distante != null) return distante
         } else {
