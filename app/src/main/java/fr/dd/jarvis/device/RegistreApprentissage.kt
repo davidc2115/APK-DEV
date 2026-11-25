@@ -450,7 +450,7 @@ class RegistreApprentissage(
                 )
                 """{"ok":true,"installed":false,"executed":false}"""
             }
-            else -> throw IllegalArgumentException("Action attendue : list, create, evidence, counterexample ou state.")
+            else -> throw IllegalArgumentException("Action attendue : list, read, create, evidence, counterexample, manifest, permission_request ou state.")
         }
     }
 }
