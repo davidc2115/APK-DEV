@@ -286,6 +286,10 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
     /** Refuse l'activation DMZ : elle expose tous les ports entrants de l'appareil. La désactivation reste permise. */
     internal fun redirectionPortInterdit(port: Int): Boolean = !AccesDistant.publicationDirecteAutorisee(port)
 
+    /** Un port HTTPS conventionnel n'est pas une preuve TLS : la vérification doit être explicite. */
+    internal fun verificationHttpsManquante(port: Int, verifie: Boolean): Boolean =
+        AccesDistant.publicationDirecteAutorisee(port) && !verifie
+
     internal fun dmzActivationInterdite(etatBrute: String, cible: String): Boolean {
         val etat = etatBrute.trim().lowercase()
         val modification = cible.isNotBlank() || etat.isNotBlank()
@@ -336,7 +340,7 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
                 ?: return "⛔ Redirection refusée : précise le port interne à vérifier."
             if (redirectionPortInterdit(portLan))
                 return "⛔ Redirection refusée : JARVIS n'ouvre directement que les points d'entrée HTTPS connus (443, 8443, 9443). Pour les autres ports, utilise le tunnel SSH sécurisé ou WireGuard ; Plex utilise son accès distant authentifié."
-            if (!a.optBoolean("https_verifie", false))
+            if (verificationHttpsManquante(portLan, a.optBoolean("https_verifie", false)))
                 return "⛔ Confirmation de sécurité requise : vérifie que le service interne sur le port $portLan est réellement protégé par HTTPS/TLS (certificat valide, reverse proxy configuré et HTTP non exposé), puis relance avec https_verifie=true. Le numéro de port seul ne prouve pas le chiffrement."
         }
         if (action == "dmz" && dmzActivationInterdite(a.optString("etat"), a.optString("appareil").ifBlank { a.optString("ip") }))
