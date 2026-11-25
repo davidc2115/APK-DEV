@@ -525,8 +525,8 @@ class SocieteService(
                 val numero = existantes.size + ajoutees.size + 1
                 val nom = (if (avant) "avant" else "apres") + "-%02d.%s".format(numero, extension)
                 val copieTemporaire = File(dossierLocal, nom)
-                copieTemporaire.writeBytes(bytes)
                 try {
+                    copieTemporaire.writeBytes(bytes)
                     // Ne rattacher la photo à l'intervention qu'après confirmation de son écriture Obsidian.
                     obsidian.saveBytes(dossierObsidian, "$interventionId-$nom", bytes, mime)
                     ajoutees += "interventions/$interventionId/$nom"
@@ -541,12 +541,12 @@ class SocieteService(
             photosAvant = if (avant) intervention.photosAvant + ajoutees else intervention.photosAvant,
             photosApres = if (avant) intervention.photosApres else intervention.photosApres + ajoutees
         )
-        repo.update { d -> d.copy(clients = d.clients.map { c ->
-            if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
-                if (s.id != siteId) s else s.copy(interventions = s.interventions.map { i -> if (i.id == interventionId) maj else i })
-            })
-        }) }
         val (emplacement, pdf) = try {
+            repo.update { d -> d.copy(clients = d.clients.map { c ->
+                if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
+                    if (s.id != siteId) s else s.copy(interventions = s.interventions.map { i -> if (i.id == interventionId) maj else i })
+                })
+            }) }
             ecrireRapport(client, site, maj)
         } finally {
             // Les originaux sont déjà dans Obsidian ; les fichiers privés n'ont servi qu'à intégrer
