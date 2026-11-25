@@ -34,15 +34,22 @@ object Tele {
 
     data class Candidat(val ip: String, val nom: String, val type: String, val raison: String)
 
+    internal fun estEnceinteGoogle(texte: String, type: String = ""): Boolean =
+        Regex("google.?home|google.?nest|chromecast.?audio|nest.?audio|nest.?mini|nest.?hub|home.?mini|speaker|enceinte|haut.?parleur").containsMatchIn(texte.lowercase()) ||
+            type.contains("🔊")
+
     /** Télés trouvées dans l'inventaire du Wi-Fi (ports et noms caractéristiques). */
     fun detecter(app: JarvisApp): List<Candidat> = Registre.tous(app).mapNotNull { e ->
         val ports = e.optJSONArray("ports")?.let { a -> (0 until a.length()).map { a.optInt(it) } }.orEmpty()
         val texte = listOf("alias", "hote", "titre", "info", "type").joinToString(" ") { e.optString(it) }.lowercase()
         val ip = e.optString("ip")
+        val enceinteGoogle = estEnceinteGoogle(texte, e.optString("type"))
         when {
-            texte.contains("bravia") || texte.contains("sony") && (texte.contains("tv") || 8009 in ports) -> Candidat(ip, Registre.nomDe(e), "bravia", "Sony Bravia")
+            // Un Nest/Google Home expose lui aussi le port Cast 8009 (parfois 8008) : ne jamais le proposer comme télé.
+            enceinteGoogle -> null
+            texte.contains("bravia") || texte.contains("sony") && (texte.contains("tv") || texte.contains("tele")) -> Candidat(ip, Registre.nomDe(e), "bravia", "Sony Bravia")
             5555 in ports -> Candidat(ip, Registre.nomDe(e), "androidtv", "débogage réseau ouvert (port 5555)")
-            6466 in ports || 6467 in ports || (8009 in ports && 8008 in ports) || Regex("android ?tv|google ?tv|chromecast|shield|mibox|freebox (pop|player)").containsMatchIn(texte) ->
+            6466 in ports || 6467 in ports || Regex("android ?tv|google ?tv|chromecast|shield|mibox|freebox (pop|player)").containsMatchIn(texte) ->
                 Candidat(ip, Registre.nomDe(e), "androidtv", "Android TV / Google TV")
             8001 in ports || 8002 in ports || texte.contains("samsung") && texte.contains("tv") -> Candidat(ip, Registre.nomDe(e), "samsung", "Samsung (Tizen)")
             3000 in ports || 3001 in ports || texte.contains("webos") || texte.contains("lg") && texte.contains("tv") -> Candidat(ip, Registre.nomDe(e), "lg", "LG (webOS)")
