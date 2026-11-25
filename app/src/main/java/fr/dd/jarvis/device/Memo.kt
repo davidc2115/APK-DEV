@@ -113,10 +113,14 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val current = items["habitudes"].orEmpty()
         val updated = if (current.lines().any { it.equals(habitLine, true) }) current
             else listOf(current.trim(), habitLine).filter { it.isNotBlank() }.joinToString("\n")
+        val anciennesHabitudes = items["habitudes"]
         items["habitudes"] = updated
-        // Garder les preuves tant que la mémoire durable n'est pas écrite. En cas d'échec,
-        // la prochaine tentative pourra reprendre la confirmation sans perdre l'apprentissage.
-        persist()
+        // Garder les preuves tant que la mémoire durable n'est pas écrite. En cas d'échec
+        // de l'écriture locale, restaurer aussi la rubrique modifiée en mémoire.
+        try { persist() } catch (e: EcritureLocaleMemoireException) {
+            if (anciennesHabitudes == null) items.remove("habitudes") else items["habitudes"] = anciennesHabitudes
+            throw e
+        }
         candidates.remove(key)
         try {
             persistCandidates()
@@ -315,18 +319,35 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         if (!loaded) throw IOException("Mémoire Obsidian indisponible : ${loadError ?: "lecture non confirmée"}. Aucune ancienne copie locale n'a été utilisée.")
     }
 
+    /** Une panne d'écriture locale annule la mutation en mémoire ; une panne du miroir Obsidian
+     * après écriture locale conserve au contraire l'état durable local pour permettre sa resynchronisation. */
+    private class EcritureLocaleMemoireException(cause: Exception) :
+        IOException("Échec de l'écriture locale de la mémoire Jarvis.", cause)
+
+    private fun <T> avecRollbackSiEcritureLocaleEchoue(action: () -> T): T {
+        val avant = LinkedHashMap(items)
+        return try { action() } catch (e: EcritureLocaleMemoireException) {
+            items.clear()
+            items.putAll(avant)
+            throw e
+        }
+    }
+
     @Synchronized
     private fun persist(): String {
         val md = render()
         // L'écriture locale fait partie de la validation : ne jamais annoncer une consigne
         // enregistrée si le fichier durable n'a pas été remplacé correctement.
-        persisterCopieHermes(local, md)
+        try { persisterCopieHermes(local, md) }
+        catch (e: Exception) { throw EcritureLocaleMemoireException(e) }
+        // Si seul le miroir Obsidian échoue, la copie locale est déjà durable : ne pas annuler
+        // le cache en mémoire, sinon l'état visible divergerait de la copie qui sera resynchronisée.
         return obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), md)
     }
 
     @Synchronized
-    fun set(sujet: String, texte: String): String {
-        ensure(); items[sujet.trim().lowercase().ifBlank { "general" }] = texte.trim(); return persist()
+    fun set(sujet: String, texte: String): String = avecRollbackSiEcritureLocaleEchoue {
+        ensure(); items[sujet.trim().lowercase().ifBlank { "general" }] = texte.trim(); persist()
     }
 
     /**
@@ -335,7 +356,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      * Une consigne très proche d'une ligne existante la remplace (mise à jour) ; déjà présente : rien ne change.
      */
     @Synchronized
-    fun ajouterConsigne(sujet: String, texte: String): String {
+    fun ajouterConsigne(sujet: String, texte: String): String = avecRollbackSiEcritureLocaleEchoue {
         ensure()
         val k = sujet.trim().lowercase().ifBlank { "general" }
         val nouvelle = texte.trim().removePrefix("-").trim()
@@ -351,7 +372,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val proche = lignes.indexOfFirst { memeCanal(it) && memeSujet(it, nouvelle) }
         if (proche >= 0) lignes[proche] = nouvelle else lignes += nouvelle
         items[k] = lignes.joinToString("\n") { "- $it" }
-        return persist()
+        persist()
     }
 
 
@@ -367,7 +388,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      * était effacée, consignes des poêles comprises).
      */
     @Synchronized
-    fun remplacerSujet(sujet: String, texte: String): String {
+    fun remplacerSujet(sujet: String, texte: String): String = avecRollbackSiEcritureLocaleEchoue {
         ensure()
         val k = sujet.trim().lowercase().ifBlank { "general" }
         val nouvelle = texte.trim().removePrefix("-").trim()
@@ -383,7 +404,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     }
 
     @Synchronized
-    fun remplacerConsigne(sujet: String, texte: String, meme: (String) -> Boolean): String {
+    fun remplacerConsigne(sujet: String, texte: String, meme: (String) -> Boolean): String = avecRollbackSiEcritureLocaleEchoue {
         ensure()
         val k = sujet.trim().lowercase().ifBlank { "general" }
         val nouvelle = texte.trim().removePrefix("-").trim()
@@ -398,12 +419,12 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     }
 
     @Synchronized
-    fun remove(sujet: String): Boolean {
-        ensure(); val r = items.remove(sujet.trim().lowercase()) != null; if (r) persist(); return r
+    fun remove(sujet: String): Boolean = avecRollbackSiEcritureLocaleEchoue {
+        ensure(); val r = items.remove(sujet.trim().lowercase()) != null; if (r) persist(); r
     }
 
     @Synchronized
-    fun clear() { ensure(); items.clear(); persist() }
+    fun clear() = avecRollbackSiEcritureLocaleEchoue { ensure(); items.clear(); persist(); Unit }
 
     @Synchronized
     fun all(): Map<String, String> { ensure(); return LinkedHashMap(items) }
