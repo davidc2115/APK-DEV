@@ -78,8 +78,19 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
             .joinToString("") { "%02x".format(it) }.take(20)
         val proofs = candidates.getOrPut(key) { linkedSetOf() }
         if (!proofs.add(hash)) {
-            // Une précédente tentative a pu écrire la copie locale mais échouer sur le miroir Obsidian.
-            // Retenter avant d'annoncer que la preuve est déjà enregistrée.
+            // Si la confirmation précédente a échoué sur Obsidian, les trois preuves restent présentes :
+            // retenter aussi la mémoire durable avant d'annoncer que l'habitude est enregistrée.
+            if (proofs.size >= 3) {
+                persist()
+                candidates.remove(key)
+                try {
+                    persistCandidates()
+                } catch (e: Exception) {
+                    candidates[key] = proofs
+                    throw e
+                }
+                return "Habitude confirmée après trois preuves distinctes et ajoutée à la mémoire durable : $value"
+            }
             persistCandidates()
             return "Cette preuve a déjà été prise en compte (${proofs.size}/3)."
         }
@@ -92,9 +103,16 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val updated = if (current.lines().any { it.equals(habitLine, true) }) current
             else listOf(current.trim(), habitLine).filter { it.isNotBlank() }.joinToString("\n")
         items["habitudes"] = updated
-        candidates.remove(key)
+        // Garder les preuves tant que la mémoire durable n'est pas écrite. En cas d'échec,
+        // la prochaine tentative pourra reprendre la confirmation sans perdre l'apprentissage.
         persist()
-        persistCandidates()
+        candidates.remove(key)
+        try {
+            persistCandidates()
+        } catch (e: Exception) {
+            candidates[key] = proofs
+            throw e
+        }
         return "Habitude confirmée après trois preuves distinctes et ajoutée à la mémoire durable : $value"
     }
 
