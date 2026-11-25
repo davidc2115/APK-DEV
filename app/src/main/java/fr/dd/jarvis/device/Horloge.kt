@@ -19,9 +19,9 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 /**
- * Alarmes, minuteurs et chronomètre gérés par JARVIS lui-même : aucune application ne s'ouvre.
- * Alarme/minuteur : AlarmManager.setAlarmClock (icône d'alarme dans la barre d'état, fiable en veille) + notification sonore.
- * Chronomètre : notification avec compteur. Les alarmes sont conservées et replanifiées au redémarrage du téléphone.
+ * Gestion des alarmes et minuteurs via l'application Horloge native Android/Xiaomi.
+ * JARVIS ne doit pas créer ni maintenir de réveils ou minuteurs internes.
+ * Les anciennes entrées internes sont purgées au remplacement de l'application.
  */
 object Horloge {
     const val CH_ALARM = "horloge_alarme_v2"
@@ -335,17 +335,20 @@ object Horloge {
         if (o != null && o.optString("kind") == "timer" && o.optLong("at") > System.currentTimeMillis()) { annuler(c, id); save(c, l.filter { it !== o }) }
     }
 
-    /** Après redémarrage : replanifie tout. */
+    /**
+     * Migration de sécurité : arrête et efface les anciens réveils/minuteurs internes JARVIS.
+     * Ne touche jamais aux alarmes de l'application Horloge native.
+     */
     fun restaurer(c: Context) {
-        channels(c)
-        val now = System.currentTimeMillis()
-        val l = load(c).filter { it.optLong("at") > now || it.optJSONArray("days")?.length() ?: 0 > 0 }.toMutableList()
-        l.forEach { o ->
-            val days = o.optJSONArray("days")?.let { a -> (0 until a.length()).map { a.getInt(it) } }.orEmpty()
-            if (o.optLong("at") <= now && o.optString("kind") == "alarm") o.put("at", prochaine(o.optInt("h"), o.optInt("m"), days))
-            planifier(c, o)
+        load(c).forEach { o ->
+            val id = o.optInt("id")
+            if (id > 0) {
+                annuler(c, id)
+                runCatching { nm(c).cancel(id + 1) }
+            }
         }
-        save(c, l)
+        runCatching { nm(c).cancel(CHRONO_ID) }
+        prefs(c).edit().putString("items", "[]").putLong("chrono", 0L).commit()
     }
 }
 
