@@ -13,6 +13,10 @@ class GoogleCastDetectionTest {
             Reseau.typeDe(listOf(8009), "", "Nest Audio _googlecast._tcp"))
         assertEquals("📺 Chromecast / TV",
             Reseau.typeDe(listOf(8008, 8009), "Chromecast Salon", "_googlecast._tcp"))
+        assertEquals("📺 Chromecast / TV",
+            Reseau.typeDe(listOf(8008, 8009), "Google TV Salon", "_googlecast._tcp"))
+        assertEquals("📡 appareil Google Cast",
+            Reseau.typeDe(listOf(8008, 8009), "", "_googlecast._tcp"))
         assertEquals("📡 appareil Google Cast",
             Reseau.typeDe(listOf(8009), "", "_googlecast._tcp"))
     }
