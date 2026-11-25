@@ -15,6 +15,7 @@ import java.util.UUID
  * Le coffre Obsidian configuré est la source durable. La copie privée ne sert que de cache/reprise
  * et n'est jamais utilisée lorsque la lecture du coffre configuré a échoué.
  * Aucune entrée ne peut installer ou exécuter du code : ce registre ne fait que gérer le cycle de vie.
+ * Les identifiants sont stables entre Jarvis et Hermès ; les preuves gardent leur contexte et leur source.
  */
 class RegistreApprentissage(
     private val fichierLocal: File,
