@@ -856,6 +856,10 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 appliquee = true
                 val final = tous(gid)
                 ToolResult("✅ Serveur « $gnom » réorganisé.\n\n" + DiscordOrganisation.apercu(final, JSONArray()), direct = true)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Une annulation de coroutine doit rester une annulation : ne pas la convertir
+                // en échec métier ni lancer le nettoyage comme si l'opération avait échoué normalement.
+                throw e
             } catch (e: Throwable) {
                 if (appliquee) {
                     ToolResult("⚠️ Discord a accepté la réorganisation de « $gnom », mais Jarvis n’a pas pu relire la structure pour la vérifier : ${e.message ?: e.javaClass.simpleName}. Aucune catégorie n’a été supprimée.", direct = true)
