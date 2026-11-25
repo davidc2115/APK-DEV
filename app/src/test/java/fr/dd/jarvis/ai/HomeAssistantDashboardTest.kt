@@ -20,4 +20,14 @@ class HomeAssistantDashboardTest {
     @Test fun ignoreUnMessageJsonInvalideSansFaireEchouerLaCorrelation() {
         assertFalse(HomeAssistantDashboard.correspondCommande("message incomplet", 7))
     }
+
+    @Test fun lesEvenementsNeSontPasAjoutesALaFileDeReponses() {
+        assertFalse(HomeAssistantDashboard.estMessageUtile("""{"type":"event","event":{"data":{}}}"""))
+    }
+
+    @Test fun lesReponsesEtMessagesAuthSontConserves() {
+        assertTrue(HomeAssistantDashboard.estMessageUtile("""{"id":7,"type":"result","success":true}"""))
+        assertTrue(HomeAssistantDashboard.estMessageUtile("""{"type":"auth_ok"}"""))
+        assertTrue(HomeAssistantDashboard.estMessageUtile("""{"_failure":"Connexion fermée"}"""))
+    }
 }
