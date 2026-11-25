@@ -14,6 +14,12 @@ class VoskReveilTest {
         return a
     }
 
+
+    @Test fun fenetresMusiqueCourtesEtDecaleesPourReduireLeDelaiDeReveil() {
+        assertEquals(20, VoskWake.FENETRE_MUSIQUE)
+        assertEquals(10, VoskWake.FENETRE_MUSIQUE / 2)
+    }
+
     @Test fun reveilEnDebutDePhrase() {
         assertTrue(VoskWake.estReveil(mots("jarvis" to 0.7, "allume" to 1.0), 0.6))
         assertTrue(VoskWake.estReveil(mots("dis" to 1.0, "jarvis" to 0.9), 0.6))
