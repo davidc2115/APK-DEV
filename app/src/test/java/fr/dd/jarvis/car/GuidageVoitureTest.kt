@@ -59,6 +59,6 @@ class MicroVoitureSensibleTest {
         val g2 = fr.dd.jarvis.voice.GainAuto()
         repeat(80) { g2.appliquer(fort, fort.size) }
         assertTrue(g2.gain < 1.05)                                            // jamais d'amplification d'un son fort
-        assertTrue(fr.dd.jarvis.voice.VoskWake.FENETRE_MUSIQUE == 15)
+        assertTrue(fr.dd.jarvis.voice.VoskWake.FENETRE_MUSIQUE == 30)
     }
 }
