@@ -182,6 +182,9 @@ class JarvisAccessibilityService : AccessibilityService() {
      * application, composants, libellés, états et coordonnées. Ce n'est pas une capture vidéo
      * ni un flux de pixels ; les champs marqués mot de passe sont volontairement masqués.
      */
+    /** Paquet de la fenêtre actuellement exposée, sans parcourir son contenu. */
+    fun activePackageName(): String? = rootInActiveWindow?.packageName?.toString()
+
     fun readScreen(): String = inspectScreen()
 
     fun inspectScreen(): String {
