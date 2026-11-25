@@ -574,7 +574,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     /** Lecture stricte : null signifie réellement absent ; une perte d'accès ou une erreur de lecture lève une exception. */
     fun readNoteStrict(path: String): String? {
         signalerFilPrincipal("readNoteStrict")
-        val p = withMd(path)
+        // Les mémoires structurées peuvent être en JSON ; ne leur ajoute pas artificiellement « .md ».
+        val p = path.trim().trim('/').let { brut ->
+            if (brut.substringAfterLast('/').contains('.')) brut else "$brut.md"
+        }
         if (coffreConfigure()) {
             val f = trouverUniquePourLecture(p) ?: return null
             if (!f.isFile) return null
