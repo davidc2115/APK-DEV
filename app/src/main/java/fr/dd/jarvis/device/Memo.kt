@@ -99,6 +99,17 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val hash = MessageDigest.getInstance("SHA-256").digest(preuveNormalisee.toByteArray())
             .joinToString("") { "%02x".format(it) }.take(20)
         val proofs = candidates.getOrPut(key) { linkedSetOf() }
+        // Le registre Jarvis/Hermès reçoit les mêmes preuves, sans attendre la migration legacy.
+        // Il garde leur contexte et ne passe en candidate qu'après trois preuves distinctes.
+        registreApprentissage.enregistrerPreuveHabitude(
+            value,
+            "Préférence candidate de la rubrique $category",
+            "Memo.apprendre",
+            evidence,
+            category,
+            "memo.apprendre",
+            "jarvis"
+        )
         if (!proofs.add(hash)) {
             // Si la confirmation précédente a échoué sur Obsidian, les trois preuves restent présentes :
             // retenter aussi la mémoire durable avant d'annoncer que l'habitude est enregistrée.
