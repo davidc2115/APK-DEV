@@ -23,6 +23,8 @@ class HomeAssistantDashboardTest {
 
     @Test fun lesEvenementsNeSontPasAjoutesALaFileDeReponses() {
         assertFalse(HomeAssistantDashboard.estMessageUtile("""{"type":"event","event":{"data":{}}}"""))
+        // L'API HA donne aussi un id aux événements issus d'un abonnement.
+        assertFalse(HomeAssistantDashboard.estMessageUtile("""{"id":3,"type":"event","event":{"data":{}}}"""))
     }
 
     @Test fun lesReponsesEtMessagesAuthSontConserves() {
