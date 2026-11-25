@@ -136,7 +136,7 @@ object Discord {
             if (t.isBlank() || t.equals("toutes_sauf_administrateur", true) ||
                 t.equals("tout_sauf_administrateur", true) || t.equals("admin_sans_administrateur", true) ||
                 t.equals("toutes", true) || t.equals("administrateur", true) || t.equals("admin", true)) return parse(t)
-            val morceaux = t.split(",", ";", "|", "\\n").map { it.trim() }.filter { it.isNotBlank() }
+            val morceaux = t.split(",", ";", "|", "\n").map { it.trim() }.filter { it.isNotBlank() }
             val inconnus = morceaux.filter { trouver(it) == null }
             require(inconnus.isEmpty()) { "Permissions Discord inconnues : ${inconnus.joinToString(", ")}. Noms possibles : ${NOMS.keys.joinToString(", ")}." }
             return morceaux.fold(0L) { acc, nom -> acc or NOMS.getValue(trouver(nom)!!) }
