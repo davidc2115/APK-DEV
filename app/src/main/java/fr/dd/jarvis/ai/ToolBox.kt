@@ -310,7 +310,7 @@ class ToolBox(
         put(tool("agendas_liste", "Liste les agendas du téléphone et indique lesquels sont masqués."))
         put(tool("tache_arriere_plan", "Lance en arrière-plan une demande LONGUE ou en masse (trier beaucoup de mails, renommer ou modifier plusieurs contacts, ranger…) : elle continue même si l'app est fermée et le résultat arrive par notification. À utiliser quand l'utilisateur dit « en arrière-plan », « pendant que je fais autre chose », ou pour un gros volume.",
             mapOf("demande" to prop("La demande complète et autonome, comme l'utilisateur la formulerait (ex. « trie 300 mails du compte x, range-les dans Gmail et archive les pubs »).")), listOf("demande")))
-        put(tool("alarme_creer", "Règle une alarme (sonnerie répétée jusqu'à l'arrêt) SANS ouvrir aucune application ; visible dans la barre d'état.",
+        put(tool("alarme_creer", "CRÉATION uniquement d'un nouveau réveil via l'intent standard Android avec demande SKIP_UI. Ce n'est pas une méthode d'édition : ne jamais l'utiliser pour déplacer, renommer ou modifier un réveil existant. N'appeler que si l'utilisateur demande explicitement un nouveau réveil.",
             mapOf("heure" to prop("Heure au format HH:MM (24 h)."), "libelle" to prop("Nom de l'alarme (optionnel)."),
                 "jours" to prop("Répétition (optionnel) : « lun mar ven », « semaine », « tous les jours ». Vide = une seule fois.")), listOf("heure")))
         put(tool("alarme_supprimer", "Supprime une alarme interne JARVIS si elle est identifiée. Pour les réveils natifs Xiaomi, aucune suppression n'est tentée tant que l'action ne peut pas être vérifiée ; ne jamais ouvrir l'Horloge automatiquement.",
