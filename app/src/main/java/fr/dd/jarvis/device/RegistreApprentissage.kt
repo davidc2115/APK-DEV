@@ -259,7 +259,7 @@ class RegistreApprentissage(
             if (title.length < 3) continue
             val hashes = rawHashes.map { it.trim() }.filter { it.isNotBlank() }.distinct().sorted()
             if (hashes.isEmpty()) continue
-            val stableKey = "$category|\${title.lowercase()}"
+            val stableKey = "$category|${title.lowercase()}"
             val id = "legacy-habit-" + empreinte(stableKey).take(32)
             if ((0 until entries.length()).any { entries.optJSONObject(it)?.optString("id") == id }) continue
             val now = System.currentTimeMillis()
@@ -288,7 +288,7 @@ class RegistreApprentissage(
                 .put("permissions", JSONArray())
                 .put("version", 1)
                 .put("legacyOpaque", true))
-            journal(id, "legacy_imported", "\${hashes.size} empreinte(s) historique(s) importée(s), contexte non conservé", acteur)
+            journal(id, "legacy_imported", "${hashes.size} empreinte(s) historique(s) importée(s), contexte non conservé", acteur)
             imported++
         }
         if (imported > 0) persisterMutation(avant)
