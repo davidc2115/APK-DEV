@@ -37,4 +37,20 @@ class VoskReveilTest {
         // Prénoms et mots qui réveillaient JARVIS à tort.
         listOf("joris", "doris", "boris", "jadis", "javier", "janvier", "charlie", "carvi", "parvis").forEach { assertTrue(it, it in g) }
     }
+
+    @Test fun fermetureRapideApresLeMot() {
+        val porte = PorteVocale().apply { sensible = true }
+        assertEquals(PorteVocale.Decision.IGNORER, porte.trame(100.0))
+        assertEquals(PorteVocale.Decision.OUVRIR, porte.trame(300.0))
+        repeat(5) {
+            assertEquals(PorteVocale.Decision.CONTINUER, porte.trame(100.0))
+        }
+        assertEquals(PorteVocale.Decision.FERMER, porte.trame(100.0))
+        assertEquals(6, PorteVocale.MAINTIEN)
+    }
+
+    @Test fun fenetresMusiquePlusCourtes() {
+        // Une fenêtre de 1,5 s, chevauchée par la seconde reconnaissance.
+        assertEquals(15, VoskWake.FENETRE_MUSIQUE)
+    }
 }
