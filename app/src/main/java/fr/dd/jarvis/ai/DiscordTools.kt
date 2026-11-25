@@ -845,11 +845,32 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             if (!confirm("Réorganiser « $gnom »" + (if (manquantes.isNotEmpty()) " (création de ${manquantes.size} catégorie(s) : ${manquantes.joinToString(", ")})" else "") +
                     " ?\n\nAVANT :\n${avant.take(1500)}\n\nAPRÈS :\n${apercu.take(1500)}", true)) return ToolResult("Réorganisation annulée : rien n'a été modifié.")
             val creees = mutableMapOf<String, String>()
-            manquantes.forEach { n -> creees[n] = Discord.salonCreer(app, gid, JSONObject().put("name", n.take(100)).put("type", DiscordOrganisation.CATEGORIE), "Réorganisation depuis Jarvis").getString("id") }
-            l = tous(gid)
-            val lignes = plan.mapIndexed { i, ligne -> idCat(ligne.categorie, l, creees) to salonsIds[i] }
-            Discord.salonsPositions(app, gid, DiscordOrganisation.reorganisation(l, lignes, vrai(a.optString("synchroniser"))), "Réorganisation depuis Jarvis")
-            ToolResult("✅ Serveur « $gnom » réorganisé.\n\n" + DiscordOrganisation.apercu(tous(gid), JSONArray()), direct = true)
+            var appliquee = false
+            try {
+                manquantes.forEach { n ->
+                    creees[n] = Discord.salonCreer(app, gid, JSONObject().put("name", n.take(100)).put("type", DiscordOrganisation.CATEGORIE), "Réorganisation depuis Jarvis").getString("id")
+                }
+                l = tous(gid)
+                val lignes = plan.mapIndexed { i, ligne -> idCat(ligne.categorie, l, creees) to salonsIds[i] }
+                Discord.salonsPositions(app, gid, DiscordOrganisation.reorganisation(l, lignes, vrai(a.optString("synchroniser"))), "Réorganisation depuis Jarvis")
+                appliquee = true
+                val final = tous(gid)
+                ToolResult("✅ Serveur « $gnom » réorganisé.\n\n" + DiscordOrganisation.apercu(final, JSONArray()), direct = true)
+            } catch (e: Throwable) {
+                if (appliquee) {
+                    ToolResult("⚠️ Discord a accepté la réorganisation de « $gnom », mais Jarvis n’a pas pu relire la structure pour la vérifier : ${e.message ?: e.javaClass.simpleName}. Aucune catégorie n’a été supprimée.", direct = true)
+                } else {
+                    var nettoyees = 0
+                    val echecsNettoyage = mutableListOf<String>()
+                    creees.values.toList().asReversed().forEach { id ->
+                        runCatching { Discord.salonSupprimer(app, id, "Nettoyage après échec de réorganisation Jarvis") }
+                            .onSuccess { nettoyees++ }
+                            .onFailure { echecsNettoyage += id }
+                    }
+                    ToolResult("❌ Réorganisation non terminée sur « $gnom » : ${e.message ?: e.javaClass.simpleName}. Rien n’a été annoncé comme réorganisé. Catégories provisoires supprimées : $nettoyees/${creees.size}." +
+                        (if (echecsNettoyage.isNotEmpty()) " Nettoyage impossible pour les ID : ${echecsNettoyage.joinToString(", ")}." else ""), direct = true)
+                }
+            }
         }
         "discord_salon_permissions_voir" -> {
             val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
