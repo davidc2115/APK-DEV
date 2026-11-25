@@ -35,7 +35,7 @@ object Tele {
     data class Candidat(val ip: String, val nom: String, val type: String, val raison: String)
 
     internal fun estEnceinteGoogle(texte: String, type: String = ""): Boolean =
-        Regex("google.?home|google.?nest|nest.?audio|nest.?mini|nest.?hub|home.?mini|speaker|enceinte|haut.?parleur").containsMatchIn(texte.lowercase()) ||
+        Regex("google.?home|google.?nest|chromecast.?audio|nest.?audio|nest.?mini|nest.?hub|home.?mini|speaker|enceinte|haut.?parleur").containsMatchIn(texte.lowercase()) ||
             type.contains("🔊")
 
     /** Télés trouvées dans l'inventaire du Wi-Fi (ports et noms caractéristiques). */
