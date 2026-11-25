@@ -332,11 +332,11 @@ class RegistreApprentissage(
         val normalisees = permissions.map { it.trim().lowercase() }.distinct()
         val refusees = normalisees.filter { it !in autorisees }
         if (refusees.isNotEmpty())
-            throw SecurityException("Permissions inconnues ou trop larges refusées : \${refusees.joinToString(", ")}.")
+            throw SecurityException("Permissions inconnues ou trop larges refusées : ${refusees.joinToString(", ")}.")
         val avant = avantMutation()
         item.put("requestedPermissions", JSONArray(normalisees.sorted()))
         item.put("updatedAt", System.currentTimeMillis())
-        journal(id, "permissions_requested", "Permissions demandées : \${normalisees.sorted().joinToString(", ")}", acteur)
+        journal(id, "permissions_requested", "Permissions demandées : ${normalisees.sorted().joinToString(", ")}", acteur)
         persisterMutation(avant)
     }
 
