@@ -263,4 +263,29 @@ class RegistreApprentissageTest {
             assertFalse(entries.getJSONObject(1).has("manifest"))
         } finally { dir.deleteRecursively() }
     }
+
+    @Test
+    fun actionMcpManifestEnregistreSansInstallerNiActiver() {
+        val dir = Files.createTempDirectory("registre-manifeste-mcp").toFile()
+        try {
+            val r = registre(dir)
+            val id = r.creer("tool", "Lecteur de capteurs", "Lecture seule des capteurs", "proposition")
+            val resultat = JSONObject(r.executer(JSONObject()
+                .put("action", "manifest")
+                .put("id", id)
+                .put("version", "2.1.0")
+                .put("source", "catalogue interne validé")
+                .put("dependances", org.json.JSONArray().put("ha-client"))
+                .put("risque", "low")
+                .put("plan_test", "Simuler un capteur absent et vérifier le résultat en lecture seule.")
+                .put("acteur", "hermes")))
+            assertTrue(resultat.getBoolean("ok"))
+            assertFalse(resultat.getBoolean("installed"))
+            assertFalse(resultat.getBoolean("executed"))
+            val item = JSONObject(r.snapshot()).getJSONArray("entries").getJSONObject(0)
+            assertEquals(RegistreApprentissage.ETAT_OBSERVED, item.getString("state"))
+            assertEquals(0, item.getJSONArray("permissions").length())
+            assertEquals("2.1.0", item.getJSONObject("manifest").getString("version"))
+        } finally { dir.deleteRecursively() }
+    }
 }
