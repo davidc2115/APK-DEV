@@ -164,8 +164,8 @@ class VoskWake(
         else when (exigence) { 1 -> 0.88; 2 -> 0.93; else -> 0.97 }
 
     companion object {
-        /** Tranche d'écoute continue pendant la musique, en voiture : 3 s (30 trames de 0,1 s). */
-        internal const val FENETRE_MUSIQUE = 30
+        /** Tranche d'écoute continue pendant la musique, en voiture : 2 s (20 trames de 0,1 s). */
+        internal const val FENETRE_MUSIQUE = 20
 
         /** Micro qui écoute « Jarvis » en ce moment (affiché dans Réglages › Écoute), null si aucune écoute. */
         @Volatile var microActuel: String? = null
