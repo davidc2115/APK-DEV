@@ -284,7 +284,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         if (!tree.canRead()) throw IOException("Autorisation de lecture Obsidian absente.")
         var current: DocumentFile = tree
         val chemin = (relatif(folder).trim('/') + "/" + name).trim('/')
-        for (part in chemin.split('/').filter { it.isNotBlank() }) {
+        val parties = chemin.split('/').filter { it.isNotBlank() }
+        parties.forEachIndexed { index, part ->
+            if (!current.isDirectory) throw IOException("Le chemin Obsidian n'est pas un dossier avant « $part ».")
             val enfants = try { current.listFiles().toList() }
                 catch (e: Exception) { throw IOException("Impossible de parcourir le coffre Obsidian ($part).", e) }
             val exacts = enfants.filter { it.name == part }
@@ -292,9 +294,13 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 it.name?.let { n -> normaliseNom(n) == normaliseNom(part) } == true
             }
             if (matches.size > 1) throw IOException("Plusieurs éléments Obsidian correspondent à « $part ».")
-            current = matches.singleOrNull() ?: return null
+            val trouve = matches.singleOrNull() ?: return null
+            val dernier = index == parties.lastIndex
+            if (dernier && trouve.isDirectory) throw IOException("L'emplacement attendu pour la note Obsidian est un dossier : $chemin")
+            if (!dernier && !trouve.isDirectory) throw IOException("Un fichier empêche d'accéder au dossier Obsidian « $part ».")
+            current = trouve
         }
-        if (!current.isFile) return null
+        if (!current.isFile) throw IOException("L'élément Obsidian attendu n'est pas un fichier : $chemin")
         val contenu = ctx.contentResolver.openInputStream(current.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
             ?: throw IOException("Impossible de lire la note Obsidian : $chemin")
         return contenu to runCatching { current.lastModified() }.getOrDefault(0L)
