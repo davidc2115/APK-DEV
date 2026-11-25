@@ -481,7 +481,7 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             val g = guildeObj(a); val gid = g.getString("id"); val gnom = g.optString("name")
             val nom = a.optString("nom").trim()
             if (nom.isBlank()) return ToolResult("Nom du rôle manquant.")
-            val perms = a.optString("permissions").let { if (it.isBlank()) null else Discord.Perm.parse(it) }
+            val perms = a.optString("permissions").let { if (it.isBlank()) null else Discord.Perm.parseStrict(it) }
             val admin = perms != null && (perms and Discord.Perm.ADMINISTRATOR) != 0L
             if (!confirm("Créer le rôle « $nom » sur le serveur « $gnom »" + (if (admin) " avec TOUTES les permissions, y compris Administrateur (ignore toujours les restrictions de salon)" else "") + " ?", true))
                 return ToolResult("Refusé par l'utilisateur.")
@@ -497,10 +497,10 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
             val role = Discord.trouverRole(app, gid, a.optString("role")) ?: return ToolResult(Discord.introuvable("rôle", a.optString("role"), gnom, Discord.roles(app, gid)))
             // « ajoute / retire tel droit » : les autres permissions du rôle sont gardées.
             val plus = a.optString("ajouter_permissions").trim(); val moins = a.optString("retirer_permissions").trim()
-            val perms = a.optString("permissions").let { if (it.isBlank()) null else Discord.Perm.parse(it) }
+            val perms = a.optString("permissions").let { if (it.isBlank()) null else Discord.Perm.parseStrict(it) }
                 ?: if (plus.isNotBlank() || moins.isNotBlank()) {
                     val actuel = role.optString("permissions", "0").toLongOrNull() ?: 0L
-                    (actuel or Discord.Perm.parse(plus)) and Discord.Perm.parse(moins).inv()
+                    (actuel or Discord.Perm.parseStrict(plus)) and Discord.Perm.parseStrict(moins).inv()
                 } else null
             val admin = perms != null && (perms and Discord.Perm.ADMINISTRATOR) != 0L
             val detail = listOfNotNull(plus.takeIf { it.isNotBlank() }?.let { "ajout : $it" }, moins.takeIf { it.isNotBlank() }?.let { "retrait : $it" }).joinToString(" ; ")
