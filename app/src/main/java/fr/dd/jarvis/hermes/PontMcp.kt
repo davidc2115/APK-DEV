@@ -87,7 +87,7 @@ object PontMcp {
         override fun groq(corps: JSONObject) = RelaisGroq.repondre(app, corps)
         override fun groqModeles() = RelaisGroq.modeles(app)
         override fun memoireHermes(texte: String) { app.memo.majHermes(texte) }
-        override fun memoireJarvis(): String = runCatching { app.memo.pourHermes() }.getOrDefault("")
+        override fun memoireJarvis(): String = app.memo.pourHermes()
         override fun capacitesHermes(json: String) { app.memo.majCapacitesHermes(json) }
         private val defaut by lazy { ToolBox(app) { _, force -> !force } }
         private fun boite() = boiteActive ?: defaut
@@ -383,7 +383,14 @@ object PontMcp {
                     .put("message", erreur.message ?: "Impossible d'enregistrer la mémoire Hermès.")
                     .toString())
             }
-            chemin == "/memoire/jarvis" && r.methode == "GET" -> repondre(s, 200, f.memoireJarvis(), type = "text/plain")
+            chemin == "/memoire/jarvis" && r.methode == "GET" -> {
+                val lecture = runCatching { f.memoireJarvis() }
+                if (lecture.isSuccess) repondre(s, 200, lecture.getOrThrow(), type = "text/plain")
+                else repondre(s, 500, JSONObject()
+                    .put("error", "jarvis_memory_unavailable")
+                    .put("message", lecture.exceptionOrNull()?.message ?: "Impossible de lire la mémoire Jarvis.")
+                    .toString())
+            }
             chemin == "/memoire/hermes-capacites" && r.methode == "POST" -> {
                 val erreur = runCatching { f.capacitesHermes(r.corps) }.exceptionOrNull()
                 if (erreur == null) repondre(s, 200, """{"ok":true}""")
