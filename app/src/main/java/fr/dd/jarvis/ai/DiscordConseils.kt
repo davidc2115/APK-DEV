@@ -27,6 +27,10 @@ internal object DiscordConseils {
         val conseils = mutableListOf<String>()
 
         val categoriesVides = categories.filter { cat -> canaux.none { it.optString("parent_id") == cat.optString("id") } }
+        categories.forEach { cat ->
+            val count = canaux.count { it.optString("parent_id") == cat.optString("id") }
+            if (count >= 45) conseils += "🟡 Catégorie « ${cat.optString("name")} » proche de la limite Discord de 50 salons ($count actuellement). Prévoir une sous-organisation en plusieurs catégories. Action : discord_salons_reorganiser."
+        }
         categoriesVides.forEach {
             conseils += "🟡 Catégorie vide « ${it.optString("name")} » : la supprimer si elle n'a plus d'utilité, ou y déplacer les salons concernés. Action : discord_salon_supprimer / discord_salon_modifier."
         }
@@ -64,6 +68,11 @@ internal object DiscordConseils {
             if (sensibles.isNotEmpty()) {
                 conseils += "🔴 @everyone possède des droits étendus : ${sensibles.joinToString { it.second }}. Vérifier si ces droits doivent être réservés à un rôle d'administration. Action : discord_role_modifier."
             }
+        }
+
+        val rolesDupliques = roles.filter { it.optString("id") != guildId }.groupBy { cle(it.optString("name")) }.filter { it.key.isNotBlank() && it.value.size > 1 }
+        rolesDupliques.values.forEach { groupe ->
+            conseils += "🟡 Noms de rôles identiques ou proches : ${groupe.joinToString { "@" + it.optString("name") }}. Renommer pour faciliter l’attribution et l’audit. Action : discord_role_modifier."
         }
 
         val rolesAdmin = roles.filter { it.optString("id") != guildId && (permissions(it) and Discord.Perm.ADMINISTRATOR) != 0L }
