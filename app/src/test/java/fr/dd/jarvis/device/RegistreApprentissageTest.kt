@@ -162,4 +162,21 @@ class RegistreApprentissageTest {
         } finally { dir.deleteRecursively() }
     }
 
+    @Test
+    fun habitudesDeRubriquesDifferentesRestentIndependantes() {
+        val dir = Files.createTempDirectory("registre-habitudes-rubriques").toFile()
+        try {
+            val r = registre(dir)
+            val idTexte = r.enregistrerPreuveHabitude("[texte] Réponses concises", "Préférence de texte", "Memo.apprendre",
+                "Je préfère les réponses courtes", "texte", "memo.apprendre")
+            val idVoix = r.enregistrerPreuveHabitude("[voix] Réponses concises", "Préférence vocale", "Memo.apprendre",
+                "Je préfère les réponses courtes", "voix", "memo.apprendre")
+            assertNotEquals(idTexte, idVoix)
+            val entries = JSONObject(r.snapshot()).getJSONArray("entries")
+            assertEquals(2, entries.length())
+            assertEquals(RegistreApprentissage.ETAT_OBSERVED, entries.getJSONObject(0).getString("state"))
+            assertEquals(RegistreApprentissage.ETAT_OBSERVED, entries.getJSONObject(1).getString("state"))
+        } finally { dir.deleteRecursively() }
+    }
+
 }
