@@ -544,7 +544,7 @@ class SocieteService(
                 File(ctx.filesDir, "societe/$relatif").let { fichier -> runCatching { fichier.delete() } }
             }
         }
-        return "${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note mise à jour : $emplacement — $pdf
+        return "${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note mise à jour : $emplacement — $pdf"
     }
 
     // ------------------------------------------------------------------ export (Obsidian + PDF)
