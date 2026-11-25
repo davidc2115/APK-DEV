@@ -86,7 +86,7 @@ object AccesDistant {
     fun portPrincipal(e: JSONObject): Int? {
         val ports = e.optJSONArray("ports")?.let { a -> (0 until a.length()).map { a.optInt(it) } }.orEmpty()
         val utiles = SERVICES.keys.filter { it in ports && it !in SENSIBLES }
-        return utiles.firstOrNull()?.takeIf { utiles.size == 1 || it in setOf(8123, 32400) } ?: ports.singleOrNull()
+        return utiles.singleOrNull() ?: ports.singleOrNull()
     }
 
     /** Port externe libre : le même que l'appareil s'il n'est pas déjà pris, sinon un port haut libre. */
