@@ -85,10 +85,10 @@ internal object DiscordConseils {
         }
 
         val noms = canaux.map { cle(it.optString("name")) }.toSet()
-        if (noms.none { it.contains("regle") || it.contains("rules") }) {
+        if (canaux.isNotEmpty() && noms.none { it.contains("regle") || it.contains("rules") }) {
             conseils += "🟢 Aucun salon de règles clairement identifiable. Envisager un #regles ou #bienvenue pour présenter le serveur. Action : discord_salon_creer."
         }
-        if (noms.none { it.contains("annonce") || it.contains("news") }) {
+        if (canaux.isNotEmpty() && noms.none { it.contains("annonce") || it.contains("announcement") || it.contains("news") }) {
             conseils += "🟢 Aucun salon d'annonces clairement identifiable. Envisager un salon d'annonces si les informations importantes doivent être centralisées. Action : discord_salon_creer."
         }
 
