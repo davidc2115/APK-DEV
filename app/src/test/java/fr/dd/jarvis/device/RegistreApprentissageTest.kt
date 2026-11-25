@@ -1,0 +1,75 @@
+package fr.dd.jarvis.device
+
+import java.io.File
+import java.nio.file.Files
+import org.json.JSONObject
+import org.junit.Assert.*
+import org.junit.Test
+
+class RegistreApprentissageTest {
+    private fun registre(dossier: File, coffre: Boolean = false, distant: MutableList<String?> = mutableListOf(null)): RegistreApprentissage {
+        return RegistreApprentissage(
+            File(dossier, "index.json"),
+            { coffre },
+            { distant.last() },
+            { raw -> distant.add(raw) }
+        )
+    }
+
+    @Test
+    fun preuveDupliqueeNeComptePasDeuxFois() {
+        val dir = Files.createTempDirectory("registre-apprentissage").toFile()
+        try {
+            val r = registre(dir)
+            val id = r.creer("habit", "Préférence de présentation", "Préférence observée", "conversation")
+            assertTrue(r.ajouterPreuve(id, "Toujours présenter les températures", "demande maison", "conversation"))
+            assertFalse(r.ajouterPreuve(id, "Toujours   présenter les températures", "autre contexte", "conversation"))
+            val item = JSONObject(r.snapshot()).getJSONArray("entries").getJSONObject(0)
+            assertEquals(1, item.getJSONArray("evidence").length())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun activationNecessiteValidationEtTransitionsAutorisees() {
+        val dir = Files.createTempDirectory("registre-etats").toFile()
+        try {
+            val r = registre(dir)
+            val id = r.creer("skill", "Diagnostic réseau", "Proposition de skill", "tâche répétée")
+            r.changerEtat(id, RegistreApprentissage.ETAT_CANDIDATE, false)
+            r.changerEtat(id, RegistreApprentissage.ETAT_NEEDS_REVIEW, false)
+            assertThrows(SecurityException::class.java) {
+                r.changerEtat(id, RegistreApprentissage.ETAT_APPROVED, false)
+            }
+            r.changerEtat(id, RegistreApprentissage.ETAT_APPROVED, true)
+            r.changerEtat(id, RegistreApprentissage.ETAT_TESTING, true)
+            r.changerEtat(id, RegistreApprentissage.ETAT_ACTIVE, true)
+            assertEquals(RegistreApprentissage.ETAT_ACTIVE,
+                JSONObject(r.snapshot()).getJSONArray("entries").getJSONObject(0).getString("state"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun transitionDirecteVersActiveEstRefusee() {
+        val dir = Files.createTempDirectory("registre-transition").toFile()
+        try {
+            val r = registre(dir)
+            val id = r.creer("tool", "Connecteur calendrier", "Outil proposé", "demande utilisateur")
+            assertThrows(IllegalStateException::class.java) {
+                r.changerEtat(id, RegistreApprentissage.ETAT_ACTIVE, true)
+            }
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun registreEstMiroireDansLeCoffreEtRecharge() {
+        val dir = Files.createTempDirectory("registre-coffre").toFile()
+        try {
+            val distant = mutableListOf<String?>(null)
+            val r = registre(dir, coffre = true, distant = distant)
+            r.creer("error", "Timeout Home Assistant", "Timeout récurrent", "journal technique")
+            assertNotNull(distant.last())
+            val r2 = RegistreApprentissage(File(dir, "autre-cache.json"), { true }, { distant.last() }, { distant.add(it) })
+            assertEquals(1, JSONObject(r2.snapshot()).getJSONArray("entries").length())
+        } finally { dir.deleteRecursively() }
+    }
+}
