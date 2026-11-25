@@ -659,7 +659,30 @@ object Serveur {
         }
     }
 
-    /** Attentes entre deux essais quand le réseau rate (adresse introuvable, connexion refusée…) : ~4,5 s au total. */
+    /** Délais différenciés : lectures d'état et commandes domestiques ne doivent pas hériter des 45 s d'une opération admin. */
+    internal data class DelaisHa(val connexion: Long, val lecture: Long, val appel: Long)
+
+    internal fun delaisHa(methode: String, chemin: String): DelaisHa = when {
+        methode != "POST" && (chemin == "/api/states" || chemin.startsWith("/api/states/")) ->
+            DelaisHa(connexion = 4, lecture = 8, appel = 10)
+        methode == "POST" && chemin.startsWith("/api/services/") ->
+            DelaisHa(connexion = 6, lecture = 12, appel = 15)
+        else -> DelaisHa(connexion = 10, lecture = 40, appel = 45)
+    }
+
+    internal fun estLectureEtatRapide(methode: String, chemin: String) =
+        methode != "POST" && (chemin == "/api/states" || chemin.startsWith("/api/states/"))
+
+    private fun clientHa(client: OkHttpClient, methode: String, chemin: String): OkHttpClient {
+        val d = delaisHa(methode, chemin)
+        return if (d.connexion == 10L && d.lecture == 40L && d.appel == 45L) client else client.newBuilder()
+            .connectTimeout(d.connexion, TimeUnit.SECONDS)
+            .readTimeout(d.lecture, TimeUnit.SECONDS)
+            .callTimeout(d.appel, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /** Attentes entre deux essais ; une lecture d'état rapide n'a qu'un seul nouvel essai court. */
     private val REESSAIS_HA = longArrayOf(1_500, 3_000)
 
     /**
@@ -681,9 +704,13 @@ object Serveur {
             } catch (e: IllegalStateException) {
                 throw e
             } catch (e: Exception) {
-                if (passager(e, methode) && essai < REESSAIS_HA.size) {
-                    fr.dd.jarvis.voice.JournalVoix.noter("maison", "Home Assistant : ${e.javaClass.simpleName} sur $methode ${chemin.take(60)} → nouvel essai dans ${REESSAIS_HA[essai] / 1000.0} s")
-                    Thread.sleep(REESSAIS_HA[essai++])
+                val lectureRapide = estLectureEtatRapide(methode, chemin)
+                val maxEssais = if (lectureRapide) 1 else REESSAIS_HA.size
+                if (passager(e, methode) && essai < maxEssais) {
+                    val attente = if (lectureRapide) 500L else REESSAIS_HA[essai]
+                    fr.dd.jarvis.voice.JournalVoix.noter("maison", "Home Assistant : ${e.javaClass.simpleName} sur $methode ${chemin.take(60)} → nouvel essai dans ${attente / 1000.0} s")
+                    Thread.sleep(attente)
+                    essai++
                     continue
                 }
                 throw erreurHa(app, e)
@@ -707,9 +734,10 @@ object Serveur {
         if (listeEtats && !frais) etatsHa?.takeIf { it.cle == cle && System.currentTimeMillis() - it.le < ETATS_DUREE_MS }?.let { return it.corps }
         if (methode == "POST") oublierEtatsHa()
         val generation = generationEtats.get()
+        val clientCible = clientHa(client, methode, chemin)
         val b = Request.Builder().url(adresse + chemin).header("Authorization", "Bearer ${app.store.haToken.value.trim()}")
         if (methode == "POST") b.post((corps?.toString() ?: "{}").toRequestBody("application/json".toMediaType())) else b.get()
-        client.newCall(b.build()).execute().use { r ->
+        clientCible.newCall(b.build()).execute().use { r ->
             val t = r.body?.string().orEmpty()
             if (methode == "POST") oublierEtatsHa()
             else if (listeEtats && r.isSuccessful && generation == generationEtats.get()) etatsHa = EtatsHa(cle, t, System.currentTimeMillis())
