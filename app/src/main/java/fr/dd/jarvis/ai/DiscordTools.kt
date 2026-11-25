@@ -866,12 +866,29 @@ class DiscordTools(private val app: JarvisApp, private val confirm: suspend (Str
                 } else {
                     var nettoyees = 0
                     val conservees = mutableListOf<String>()
-                    val etatActuel = runCatching { tous(gid) }.getOrNull()
+                    // Les blocs de nettoyage ne doivent jamais absorber une annulation de coroutine.
+                    val etatActuel = try {
+                        tous(gid)
+                    } catch (annulation: kotlinx.coroutines.CancellationException) {
+                        throw annulation
+                    } catch (_: Throwable) {
+                        null
+                    }
                     creees.values.toList().asReversed().forEach { id ->
                         // Ne jamais supprimer une catégorie si Discord a malgré tout déplacé des salons dedans.
                         val occupee = etatActuel?.any { it.optInt("type") != DiscordOrganisation.CATEGORIE && it.optString("parent_id") == id }
-                        if (etatActuel == null || occupee == true) conservees += id
-                        else runCatching { Discord.salonSupprimer(app, id, "Nettoyage après échec de réorganisation Jarvis") }.onSuccess { nettoyees++ }.onFailure { conservees += id }
+                        if (etatActuel == null || occupee == true) {
+                            conservees += id
+                        } else {
+                            try {
+                                Discord.salonSupprimer(app, id, "Nettoyage après échec de réorganisation Jarvis")
+                                nettoyees++
+                            } catch (annulation: kotlinx.coroutines.CancellationException) {
+                                throw annulation
+                            } catch (_: Throwable) {
+                                conservees += id
+                            }
+                        }
                     }
                     ToolResult("❌ Réorganisation non terminée sur « $gnom » : ${e.message ?: e.javaClass.simpleName}. Catégories provisoires vides supprimées : $nettoyees/${creees.size}." +
                         (if (conservees.isNotEmpty()) " Catégories conservées par sécurité (salons déplacés ou état non vérifiable) : ${conservees.joinToString(", ")}." else ""), direct = true)
