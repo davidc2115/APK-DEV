@@ -467,13 +467,34 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val md = "# Mémoire d'Hermès\n\n_Synchronisée automatiquement depuis Hermès (Termux). Pour corriger une information, demande-le à Jarvis ou à Hermès._\n\n" +
             "## Notes d'Hermès\n" + notes.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } +
             "\n\n## Profil de l'utilisateur (vu par Hermès)\n" + profil.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } + "\n"
-        // Même sans changement, retenter le miroir Obsidian : un coffre momentanément inaccessible
-        // ne doit pas laisser une mémoire locale correcte mais une note Obsidian durablement périmée.
+        // Conserver la source brute dans le coffre : le résumé Markdown ne suffit pas à reconstruire
+        // fidèlement la mémoire après une réinstallation de Jarvis.
+        obsidian.saveIn(FOLDER, "Mémoire Hermès source", texte)
+        // Même sans changement, retenter les deux miroirs : un échec temporaire ne doit pas laisser
+        // une mémoire locale correcte mais des notes Obsidian durablement périmées.
         obsidian.saveIn(FOLDER, "Mémoire Hermès", md)
         return change
     }
 
-    fun hermes(): String = hermesCache ?: runCatching { hermesLocal.takeIf { it.exists() }?.readText() }.getOrNull().orEmpty().also { hermesCache = it }
+    @Synchronized
+    fun hermes(): String {
+        hermesCache?.let { return it }
+        val source = if (obsidian.coffreConfigure()) {
+            // Une erreur d'accès SAF remonte : la copie privée n'est pas une source concurrente.
+            val distante = obsidian.lireAvecDateStrict(FOLDER, "Mémoire Hermès source.md")?.first
+            if (distante != null) distante else {
+                // Migration unique d'une ancienne installation : le fichier local n'est utilisé
+                // que si la note est réellement absente, jamais si le coffre est inaccessible.
+                val ancienne = hermesLocal.takeIf { it.isFile }?.readText().orEmpty()
+                if (ancienne.isNotBlank()) obsidian.saveIn(FOLDER, "Mémoire Hermès source", ancienne)
+                ancienne
+            }
+        } else {
+            hermesLocal.takeIf { it.isFile }?.readText().orEmpty()
+        }
+        hermesCache = source
+        return source
+    }
 
     /** Toutes les entrées de la mémoire d'Hermès (notes puis profil). */
     fun entreesHermesListe(): List<String> = entreesHermes(hermes()).let { (n, p) -> n + p }
@@ -500,12 +521,25 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         // Même garantie que la mémoire : pas d'accusé de réception si le fichier durable
         // n'a pas été remplacé correctement, afin que le hook réessaie.
         persisterCopieHermes(capacitesLocal, json)
+        obsidian.saveBytes(FOLDER, "Capacités Hermès.json", json.toByteArray(Charsets.UTF_8), "application/json")
         capacitesCache = j
     }
 
-    private fun capacites(): org.json.JSONObject = capacitesCache
-        ?: runCatching { org.json.JSONObject(capacitesLocal.readText()) }.getOrNull()?.also { capacitesCache = it }
-        ?: org.json.JSONObject()
+    @Synchronized
+    private fun capacites(): org.json.JSONObject {
+        capacitesCache?.let { return it }
+        val brut = if (obsidian.coffreConfigure()) {
+            val distante = obsidian.lireAvecDateStrict(FOLDER, "Capacités Hermès.json")?.first
+            if (distante != null) distante else {
+                val ancienne = capacitesLocal.takeIf { it.isFile }?.readText().orEmpty()
+                if (ancienne.isNotBlank()) obsidian.saveBytes(FOLDER, "Capacités Hermès.json", ancienne.toByteArray(Charsets.UTF_8), "application/json")
+                ancienne
+            }
+        } else capacitesLocal.takeIf { it.isFile }?.readText().orEmpty()
+        val resultat = if (brut.isBlank()) org.json.JSONObject() else org.json.JSONObject(brut)
+        capacitesCache = resultat
+        return resultat
+    }
 
     /** Automatismes (cron) d'Hermès tels que synchronisés par le hook : nom, quand, prochaine, derniere, statut… */
     fun automatismesHermes(): List<org.json.JSONObject> = capacites().optJSONArray("automatismes")?.let { a ->
@@ -513,7 +547,10 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     }.orEmpty()
 
     /** Heure de la dernière synchronisation des capacités d'Hermès (0 si jamais). */
-    fun capacitesHermesDate(): Long = runCatching { capacitesLocal.lastModified() }.getOrDefault(0L)
+    fun capacitesHermesDate(): Long = runCatching {
+        if (obsidian.coffreConfigure()) obsidian.lireAvecDateStrict(FOLDER, "Capacités Hermès.json")?.second ?: 0L
+        else capacitesLocal.takeIf { it.isFile }?.lastModified() ?: 0L
+    }.getOrDefault(0L)
 
     /** Skills ajoutés à Hermès (nom → description). */
     fun skillsHermes(): List<Pair<String, String>> = capacites().optJSONArray("skills")?.let { a ->
