@@ -220,4 +220,47 @@ class RegistreApprentissageTest {
         } finally { dir.deleteRecursively() }
     }
 
+
+    @Test
+    fun manifesteSkillConserveVersionDependancesRisqueEtPlanDeTest() {
+        val dir = Files.createTempDirectory("registre-manifeste").toFile()
+        try {
+            val r = registre(dir)
+            val id = r.creer("skill", "Diagnostic réseau", "Analyse réseau en lecture seule", "proposition Hermès")
+            r.declarerManifest(
+                id, "1.2.0", "https://example.invalid/skill-source",
+                listOf("homeassistant-client", "json-parser"), "medium",
+                "Vérifier les réponses simulées, les délais et le refus des actions non autorisées."
+            )
+            val item = JSONObject(r.snapshot()).getJSONArray("entries").getJSONObject(0)
+            val manifest = item.getJSONObject("manifest")
+            assertEquals("1.2.0", manifest.getString("version"))
+            assertEquals("medium", manifest.getString("risk"))
+            assertEquals(2, manifest.getJSONArray("dependencies").length())
+            assertTrue(manifest.getString("testPlan").contains("réponses simulées"))
+            assertEquals(RegistreApprentissage.ETAT_OBSERVED, item.getString("state"))
+            assertEquals(0, item.getJSONArray("permissions").length())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun manifesteRefuseRisqueInconnuEtTypesNonSkill() {
+        val dir = Files.createTempDirectory("registre-manifeste-invalide").toFile()
+        try {
+            val r = registre(dir)
+            val skill = r.creer("skill", "Skill sans risque défini", "Proposition", "revue")
+            assertThrows(IllegalArgumentException::class.java) {
+                r.declarerManifest(skill, "1.0", "catalogue interne", emptyList(), "critical",
+                    "Plan de test suffisamment détaillé pour être vérifiable.")
+            }
+            val habit = r.creer("habit", "Préférence concise", "Réponse courte", "conversation")
+            assertThrows(IllegalArgumentException::class.java) {
+                r.declarerManifest(habit, "1.0", "catalogue interne", emptyList(), "low",
+                    "Plan de test suffisamment détaillé pour être vérifiable.")
+            }
+            val entries = JSONObject(r.snapshot()).getJSONArray("entries")
+            assertFalse(entries.getJSONObject(0).has("manifest"))
+            assertFalse(entries.getJSONObject(1).has("manifest"))
+        } finally { dir.deleteRecursively() }
+    }
 }
