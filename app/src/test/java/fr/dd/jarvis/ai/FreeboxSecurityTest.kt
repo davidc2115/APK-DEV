@@ -5,6 +5,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FreeboxSecurityTest {
+    @Test fun redirectionsHttpsExigentUneVerificationExpliciteDuChiffrement() {
+        listOf(443, 8443, 9443).forEach { port ->
+            assertTrue(FreeboxOs.verificationHttpsManquante(port, false))
+            assertFalse(FreeboxOs.verificationHttpsManquante(port, true))
+        }
+        listOf(80, 8123, 5555).forEach { port ->
+            assertFalse(FreeboxOs.verificationHttpsManquante(port, false))
+        }
+    }
+
     @Test fun dmzNePeutPasEtreActiveeMaisPeutEtreDesactivee() {
         assertTrue(FreeboxOs.dmzActivationInterdite("", "192.168.1.20"))
         assertTrue(FreeboxOs.dmzActivationInterdite("activer", "192.168.1.20"))
