@@ -360,13 +360,13 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         ensure()
         val k = sujet.trim().lowercase().ifBlank { "general" }
         val nouvelle = texte.trim().removePrefix("-").trim()
-        if (nouvelle.isBlank()) return "rien à enregistrer"
+        if (nouvelle.isBlank()) return@avecRollbackSiEcritureLocaleEchoue "rien à enregistrer"
         val lignes = items[k].orEmpty().lines().map { it.trim() }.filter { it.isNotBlank() }.map { it.removePrefix("-").trim() }.toMutableList()
         val n = fr.dd.jarvis.societe.core.normaliser(nouvelle)
         // Une consigne « (vocal) » et une « (écrit) » sur le même sujet coexistent : la comparaison se fait par canal.
         val canal = fr.dd.jarvis.ai.CanalDemande.de(nouvelle)
         fun memeCanal(l: String) = fr.dd.jarvis.ai.CanalDemande.de(l) == canal
-        if (lignes.any { memeCanal(it) && (fr.dd.jarvis.societe.core.normaliser(it) == n || fr.dd.jarvis.societe.core.normaliser(it).contains(n)) }) return "déjà enregistrée"
+        if (lignes.any { memeCanal(it) && (fr.dd.jarvis.societe.core.normaliser(it) == n || fr.dd.jarvis.societe.core.normaliser(it).contains(n)) }) return@avecRollbackSiEcritureLocaleEchoue "déjà enregistrée"
         // Une consigne voisine n'est mise à jour que si elle parle VRAIMENT de la même chose (voir [memeSujet]) : celle du
         // poêle de l'étage n'écrase plus celle du salon, ni « retirer le mode nuit » celle qui l'active.
         val proche = lignes.indexOfFirst { memeCanal(it) && memeSujet(it, nouvelle) }
@@ -392,7 +392,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         ensure()
         val k = sujet.trim().lowercase().ifBlank { "general" }
         val nouvelle = texte.trim().removePrefix("-").trim()
-        if (nouvelle.isBlank()) return "rien à enregistrer"
+        if (nouvelle.isBlank()) return@avecRollbackSiEcritureLocaleEchoue "rien à enregistrer"
         val lignes = items[k].orEmpty().lines().map { it.trim() }.filter { it.isNotBlank() }.map { it.removePrefix("-").trim() }
         val canal = fr.dd.jarvis.ai.CanalDemande.de(nouvelle)
         val n = fr.dd.jarvis.societe.core.normaliser(nouvelle)
@@ -400,7 +400,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         items[k] = (gardees + nouvelle).joinToString("\n") { "- $it" }
         val r = persist()
         val retirees = lignes.size - gardees.size
-        return if (retirees > 0) "$r ; $retirees consigne(s) sur le même sujet remplacée(s), les ${gardees.size} autre(s) gardée(s)" else r
+        if (retirees > 0) "$r ; $retirees consigne(s) sur le même sujet remplacée(s), les ${gardees.size} autre(s) gardée(s)" else r
     }
 
     @Synchronized
@@ -408,14 +408,14 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         ensure()
         val k = sujet.trim().lowercase().ifBlank { "general" }
         val nouvelle = texte.trim().removePrefix("-").trim()
-        if (nouvelle.isBlank()) return "rien à enregistrer"
+        if (nouvelle.isBlank()) return@avecRollbackSiEcritureLocaleEchoue "rien à enregistrer"
         val lignes = items[k].orEmpty().lines().map { it.trim() }.filter { it.isNotBlank() }.map { it.removePrefix("-").trim() }.toMutableList()
-        if (lignes.any { it == nouvelle }) return "déjà enregistrée"
+        if (lignes.any { it == nouvelle }) return@avecRollbackSiEcritureLocaleEchoue "déjà enregistrée"
         val i = lignes.indexOfFirst(meme)
         if (i >= 0) lignes[i] = nouvelle else lignes += nouvelle
         lignes.removeAll { it != nouvelle && meme(it) }
         items[k] = lignes.joinToString("\n") { "- $it" }
-        return persist()
+        persist()
     }
 
     @Synchronized
