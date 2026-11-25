@@ -346,7 +346,7 @@ class VoskWake(
 
         @android.annotation.SuppressLint("MissingPermission")
         fun demarrer(): Boolean {
-            val taille = 800   // 0,05 s à 16 kHz : réduit l'attente maximale avant décodage
+            val taille = 800   // 0,05 s à 16 kHz : réduit l'attente maximale avant décodage (20 lectures/s).
             val min = android.media.AudioRecord.getMinBufferSize(16000, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
             val ar = try {
                 android.media.AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000,
