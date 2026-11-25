@@ -661,7 +661,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val p = withMd(path)
         val folder = p.substringBeforeLast('/', "")
         val name = p.substringAfterLast('/')
-        val body = if (append) (readNote(p)?.trimEnd()?.plus("\n\n") ?: "") + content else content
+        // L'ajout doit échouer si la lecture de l'existant échoue : ne jamais interpréter
+        // une panne SAF comme une note absente puis écraser son contenu.
+        val body = if (append) (readNoteStrict(p)?.trimEnd()?.plus("\n\n") ?: "") + content else content
         return saveBytes(folder, name, body.toByteArray(), "text/markdown")
     }
 
