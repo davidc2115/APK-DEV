@@ -297,7 +297,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     private fun persist(): String {
         val md = render()
-        runCatching { local.writeText(md) }
+        // L'écriture locale fait partie de la validation : ne jamais annoncer une consigne
+        // enregistrée si le fichier durable n'a pas été remplacé correctement.
+        persisterCopieHermes(local, md)
         return obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), md)
     }
 
