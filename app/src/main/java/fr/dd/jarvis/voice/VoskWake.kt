@@ -283,7 +283,8 @@ class VoskWake(
                             if (detecte(org.json.JSONObject(j).optJSONArray("result"))) { fired = true; JournalVoix.noter("Vosk", "« Jarvis » détecté${if (francais) "" else " (modèle anglais)"}"); onWake() }
                         } catch (_: Throwable) {}
                     }
-                    override fun onPartialResult(hypothesis: String?) {}
+                    // Ne pas attendre la fin de phrase : les mots partiels contiennent maintenant confiance et durée.
+                    override fun onPartialResult(hypothesis: String?) = verifierPartiel(hypothesis)
                     override fun onResult(hypothesis: String?) = check(hypothesis)
                     override fun onFinalResult(hypothesis: String?) = check(hypothesis)
                     // Le service de Vosk s'arrête sur une erreur micro : on prévient pour qu'il soit relancé.
