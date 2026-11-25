@@ -125,6 +125,10 @@ object PontMcp {
             if (nom in EXCLUS) return "Outil indisponible : $nom" to true
             // Certains clients Hermes préfixent les noms MCP par mcp_jarvis_.
             val nomCanonique = nom.removePrefix("mcp_jarvis_")
+            if (nomCanonique == "jarvis_apprentissage") {
+                return runCatching { app.memo.registreApprentissage().executer(args) }
+                    .fold({ it to false }, { e -> "❌ Registre d'apprentissage : ${e.message ?: e.javaClass.simpleName}" to true })
+            }
             if (nomCanonique == "jarvis_rechercher_outils") {
                 val termes = args.optString("requete").trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
                 if (termes.isEmpty()) return "Précise le nom ou le domaine de l'outil recherché." to true
@@ -536,6 +540,23 @@ object PontMcp {
                 .put("titre", JSONObject().put("type", "string").put("description", "Titre court (ex. « Briefing du matin »)"))
                 .put("message", JSONObject().put("type", "string").put("description", "Contenu à livrer, concis et lisible")))
                 .put("required", JSONArray().put("message"))))
+        out.put(JSONObject()
+            .put("name", "jarvis_apprentissage")
+            .put("description", "REGISTRE DURABLE PARTAGÉ JARVIS/HERMÈS. Gère les observations, habitudes candidates, skills et outils proposés, avec preuves contextualisées, contre-exemples, provenance et historique. Actions : list/read ; create (type=habit|skill|tool|error, titre, description, provenance) ; evidence (id, contenu, contexte, source) ; counterexample (id, contenu, contexte) ; state (id, etat, confirmation_explicite). Toute activation/approbation exige une confirmation explicite. Cet outil n'installe ni n'exécute aucun code : il gère uniquement le cycle de validation.")
+            .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("action", JSONObject().put("type", "string").put("enum", JSONArray().put("list").put("read").put("create").put("evidence").put("counterexample").put("state")))
+                .put("id", JSONObject().put("type", "string"))
+                .put("type", JSONObject().put("type", "string").put("enum", JSONArray().put("habit").put("skill").put("tool").put("error")))
+                .put("titre", JSONObject().put("type", "string"))
+                .put("description", JSONObject().put("type", "string"))
+                .put("provenance", JSONObject().put("type", "string"))
+                .put("contenu", JSONObject().put("type", "string"))
+                .put("contexte", JSONObject().put("type", "string"))
+                .put("source", JSONObject().put("type", "string"))
+                .put("etat", JSONObject().put("type", "string").put("enum", JSONArray().put("observed").put("candidate").put("needs_review").put("approved").put("testing").put("active").put("paused").put("rejected").put("failed").put("superseded")))
+                .put("confirmation_explicite", JSONObject().put("type", "boolean"))
+                .put("acteur", JSONObject().put("type", "string")))
+                .put("required", JSONArray().put("action"))))
         out.put(JSONObject()
             .put("name", "jarvis_rechercher_outils")
             .put("description", "Catalogue complet des outils JARVIS (Discord : lire, rechercher, envoyer des messages, salons, rôles ; Plex ; Freebox ; Home Assistant ; société ; mails ; SMS ; agenda ; fichiers ; réseau…), y compris ceux absents de ta liste courte. À utiliser AVANT de dire qu'un outil n'existe pas.")
