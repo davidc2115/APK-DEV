@@ -32,6 +32,23 @@ class AutorisationsCommandeTest {
         assertEquals(true, Autorisations.discordCritique("discord_membre_bannir", "Bannir ce membre ?"))
     }
 
+    @Test fun toutesLesActionsDiscordDeGestionExigentUneConfirmationFraiche() {
+        val actionsSensibles = listOf(
+            "discord_membre_timeout", "discord_membre_expulser", "discord_membre_bannir", "discord_membre_pseudo",
+            "discord_role_creer", "discord_role_modifier", "discord_role_supprimer", "discord_role_position", "discord_role_attribuer",
+            "discord_salon_permission", "discord_salon_creer", "discord_salon_modifier", "discord_salon_supprimer",
+            "discord_salons_reorganiser", "discord_serveur_modifier", "discord_messages_purger",
+            "discord_message_modifier", "discord_message_supprimer", "discord_message_epingler",
+            "discord_fil_creer", "discord_fil_gerer", "discord_invitations"
+        )
+        actionsSensibles.forEach { outil ->
+            assertEquals("Une confirmation fraîche est requise pour $outil", null,
+                Autorisations.cle(outil, "Confirmer l'action Discord ?"))
+            assertEquals("La commande précise ne doit pas être mémorisable pour $outil", false,
+                Autorisations.discordCritique(outil, "Confirmer l'action Discord ?").not())
+        }
+    }
+
     @Test fun messageDiscordOrdinairePeutGarderSonAutorisation() {
         assertNotEquals(null, Autorisations.cle("discord_message_envoyer", "Envoyer ce message dans le salon ?"))
         assertEquals(false, Autorisations.discordCritique("discord_message_envoyer", "Envoyer ce message ?"))
