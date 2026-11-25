@@ -51,8 +51,11 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val json = JSONObject()
         candidates.forEach { (key, values) -> json.put(key, JSONArray(values.toList())) }
         val raw = json.toString(2)
-        runCatching { habitsFile.writeText(raw) }
-        runCatching { obsidian.saveIn(FOLDER, "Apprentissage en cours", raw) }
+        // Une preuve n'est confirmée qu'après écriture durable locale ET miroir Obsidian.
+        // Si Obsidian est temporairement indisponible, l'exception remonte : le prochain essai
+        // de la même preuve retentera la synchronisation au lieu de l'annoncer comme déjà sauvée.
+        persisterCopieHermes(habitsFile, raw)
+        obsidian.saveIn(FOLDER, "Apprentissage en cours", raw)
     }
 
     /** Enregistre une préférence candidate après une correction ou observation pertinente. */
@@ -74,7 +77,12 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val hash = MessageDigest.getInstance("SHA-256").digest(preuveNormalisee.toByteArray())
             .joinToString("") { "%02x".format(it) }.take(20)
         val proofs = candidates.getOrPut(key) { linkedSetOf() }
-        if (!proofs.add(hash)) return "Cette preuve a déjà été prise en compte (${proofs.size}/3)."
+        if (!proofs.add(hash)) {
+            // Une précédente tentative a pu écrire la copie locale mais échouer sur le miroir Obsidian.
+            // Retenter avant d'annoncer que la preuve est déjà enregistrée.
+            persistCandidates()
+            return "Cette preuve a déjà été prise en compte (${proofs.size}/3)."
+        }
         if (proofs.size < 3) {
             persistCandidates()
             return "Préférence candidate conservée (${proofs.size}/3 preuves distinctes). Elle ne sera pas appliquée comme habitude avant confirmation par répétition."
@@ -85,8 +93,8 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
             else listOf(current.trim(), habitLine).filter { it.isNotBlank() }.joinToString("\n")
         items["habitudes"] = updated
         candidates.remove(key)
-        persistCandidates()
         persist()
+        persistCandidates()
         return "Habitude confirmée après trois preuves distinctes et ajoutée à la mémoire durable : $value"
     }
 
