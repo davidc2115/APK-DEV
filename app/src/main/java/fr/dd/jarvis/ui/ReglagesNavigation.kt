@@ -74,87 +74,82 @@ class VoletReglages(val onglet: String, val sous: String, val titre: String, val
 }
 
 /**
- * En-tête des Réglages : la grille des onglets (tous visibles d'un coup), la ligne de sous-onglets et la recherche.
- * Sans dépendance à l'application : prévisualisable.
+ * En-tête compact des réglages : recherche, catégories et sous-catégories restent indépendantes
+ * de la zone défilante qui contient les panneaux.
  */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ReglagesNavigation(
     onglet: String, sous: String, recherche: String?,
     onOnglet: (String) -> Unit, onSous: (String) -> Unit, onRecherche: (String?) -> Unit,
 ) {
     val accent = LocalAccent.current
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
-        Text("RÉGLAGES", color = accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp)
-        Text("Tout est organisé par thème. Choisis une rubrique ou recherche directement une option.",
-            color = HudDim, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp, bottom = 10.dp))
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Réglages", color = HudText, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text("Organisés par thème", color = HudDim, fontSize = 11.sp)
+            }
+            Text("JARVIS · CONFIGURATION", color = accent, fontSize = 9.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(9.dp))
         HudTextField(
             value = recherche.orEmpty(),
             onValueChange = { onRecherche(it.takeIf(String::isNotBlank)) },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = "Rechercher : voix, batterie, Freebox…",
+            placeholder = "Rechercher un réglage…",
             singleLine = true
         )
         if (recherche.isNullOrBlank()) {
             Spacer(Modifier.height(10.dp))
-            ONGLETS_REGLAGES.chunked(4).forEach { ligne ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ligne.forEach { o ->
-                        val choisi = o.id == onglet
-                        Column(
-                            Modifier.weight(1f).height(58.dp).clip(HudShapeSmall)
-                                .background(accent.copy(alpha = if (choisi) 0.22f else 0.055f))
-                                .border(1.dp, accent.copy(alpha = if (choisi) 0.85f else 0.18f), HudShapeSmall)
-                                .clickable { onOnglet(o.id) }
-                                .padding(horizontal = 3.dp, vertical = 6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(o.icone, fontSize = 17.sp)
-                            Text(o.nom, color = if (choisi) Color.White else HudText, fontSize = 10.sp,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                fontWeight = if (choisi) FontWeight.Bold else FontWeight.Normal,
-                                textAlign = TextAlign.Center)
-                        }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                ONGLETS_REGLAGES.forEach { o ->
+                    val choisi = o.id == onglet
+                    Row(
+                        Modifier.clip(HudShapeSmall)
+                            .background(accent.copy(alpha = if (choisi) 0.20f else 0.055f))
+                            .border(1.dp, accent.copy(alpha = if (choisi) 0.82f else 0.18f), HudShapeSmall)
+                            .clickable { onOnglet(o.id) }
+                            .padding(horizontal = 11.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(o.icone, fontSize = 14.sp)
+                        Text(o.nom, color = if (choisi) Color.White else HudText, fontSize = 11.sp,
+                            fontWeight = if (choisi) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
                     }
-                    repeat(4 - ligne.size) { Spacer(Modifier.weight(1f)) }
                 }
-                Spacer(Modifier.height(7.dp))
             }
             val o = ONGLETS_REGLAGES.firstOrNull { it.id == onglet } ?: ONGLETS_REGLAGES.first()
-            Text(o.nom, color = HudText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 2.dp, bottom = 2.dp))
-            Text(o.aide, color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp))
+            Column(Modifier.fillMaxWidth().padding(top = 9.dp, bottom = 7.dp)) {
+                Text(o.nom, color = HudText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(o.aide, color = HudDim, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
             if (o.sous.isNotEmpty()) {
-                androidx.compose.foundation.layout.FlowRow(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    verticalArrangement = Arrangement.spacedBy(7.dp)
-                ) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     o.sous.forEach { (id, nom) -> SousOnglet(nom, id == sous) { onSous(id) } }
                 }
             }
         } else {
             Text("RÉSULTATS DE RECHERCHE", color = accent, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                letterSpacing = 1.2.sp, modifier = Modifier.padding(top = 10.dp))
+                letterSpacing = 1.2.sp, modifier = Modifier.padding(top = 9.dp))
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         HudDivider()
     }
 }
 
-/** Sous-rubrique : une cible large, lisible et facile à toucher. */
+/** Sous-rubrique compacte, avec une zone tactile confortable. */
 @Composable
 private fun SousOnglet(nom: String, choisi: Boolean, onClick: () -> Unit) {
     val accent = LocalAccent.current
     Box(
         Modifier.clip(HudShapeSmall)
-            .background(accent.copy(alpha = if (choisi) 0.24f else 0.055f))
-            .border(1.dp, accent.copy(alpha = if (choisi) 0.85f else 0.22f), HudShapeSmall)
+            .background(accent.copy(alpha = if (choisi) 0.23f else 0.055f))
+            .border(1.dp, accent.copy(alpha = if (choisi) 0.82f else 0.20f), HudShapeSmall)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 9.dp)
     ) {
-        Text(nom, color = if (choisi) Color.White else HudText, fontSize = 12.sp,
+        Text(nom, color = if (choisi) Color.White else HudText, fontSize = 11.sp,
             fontWeight = if (choisi) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
     }
 }
