@@ -13,6 +13,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.concurrent.TimeUnit
 
 /** Serveur personnel : SSH (commandes, fichiers) et Home Assistant (API REST + fichiers de configuration YAML). */
@@ -82,6 +87,17 @@ object Serveur {
         val essais = mutableListOf<String>()
         for ((i, cibleAdr) in ordre.withIndex()) {
             val s = jsch.getSession(st.sshUser.value.trim(), cibleAdr.first, cibleAdr.second)
+            // Une cible privée doit utiliser exactement le réseau Wi-Fi/VPN qui a validé sa route ;
+            // ne laisse pas le socket JSch repartir silencieusement par le réseau mobile par défaut.
+            if (ipPrivee(cibleAdr.first)) {
+                val reseauCible = reseauPourCible(app, cibleAdr.first, cibleAdr.second)
+                if (reseauCible == null) {
+                    essais += "${cibleAdr.first}:${cibleAdr.second} → route Wi-Fi/VPN devenue indisponible"
+                    erreur = java.net.NoRouteToHostException("Route Wi-Fi/VPN indisponible vers ${cibleAdr.first}")
+                    continue
+                }
+                s.setSocketFactory(socketFactoryLieeAuReseau(reseauCible))
+            }
             // Si une ancienne clé privée est encore renseignée, ne pas empêcher le repli sur le mot de passe.
             // JSch n'essaie l'authentification password que si le mot de passe est explicitement fourni à la session.
             if (st.sshPass.value.isNotBlank()) s.setPassword(st.sshPass.value)
@@ -144,37 +160,57 @@ object Serveur {
      * Les interfaces cellulaires sont ignorées : les opérateurs attribuent aussi des adresses privées 10.x.x.x.
      * Avec [port], un test TCP lié au réseau Android confirme que SSH/API répond par cette route.
      */
-    fun telephoneSurReseau(app: JarvisApp, ipServeur: String, port: Int? = null): Boolean = runCatching {
+    /** Renvoie le réseau Android Wi-Fi/VPN qui possède réellement la route vers cette cible. */
+    private fun reseauPourCible(app: JarvisApp, ipServeur: String, port: Int? = null): android.net.Network? = runCatching {
         val parties = ipServeur.trim().split(".")
-        if (parties.size != 4) return false
-        val valeurs = parties.map { it.toIntOrNull()?.takeIf { n -> n in 0..255 } ?: return false }
-        val cible = java.net.InetAddress.getByAddress(valeurs.map { it.toByte() }.toByteArray())
-        val cm = app.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return false
+        if (parties.size != 4) return null
+        val valeurs = parties.map { it.toIntOrNull()?.takeIf { n -> n in 0..255 } ?: return null }
+        val cible = InetAddress.getByAddress(valeurs.map { it.toByte() }.toByteArray())
+        val cm = app.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return null
         val reseaux = (cm.allNetworks.toList() + listOfNotNull(cm.activeNetwork)).distinct()
-        reseaux.any { reseau ->
-            val caps = cm.getNetworkCapabilities(reseau) ?: return@any false
+        reseaux.firstOrNull { reseau ->
+            val caps = cm.getNetworkCapabilities(reseau) ?: return@firstOrNull false
             val wifi = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) &&
                 !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
             val vpn = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
-            if (!wifi && !vpn) return@any false
-            val lp = cm.getLinkProperties(reseau) ?: return@any false
+            if (!wifi && !vpn) return@firstOrNull false
+            val lp = cm.getLinkProperties(reseau) ?: return@firstOrNull false
             val memeLan = lp.linkAddresses.any { adresse ->
                 adresse.address is java.net.Inet4Address &&
                     memeSousReseau(ipServeur, adresse.address.hostAddress.orEmpty(), adresse.prefixLength)
             }
             val routeSpecifique = lp.routes.any { it.destination.prefixLength > 0 && it.matches(cible) }
             val routeVpn = vpn && lp.routes.any { it.matches(cible) }
-            if (!memeLan && !routeSpecifique && !routeVpn) return@any false
-            if (port == null) return@any true
-            if (port !in 1..65535) return@any false
+            if (!memeLan && !routeSpecifique && !routeVpn) return@firstOrNull false
+            if (port == null) return@firstOrNull true
+            if (port !in 1..65535) return@firstOrNull false
             runCatching {
                 reseau.socketFactory.createSocket().use { socket ->
-                    socket.connect(java.net.InetSocketAddress(cible, port), 900)
+                    socket.connect(InetSocketAddress(cible, port), 900)
                     true
                 }
             }.getOrDefault(false)
         }
-    }.getOrDefault(false)
+    }.getOrNull()
+
+    /** SocketFactory JSch explicitement liée au réseau Android choisi (Wi-Fi ou VPN). */
+    private fun socketFactoryLieeAuReseau(reseau: android.net.Network): com.jcraft.jsch.SocketFactory =
+        object : com.jcraft.jsch.SocketFactory {
+            override fun createSocket(host: String, port: Int): Socket {
+                val adresse = runCatching { InetAddress.getByName(host) }
+                    .getOrElse { reseau.getByName(host) }
+                return reseau.socketFactory.createSocket().apply {
+                    connect(InetSocketAddress(adresse, port), 12_000)
+                }
+            }
+
+            override fun getInputStream(socket: Socket): InputStream = socket.getInputStream()
+            override fun getOutputStream(socket: Socket): OutputStream = socket.getOutputStream()
+        }
+
+    /** Confirme la route et, si demandé, la joignabilité TCP sur le réseau Wi-Fi/VPN correspondant. */
+    fun telephoneSurReseau(app: JarvisApp, ipServeur: String, port: Int? = null): Boolean =
+        reseauPourCible(app, ipServeur, port) != null
 
     /** Adresses IPv4 du téléphone : (interface, adresse). wlan = Wi-Fi ; rmnet / ccmni = données mobiles. */
     fun adressesTelephone(): List<Pair<String, String>> = runCatching {
