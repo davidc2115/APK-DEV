@@ -128,6 +128,8 @@ object PontMcp {
             if (nomCanonique == "jarvis_apprentissage") {
                 val action = args.optString("action").trim().lowercase()
                 val etat = args.optString("etat").trim().lowercase()
+                // Hermès ne peut pas s'auto-attribuer le consentement via un simple argument JSON.
+                // Les transitions sensibles doivent passer par la confirmation native de Jarvis.
                 if (action == "state" && etat in setOf("approved", "testing", "active")) {
                     return "Confirmation requise dans l'interface Jarvis : Hermès peut proposer cette transition, mais ne peut pas confirmer à la place de l'utilisateur." to true
                 }
@@ -548,7 +550,7 @@ object PontMcp {
                 .put("required", JSONArray().put("message"))))
         out.put(JSONObject()
             .put("name", "jarvis_apprentissage")
-            .put("description", "REGISTRE DURABLE PARTAGÉ JARVIS/HERMÈS. Gère les observations, habitudes candidates, skills et outils proposés, avec preuves contextualisées, contre-exemples, provenance et historique. Actions : list/read ; create ; evidence ; counterexample ; permission_request (id, permissions) ; state. permission_request enregistre uniquement des scopes demandés, jamais accordés ; scopes précis uniquement, aucun wildcard/shell/root/code arbitraire. Toute approbation/activation exige confirmation explicite. Cet outil n'installe ni n'exécute aucun code.")
+            .put("description", "REGISTRE DURABLE PARTAGÉ JARVIS/HERMÈS. Gère les observations, habitudes candidates, skills et outils proposés, avec preuves contextualisées, contre-exemples, provenance et historique. Actions : list/read ; create ; evidence ; counterexample ; permission_request (id, permissions) ; state. permission_request enregistre uniquement des scopes demandés, jamais accordés ; scopes précis uniquement, aucun wildcard/shell/root/code arbitraire. Les transitions vers approved/testing/active doivent être confirmées dans l'interface native Jarvis ; Hermès ne peut pas s'auto-accorder ce consentement. Cet outil n'installe ni n'exécute aucun code.")
             .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
                 .put("action", JSONObject().put("type", "string").put("enum", JSONArray().put("list").put("read").put("create").put("evidence").put("counterexample").put("permission_request").put("state")))
                 .put("id", JSONObject().put("type", "string"))
