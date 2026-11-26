@@ -50,63 +50,64 @@ object Serveur {
     private fun cleEmpreinteCible(cible: Cible): String =
         cible.hote.trim().lowercase() + ":" + cible.port + ":" + cible.user.trim()
 
+    private fun aliasEmpreinteCible(cible: Cible): String =
+        "jarvis-" + java.security.MessageDigest.getInstance("SHA-256")
+            .digest(cleEmpreinteCible(cible).toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
+    data class EmpreinteSSH(val empreinte: String, val type: String, val cle: String)
+
     fun empreinteCibleConnue(app: JarvisApp, cible: Cible): String {
         val coffre = app.store.sshEmpreintesCibles
         if (!coffre.available) throw IllegalStateException("Le coffre chiffré Android est indisponible : impossible de mémoriser une confiance SSH.")
-        return runCatching { JSONObject(coffre.value.ifBlank { "{}" }).optString(cleEmpreinteCible(cible)) }.getOrDefault("")
+        return runCatching { JSONObject(coffre.value.ifBlank { "{}" }).optJSONObject(cleEmpreinteCible(cible))?.optString("empreinte").orEmpty() }.getOrDefault("")
     }
 
-    /** Première connexion : renvoie l'empreinte sans exécuter de commande sur la cible. */
-    fun empreinteCible(app: JarvisApp, cible: Cible): String {
+    /** Négocie uniquement la clé d'hôte : aucun mot de passe n'est envoyé avant l'approbation. */
+    fun empreinteCible(app: JarvisApp, cible: Cible): EmpreinteSSH {
         require(cible.port in 1..65535 && cible.hote.isNotBlank()) { "Cible SSH invalide." }
-        if (cible.jump) {
-            val principale = sessionPrincipale(app)
-            val relais = principale.setPortForwardingL(0, cible.hote, cible.port)
-            try {
-                val jsch = JSch()
-                val s = jsch.getSession(cible.user, "127.0.0.1", relais)
-                s.setPassword(cible.pass)
-                s.setConfig("StrictHostKeyChecking", "no")
-                s.connect(12000)
-                return try { s.hostKey.getFingerPrint(jsch) } finally { runCatching { s.disconnect() } }
-            } finally { runCatching { principale.delPortForwardingL(relais) } }
-        }
         val jsch = JSch()
-        val s = jsch.getSession(cible.user, cible.hote, cible.port)
-        s.setPassword(cible.pass)
+        val hote = if (cible.jump) "127.0.0.1" else cible.hote
+        var relais: Int? = null
+        val principale = if (cible.jump) sessionPrincipale(app) else null
+        if (principale != null) relais = principale.setPortForwardingL(0, cible.hote, cible.port)
+        val s = jsch.getSession(cible.user, hote, relais ?: cible.port)
         s.setConfig("StrictHostKeyChecking", "no")
-        s.connect(12000)
-        return try { s.hostKey.getFingerPrint(jsch) } finally { runCatching { s.disconnect() } }
+        s.setConfig("PreferredAuthentications", "none")
+        try {
+            runCatching { s.connect(12000) }
+            val hostKey = s.hostKey ?: throw IllegalStateException("Le serveur SSH n'a pas présenté de clé d'hôte.")
+            return EmpreinteSSH(hostKey.getFingerPrint(jsch), hostKey.getType(), hostKey.getKey())
+        } finally {
+            runCatching { s.disconnect() }
+            if (principale != null && relais != null) runCatching { principale.delPortForwardingL(relais) }
+        }
     }
 
-    /** Enregistre uniquement une empreinte présentée à l'utilisateur et explicitement approuvée. */
-    fun memoriserEmpreinteCible(app: JarvisApp, cible: Cible, empreinte: String) {
+    /** Enregistre la clé publique d'hôte dans le coffre chiffré, après approbation explicite. */
+    fun memoriserEmpreinteCible(app: JarvisApp, cible: Cible, empreinte: EmpreinteSSH) {
         val coffre = app.store.sshEmpreintesCibles
         if (!coffre.available) throw IllegalStateException("Le coffre chiffré Android est indisponible : aucune empreinte SSH n'a été enregistrée.")
-        require(empreinte.isNotBlank()) { "Empreinte SSH vide." }
+        require(empreinte.empreinte.isNotBlank() && empreinte.type.isNotBlank() && empreinte.cle.isNotBlank()) { "Clé SSH présentée invalide." }
         val json = JSONObject(coffre.value.ifBlank { "{}" })
         val cle = cleEmpreinteCible(cible)
-        val precedente = json.optString(cle)
-        if (precedente.isNotBlank() && precedente != empreinte) {
+        val precedente = json.optJSONObject(cle)
+        if (precedente != null && precedente.optString("empreinte") != empreinte.empreinte) {
             throw IllegalStateException("L'empreinte SSH de " + cible.hote + ":" + cible.port + " a changé. Connexion refusée ; vérifie le serveur avant toute réinitialisation.")
         }
-        json.put(cle, empreinte)
+        json.put(cle, JSONObject().put("empreinte", empreinte.empreinte).put("type", empreinte.type).put("cle", empreinte.cle))
         coffre.set(json.toString())
     }
 
-    private fun verifierEmpreinteCible(app: JarvisApp, cible: Cible, session: Session) {
-        val connue = empreinteCibleConnue(app, cible)
-        val presente = session.hostKey.getFingerPrint(JSch())
-        if (connue.isBlank()) {
-            session.disconnect()
-            throw IllegalStateException("Première connexion SSH à " + cible.hote + " non approuvée : confirme d'abord son empreinte dans Jarvis.")
-        }
-        if (connue != presente) {
-            session.disconnect()
-            throw IllegalStateException("Empreinte SSH modifiée pour " + cible.hote + ":" + cible.port + " : connexion bloquée (empreinte reçue " + presente + ").")
-        }
+    /** JSch refuse une clé inconnue ou modifiée AVANT toute authentification SSH. */
+    private fun jschCible(app: JarvisApp, cible: Cible): JSch {
+        val coffre = app.store.sshEmpreintesCibles
+        if (!coffre.available) throw IllegalStateException("Le coffre chiffré Android est indisponible : connexion SSH secondaire bloquée.")
+        val item = runCatching { JSONObject(coffre.value.ifBlank { "{}" }).optJSONObject(cleEmpreinteCible(cible)) }.getOrNull()
+            ?: throw IllegalStateException("Première connexion SSH à " + cible.hote + " non approuvée : confirme d'abord son empreinte dans Jarvis.")
+        val ligne = aliasEmpreinteCible(cible) + " " + item.optString("type") + " " + item.optString("cle") + "\n"
+        return JSch().apply { setKnownHosts(ByteArrayInputStream(ligne.toByteArray(Charsets.UTF_8))) }
     }
-
 
     /** Traduit l'erreur technique JSch en explication compréhensible (mauvais mot de passe, hôte injoignable, port fermé…). */
     fun expliquer(e: Exception, hote: String, port: Int): String {
@@ -126,8 +127,13 @@ object Serveur {
     private fun ouvrir(app: JarvisApp, cible: Cible? = null): Session {
         invaliderConnexionsSiReseauChange(app)
         if (cible != null) {
-            val s = JSch().getSession(cible.user, cible.hote, cible.port)
-            s.setPassword(cible.pass); s.setConfig("StrictHostKeyChecking", "no"); s.connect(12000); return s
+            val jsch = jschCible(app, cible)
+            val s = jsch.getSession(cible.user, cible.hote, cible.port)
+            s.setHostKeyAlias(aliasEmpreinteCible(cible))
+            s.setPassword(cible.pass)
+            s.setConfig("StrictHostKeyChecking", "yes")
+            s.connect(12000)
+            return s
         }
         val st = app.store
         val jsch = JSch()
@@ -459,20 +465,18 @@ object Serveur {
                 val main = sessionPrincipale(app)
                 val lp = main.setPortForwardingL(0, cible.hote, cible.port)
                 try {
-                    val s2 = JSch().getSession(cible.user, "127.0.0.1", lp)
-                    s2.setPassword(cible.pass); s2.setConfig("StrictHostKeyChecking", "no"); s2.connect(12000)
-                    try {
-                        verifierEmpreinteCible(app, cible, s2)
-                        return f(s2)
-                    } finally { runCatching { s2.disconnect() } }
+                    val jsch = jschCible(app, cible)
+                    val s2 = jsch.getSession(cible.user, "127.0.0.1", lp)
+                    s2.setHostKeyAlias(aliasEmpreinteCible(cible))
+                    s2.setPassword(cible.pass)
+                    s2.setConfig("StrictHostKeyChecking", "yes")
+                    s2.connect(12000)
+                    try { return f(s2) } finally { runCatching { s2.disconnect() } }
                 } finally { runCatching { main.delPortForwardingL(lp) } }
             }
             if (cible != null) {
                 val s = ouvrir(app, cible)
-                try {
-                    verifierEmpreinteCible(app, cible, s)
-                    return f(s)
-                } finally { runCatching { s.disconnect() } }
+                try { return f(s) } finally { runCatching { s.disconnect() } }
             }
             // Serveur principal : session réutilisée ; si elle était tombée entre-temps, une seule reconnexion.
             val s = sessionPrincipale(app)
