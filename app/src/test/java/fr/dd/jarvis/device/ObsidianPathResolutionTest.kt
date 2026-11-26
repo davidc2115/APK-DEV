@@ -92,6 +92,20 @@ class ObsidianPathResolutionTest {
         }
     }
 
+    @Test fun refusePlusieursEnfantsPortantExactementLeMemeNom() {
+        try {
+            ObsidianPathResolution.uniqueNameMatch(
+                listOf("rapport.pdf", "rapport.pdf"),
+                "rapport.pdf",
+                ::key,
+                ::key
+            )
+            throw AssertionError("Deux fichiers homonymes ne doivent jamais être départagés arbitrairement.")
+        } catch (e: IllegalArgumentException) {
+            assertEquals(true, e.message?.contains("Précise le chemin complet") == true)
+        }
+    }
+
     @Test fun privilegieLeNomExactAvantLesCorrespondancesApprochees() {
         assertEquals(
             "Images",

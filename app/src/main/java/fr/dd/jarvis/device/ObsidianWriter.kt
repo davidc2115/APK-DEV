@@ -22,7 +22,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     private fun subDir(root: DocumentFile, path: String): DocumentFile {
         var cur = root
         for (part in path.split('/').filter { it.isNotBlank() }) {
-            val existing = cur.trouverLoose(part)
+            val existing = cur.trouverLooseUnique(part)
             if (existing != null) {
                 if (!existing.isDirectory)
                     throw java.io.IOException("Un fichier nommé « $part » empêche la création du dossier « $path ».")
@@ -47,6 +47,22 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         return listFiles().firstOrNull { f -> f.name?.let { normaliseNom(it) == cible } == true }
     }
 
+    /**
+     * Variante réservée aux opérations mutantes : ne choisit jamais arbitrairement un enfant homonyme.
+     * findFile() peut renvoyer un seul résultat même si le fournisseur SAF expose plusieurs noms identiques.
+     */
+    private fun DocumentFile.trouverLooseUnique(nom: String): DocumentFile? {
+        val enfants = listFiles().filter { it.name != null }
+        val noms = enfants.map { it.name!! }
+        val choisi = ObsidianPathResolution.uniqueNameMatch(
+            candidates = noms,
+            wanted = nom,
+            normalize = ::normaliseNom,
+            loose = ::normaliseNom
+        ) ?: return null
+        return enfants.single { it.name == choisi }
+    }
+
     /** [folder] peut contenir des sous-dossiers : « Société/Devis ». Retourne l'emplacement lisible. */
     fun saveBytes(folder: String, fileName: String, bytes: ByteArray, mime: String): String {
         try {
@@ -66,7 +82,7 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val dir = subDir(tree, dossierReel)
             if (!dir.isDirectory || !dir.canWrite())
                 throw java.io.IOException("Impossible d'accéder au dossier Obsidian demandé : $folder")
-            val target = dir.trouverLoose(name) ?: dir.createFile(mime, name)
+            val target = dir.trouverLooseUnique(name) ?: dir.createFile(mime, name)
                 ?: throw java.io.IOException("Impossible de créer $name dans Obsidian/$folder.")
             val written = ctx.contentResolver.openOutputStream(target.uri, "wt")
                 ?: throw java.io.IOException("Android n'a pas ouvert le fichier Obsidian : $name.")
@@ -130,11 +146,11 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
             val dossierRelatif = relatif(folder)
             val dossierReel = if (dossierRelatif.isBlank()) "" else resoudre(dossierRelatif)
             val cur = if (dossierReel != null) {
-                if (dossierReel.isBlank()) tree else trouver(dossierReel)?.takeIf { it.isDirectory }
+                if (dossierReel.isBlank()) tree else trouverUnique(dossierReel)?.takeIf { it.isDirectory }
             } else null
             val cheminFichier = if (dossierRelatif.isBlank()) resoudre(name) else resoudre("$dossierRelatif/$name")
-            val cible = cheminFichier?.let { trouver(it)?.takeIf { f -> f.isFile } }
-                ?: cur?.trouverLoose(name)
+            val cible = cheminFichier?.let { trouverUnique(it)?.takeIf { f -> f.isFile } }
+                ?: cur?.trouverLooseUnique(name)
             var supprime = false
             if (cible != null) {
                 if (!cible.canWrite()) return false
@@ -551,6 +567,15 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
     private fun trouver(chemin: String): DocumentFile? {
         var cur: DocumentFile? = vaultRoot() ?: return null
         for (part in chemin.trim().trim('/').split('/').filter { it.isNotBlank() }) cur = cur?.trouverLoose(part)
+        return cur
+    }
+
+    /** Résolution stricte réservée aux opérations mutantes : chaque segment doit être unique. */
+    private fun trouverUnique(chemin: String): DocumentFile? {
+        var cur: DocumentFile? = vaultRoot() ?: return null
+        for (part in chemin.trim().trim('/').split('/').filter { it.isNotBlank() }) {
+            cur = cur?.trouverLooseUnique(part) ?: return null
+        }
         return cur
     }
 
