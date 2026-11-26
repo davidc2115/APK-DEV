@@ -2146,6 +2146,13 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
             Text("🔒 Empreinte mémorisée", color = HudDim, fontSize = 11.sp, modifier = Modifier.weight(1f))
             Text("Effacer", color = HudText, fontSize = 12.sp, modifier = Modifier.clickable { store.sshFp.set("") })
         }
+        if (store.sshEmpreintesCibles.value.isNotBlank()) {
+            Text("Les clés des autres serveurs SSH sont conservées séparément et vérifiées avant authentification.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+            HudButton("Effacer les confiances SSH secondaires", Modifier.fillMaxWidth()) {
+                store.sshEmpreintesCibles.clear()
+                msg = "Les clés SSH secondaires ont été effacées. Chaque machine devra être approuvée à sa prochaine connexion."
+            }
+        }
         if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
     }
 }
