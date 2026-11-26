@@ -202,8 +202,10 @@ object AdbShell {
     }
 
     /** Lit tout le flux distant pour libérer le shell, mais ne conserve que [limite] caractères. */
-    internal fun lireSortieLimitee(flux: InputStream, limite: Int = 4000): String {
+    internal fun lireSortieLimitee(flux: InputStream, limite: Int = 4000, conserverFin: Boolean = false): String {
         val texte = StringBuilder(minOf(limite, 1024))
+        val fin = StringBuilder()
+        val tailleFin = 256
         var tronque = false
         flux.bufferedReader(Charsets.UTF_8).use { lecteur ->
             val tampon = CharArray(1024)
@@ -213,7 +215,15 @@ object AdbShell {
                 val restant = (limite - texte.length).coerceAtLeast(0)
                 if (restant > 0) texte.append(tampon, 0, minOf(n, restant))
                 if (n > restant) tronque = true
+                if (conserverFin) {
+                    fin.append(tampon, 0, n)
+                    if (fin.length > tailleFin) fin.delete(0, fin.length - tailleFin)
+                }
             }
+        }
+        if (tronque && conserverFin) {
+            val tete = texte.take((limite - tailleFin - 40).coerceAtLeast(0))
+            return "$tete\n… (sortie tronquée)\n$fin".trim()
         }
         if (tronque) texte.append("\n… (sortie tronquée)")
         return texte.toString().trim()
@@ -229,7 +239,7 @@ object AdbShell {
             val stream = m.openStream("shell:${ShellResult.withExitCode(command)}")
             val lecteur = Executors.newSingleThreadExecutor()
             try {
-                val sortie = lecteur.submit(Callable { stream.openInputStream().use { lireSortieLimitee(it) } })
+                val sortie = lecteur.submit(Callable { stream.openInputStream().use { lireSortieLimitee(it, conserverFin = true) } })
                 try {
                     val brut = sortie.get(20, TimeUnit.SECONDS)
                     ShellResult.fromAdbOutput(brut) ?: "Erreur ADB : code de sortie shell absent (résultat non vérifiable)."
