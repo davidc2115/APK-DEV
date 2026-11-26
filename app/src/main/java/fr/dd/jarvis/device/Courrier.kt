@@ -63,7 +63,7 @@ object Courrier {
     )
     private val MOTS_COLIS = Regex("\\b(colis|livraison|livre|livree|expedie|expediee|expedition|point relais|relais|consigne|locker|avis de passage|suivi|tracking|envoi|transporteur)\\b")
     /** Une commande ou un numéro de commande Amazon ne prouvent jamais qu'un colis est expédié. */
-    private val INDICES_EXPEDITION = Regex("\\b(votre colis|colis (?:a ete |est |sera )?(?:expedie|livre|en route|en transit|disponible|arrive)|commande (?:a ete |est )?expediee?|vient d etre expedie|a ete expedie|en cours d acheminement|pris en charge par|numero de suivi|suivre votre colis|suivi de (?:votre )?(?:colis|commande)|livraison (?:est |sera )?(?:prevue|confirmee|en cours|effectuee)|sera livre|est en transit|est en cours de livraison|avis de passage|disponible au point relais|votre envoi est|votre paquet|a ete remis au transporteur|en cours d expedition)\\b")
+    private val INDICES_EXPEDITION = Regex("\\b(colis (?:a ete |est |sera )?(?:expedie|livre|en route|en transit|disponible|arrive)|commande (?:a ete |est )?expediee?|vient d etre expedie|a ete expedie|en cours d acheminement|pris en charge par|numero de suivi|suivre votre colis|suivi de (?:votre )?(?:colis|commande)|livraison (?:est |sera )?(?:prevue|confirmee|en cours|effectuee)|sera livre|est en transit|est en cours de livraison|avis de passage|disponible au point relais|a ete remis au transporteur|en cours d expedition)\\b")
     private val NUMERO_GENERIQUE = Regex("\\b([A-Z]{2}\\d{9}[A-Z]{2}|\\d[A-Z]\\d{11}|1Z[0-9A-Z]{16}|\\d{13,15})\\b")
     private val CODE_RETRAIT = Regex("(?i)code (?:de retrait|de collecte|d'ouverture|d’ouverture|de deverrouillage|de déverrouillage|pin|de livraison|de recuperation|de récupération|a presenter|à présenter)\\s*[:=]?\\s*([A-Z0-9]{4,10})")
 
@@ -71,7 +71,7 @@ object Courrier {
     // Les mots génériques (« garage », « réservation », « intervention », « prélèvement ») seuls génèrent trop de faux positifs.
     private val FACTURE_RE = Regex("\\b(facture|factures|invoice|avis d echeance|echeancier|facture jointe|facture disponible|facture a payer|facture a regler|relance de paiement|impaye|paiement en attente|justificatif de paiement|recu de paiement|montant de votre facture|prelevement de votre facture)\\b")
     private val DEVIS_RE = Regex("\\b(devis|proposition de devis|offre de prix|estimation de travaux|chiffrage|bon pour accord)\\b")
-    private val RDV_RE = Regex("\\b(rendez vous|rdv|convocation|rappel de votre rendez vous|confirmation de rendez vous|confirmation du rendez vous|votre rendez vous|visite prevue|visite technique|votre consultation|consultation prevue|creneau confirme|creneau reserve|votre venue|vous etes attendu|nous vous attendons|passage de notre technicien|passage du technicien|technicien passera|confirmation de visite)\\b")
+    private val RDV_RE = Regex("\\b(rendez vous|rdv|convocation|rappel de votre rendez vous|confirmation de rendez vous|confirmation du rendez vous|votre rendez vous|rdv confirme|visite prevue|visite est prevue|votre visite|visite technique|rappel de visite|visite a domicile|votre consultation|consultation prevue|creneau confirme|creneau reserve|reservation confirmee|confirmation de reservation|votre reservation est confirmee|intervention prevue|intervention programmee|intervention planifiee|intervention confirmee|votre intervention|votre venue|vous etes attendu|nous vous attendons|passage de notre technicien|passage du technicien|technicien passera|confirmation de visite)\\b")
     private val RDV_AUTO_RE = Regex("\\b(vidange|controle technique|ct|revision|entretien du vehicule|pneumatiques?|changement de pneus)\\b")
     private val RENCONTRE_RE = Regex("\\b(on se voit|on se retrouve|on se rejoint|je passe te voir|je passerai te voir|je viens te voir|je viendrai te voir|je serai chez toi|je serai chez vous|je t attends|je vous attends|je passe chez toi|je passerai chez toi|je viens chez toi|je viendrai chez toi)\\b")
     private val PROMOTION_RE = Regex("\\b(option budget|code promo|promotion|promotions|offre speciale|offre exclusive|profitez de|decouvrez notre offre|remise exceptionnelle|vente privee|abonnez vous|souscrivez|jusqu a -?\\d{1,2} ?%)\\b")
@@ -153,7 +153,7 @@ object Courrier {
         val m = montant(brut)
         val documentFinancier = FACTURE_RE.containsMatchIn(n) || DEVIS_RE.containsMatchIn(n)
         val contenuPromotionnel = PROMOTION_RE.containsMatchIn(n)
-        if (documentFinancier && (!contenuPromotionnel || FACTURE_RE.containsMatchIn(n))) {
+        if (documentFinancier && !contenuPromotionnel) {
             val devis = DEVIS_RE.containsMatchIn(n) && !FACTURE_RE.containsMatchIn(n)
             val ech = Regex("\\b(?:avant le|au plus tard le|date limite(?: de paiement)?|echeance(?: le| du)?|preleve le|sera preleve le|a payer (?:avant )?le|valable jusqu au|le) ?:? ?(.{4,30})").find(DatesFr.normaliser(brut))
                 ?.groupValues?.get(1)?.let { DatesFr.jour(DatesFr.normaliser(it), aujourdhui)?.date?.toString() }.orEmpty()
