@@ -5,12 +5,16 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import fr.dd.jarvis.data.Store
 import java.io.File
+import java.io.IOException
 
 /**
  * Écrit les fichiers dans le dossier Obsidian choisi (sélecteur Android, sous-dossiers créés au besoin),
  * sinon dans le dossier propre à l'application (Android/data/fr.dd.jarvis/files/<dossier>).
  */
 class ObsidianWriter(private val ctx: Context, private val store: Store) {
+
+    /** Indique si l'utilisateur a choisi un coffre externe comme source de référence. */
+    fun coffreConfigure(): Boolean = store.obsidianUri.value.isNotBlank()
 
     private fun safe(name: String, def: String) =
         name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { def }
@@ -262,6 +266,44 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         } catch (_: Exception) {
             return null
         }
+    }
+
+    /**
+     * Lecture de mémoire avec résultat non ambigu : null signifie uniquement « note absente ».
+     * Une permission SAF expirée, un fournisseur indisponible ou un flux illisible lève une erreur.
+     */
+    fun lireAvecDateStrict(folder: String, fileName: String): Pair<String, Long>? {
+        val name = safe(fileName, "Fichier")
+        val uriStr = store.obsidianUri.value
+        if (uriStr.isBlank()) {
+            val f = File(File(ctx.getExternalFilesDir(null), folder), name)
+            return if (f.isFile) f.readText() to f.lastModified() else null
+        }
+        val tree = DocumentFile.fromTreeUri(ctx, Uri.parse(uriStr))
+            ?: throw IOException("Le coffre Obsidian sélectionné n'est plus accessible.")
+        if (!tree.canRead()) throw IOException("Autorisation de lecture Obsidian absente.")
+        var current: DocumentFile = tree
+        val chemin = (relatif(folder).trim('/') + "/" + name).trim('/')
+        val parties = chemin.split('/').filter { it.isNotBlank() }
+        parties.forEachIndexed { index, part ->
+            if (!current.isDirectory) throw IOException("Le chemin Obsidian n'est pas un dossier avant « $part ».")
+            val enfants = try { current.listFiles().toList() }
+                catch (e: Exception) { throw IOException("Impossible de parcourir le coffre Obsidian ($part).", e) }
+            val exacts = enfants.filter { it.name == part }
+            val matches = if (exacts.isNotEmpty()) exacts else enfants.filter {
+                it.name?.let { n -> normaliseNom(n) == normaliseNom(part) } == true
+            }
+            if (matches.size > 1) throw IOException("Plusieurs éléments Obsidian correspondent à « $part ».")
+            val trouve = matches.singleOrNull() ?: return null
+            val dernier = index == parties.lastIndex
+            if (dernier && trouve.isDirectory) throw IOException("L'emplacement attendu pour la note Obsidian est un dossier : $chemin")
+            if (!dernier && !trouve.isDirectory) throw IOException("Un fichier empêche d'accéder au dossier Obsidian « $part ».")
+            current = trouve
+        }
+        if (!current.isFile) throw IOException("L'élément Obsidian attendu n'est pas un fichier : $chemin")
+        val contenu = ctx.contentResolver.openInputStream(current.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+            ?: throw IOException("Impossible de lire la note Obsidian : $chemin")
+        return contenu to runCatching { current.lastModified() }.getOrDefault(0L)
     }
 
     // ------------------------------------------------------------------ lecture / recherche dans le coffre

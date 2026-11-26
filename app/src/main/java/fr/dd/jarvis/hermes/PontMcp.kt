@@ -86,9 +86,9 @@ object PontMcp {
     private class FournisseurJarvis(val app: JarvisApp) : Fournisseur {
         override fun groq(corps: JSONObject) = RelaisGroq.repondre(app, corps)
         override fun groqModeles() = RelaisGroq.modeles(app)
-        override fun memoireHermes(texte: String) { runCatching { app.memo.majHermes(texte) } }
-        override fun memoireJarvis(): String = runCatching { app.memo.pourHermes() }.getOrDefault("")
-        override fun capacitesHermes(json: String) { runCatching { app.memo.majCapacitesHermes(json) } }
+        override fun memoireHermes(texte: String) { app.memo.majHermes(texte) }
+        override fun memoireJarvis(): String = app.memo.pourHermes()
+        override fun capacitesHermes(json: String) { app.memo.majCapacitesHermes(json) }
         private val defaut by lazy { ToolBox(app) { _, force -> !force } }
         private fun boite() = boiteActive ?: defaut
 
@@ -375,9 +375,34 @@ object PontMcp {
                 }
             }
             // Mémoire partagée : le hook « jarvis-memoire » d'Hermès envoie la sienne et recopie celle de Jarvis.
-            chemin == "/memoire/hermes" && r.methode == "POST" -> { f.memoireHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
-            chemin == "/memoire/jarvis" && r.methode == "GET" -> repondre(s, 200, f.memoireJarvis(), type = "text/plain")
-            chemin == "/memoire/hermes-capacites" && r.methode == "POST" -> { f.capacitesHermes(r.corps); repondre(s, 200, """{"ok":true}""") }
+            chemin == "/memoire/hermes" && r.methode == "POST" -> {
+                val erreur = runCatching { f.memoireHermes(r.corps) }.exceptionOrNull()
+                if (erreur == null) repondre(s, 200, """{"ok":true}""")
+                else repondre(s, 500, JSONObject()
+                    .put("error", "memory_persistence_failed")
+                    .put("message", erreur.message ?: "Impossible d'enregistrer la mémoire Hermès.")
+                    .toString())
+            }
+            chemin == "/memoire/jarvis" && r.methode == "GET" -> {
+                try {
+                    repondre(s, 200, f.memoireJarvis(), type = "text/plain")
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    repondre(s, 500, JSONObject()
+                        .put("error", "jarvis_memory_unavailable")
+                        .put("message", e.message ?: "Impossible de lire la mémoire Jarvis.")
+                        .toString())
+                }
+            }
+            chemin == "/memoire/hermes-capacites" && r.methode == "POST" -> {
+                val erreur = runCatching { f.capacitesHermes(r.corps) }.exceptionOrNull()
+                if (erreur == null) repondre(s, 200, """{"ok":true}""")
+                else repondre(s, 500, JSONObject()
+                    .put("error", "capabilities_persistence_failed")
+                    .put("message", erreur.message ?: "Impossible d'enregistrer les capacités Hermès.")
+                    .toString())
+            }
             chemin == "/groq/v1/models" && r.methode == "GET" -> repondre(s, 200, f.groqModeles())
             chemin == "/groq/v1/chat/completions" && r.methode == "POST" -> {
                 val corps = runCatching { JSONObject(r.corps) }.getOrElse { return@use repondre(s, 400, """{"error":{"message":"JSON invalide"}}""") }

@@ -2,6 +2,8 @@ package fr.dd.jarvis.device
 
 import android.content.Context
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -17,6 +19,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     private val habitsFile get() = File(ctx.filesDir, "habits-learning.json")
     private val candidates = linkedMapOf<String, MutableSet<String>>()
     @Volatile private var loaded = false
+    @Volatile private var loadError: String? = null
 
     private val sensitivePattern = Regex(
         "\\b(sant[eé]|m[eé]dical|maladie|diagnostic|m[eé]dicament|banque|bancaire|carte bancaire|mot de passe|password|secret|cl[eé] api|token|religion|politique|orientation sexuelle|sexualit[eé]|syndicat)\\b",
@@ -27,10 +30,12 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         candidates.clear()
         // Obsidian et la copie locale peuvent être momentanément désynchronisés :
         // fusionner les preuves évite de perdre un apprentissage récent au redémarrage.
-        val sources = listOfNotNull(
-            runCatching { obsidian.read(FOLDER, "Apprentissage en cours.md") }.getOrNull(),
-            runCatching { habitsFile.takeIf { it.exists() }?.readText() }.getOrNull()
-        ).distinct()
+        // Comme pour la mémoire principale, une erreur SAF ne signifie pas « journal absent ».
+        // Si le coffre est configuré mais inaccessible, load() doit échouer et rester réessayable :
+        // ne jamais valider un apprentissage incomplet à partir de la seule copie locale.
+        val note = obsidian.lireAvecDateStrict(FOLDER, "Apprentissage en cours.md")?.first
+        val copieLocale = habitsFile.takeIf { it.isFile }?.readText()
+        val sources = listOfNotNull(note, copieLocale).distinct()
         sources.forEach { raw ->
             runCatching {
                 val json = JSONObject(raw)
@@ -45,12 +50,22 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         }
     }
 
+    /** Restaure le journal local des preuves si le miroir Obsidian échoue après l'écriture locale. */
+    private fun restaurerPreuvesLocales() {
+        val json = JSONObject()
+        candidates.forEach { (key, values) -> json.put(key, JSONArray(values.toList())) }
+        persisterCopieHermes(habitsFile, json.toString(2))
+    }
+
     private fun persistCandidates() {
         val json = JSONObject()
         candidates.forEach { (key, values) -> json.put(key, JSONArray(values.toList())) }
         val raw = json.toString(2)
-        runCatching { habitsFile.writeText(raw) }
-        runCatching { obsidian.saveIn(FOLDER, "Apprentissage en cours", raw) }
+        // Une preuve n'est confirmée qu'après écriture durable locale ET miroir Obsidian.
+        // Si Obsidian est temporairement indisponible, l'exception remonte : le prochain essai
+        // de la même preuve retentera la synchronisation au lieu de l'annoncer comme déjà sauvée.
+        persisterCopieHermes(habitsFile, raw)
+        obsidian.saveIn(FOLDER, "Apprentissage en cours", raw)
     }
 
     /** Enregistre une préférence candidate après une correction ou observation pertinente. */
@@ -72,7 +87,24 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val hash = MessageDigest.getInstance("SHA-256").digest(preuveNormalisee.toByteArray())
             .joinToString("") { "%02x".format(it) }.take(20)
         val proofs = candidates.getOrPut(key) { linkedSetOf() }
-        if (!proofs.add(hash)) return "Cette preuve a déjà été prise en compte (${proofs.size}/3)."
+        if (!proofs.add(hash)) {
+            // Si la confirmation précédente a échoué sur Obsidian, les trois preuves restent présentes :
+            // retenter aussi la mémoire durable avant d'annoncer que l'habitude est enregistrée.
+            if (proofs.size >= 3) {
+                persist()
+                candidates.remove(key)
+                try {
+                    persistCandidates()
+                } catch (e: Exception) {
+                    candidates[key] = proofs
+                    runCatching { restaurerPreuvesLocales() }
+                    throw e
+                }
+                return "Habitude confirmée après trois preuves distinctes et ajoutée à la mémoire durable : $value"
+            }
+            persistCandidates()
+            return "Cette preuve a déjà été prise en compte (${proofs.size}/3)."
+        }
         if (proofs.size < 3) {
             persistCandidates()
             return "Préférence candidate conservée (${proofs.size}/3 preuves distinctes). Elle ne sera pas appliquée comme habitude avant confirmation par répétition."
@@ -81,10 +113,22 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val current = items["habitudes"].orEmpty()
         val updated = if (current.lines().any { it.equals(habitLine, true) }) current
             else listOf(current.trim(), habitLine).filter { it.isNotBlank() }.joinToString("\n")
+        val anciennesHabitudes = items["habitudes"]
         items["habitudes"] = updated
+        // Garder les preuves tant que la mémoire durable n'est pas écrite. En cas d'échec
+        // de l'écriture locale, restaurer aussi la rubrique modifiée en mémoire.
+        try { persist() } catch (e: EcritureLocaleMemoireException) {
+            if (anciennesHabitudes == null) items.remove("habitudes") else items["habitudes"] = anciennesHabitudes
+            throw e
+        }
         candidates.remove(key)
-        persistCandidates()
-        persist()
+        try {
+            persistCandidates()
+        } catch (e: Exception) {
+            candidates[key] = proofs
+            runCatching { restaurerPreuvesLocales() }
+            throw e
+        }
         return "Habitude confirmée après trois preuves distinctes et ajoutée à la mémoire durable : $value"
     }
 
@@ -100,6 +144,27 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     companion object {
         const val FOLDER = "JARVIS"
         const val FILE = "Mémoire JARVIS.md"
+
+        /**
+         * Écrit la copie locale de la mémoire Hermès avant de valider le cache.
+         * Le fichier temporaire est synchronisé sur disque puis renommé dans le même dossier :
+         * un arrêt du processus ne doit pas laisser une mémoire partiellement écrite.
+         */
+        internal fun persisterCopieHermes(fichier: File, texte: String) {
+            val parent = fichier.parentFile ?: throw IOException("Dossier de mémoire introuvable.")
+            if (!parent.exists() && !parent.mkdirs()) throw IOException("Impossible de créer le dossier de mémoire.")
+            val temporaire = File(parent, fichier.name + ".tmp")
+            try {
+                FileOutputStream(temporaire).use { sortie ->
+                    sortie.write(texte.toByteArray(Charsets.UTF_8))
+                    sortie.flush()
+                    sortie.fd.sync()
+                }
+                if (!temporaire.renameTo(fichier)) throw IOException("Impossible de valider la nouvelle mémoire Hermès.")
+            } finally {
+                if (temporaire.exists()) temporaire.delete()
+            }
+        }
 
         private val PIECES = Regex("\\b(etage|haut|mezzanine|salon|sejour|living|rez|chaussee|rdc|bas|cuisine|chambre|bureau|garage|veranda|cave|grenier|entree|couloir|buanderie)\\b")
 
@@ -223,29 +288,66 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      */
     @Synchronized
     fun load() {
-        val note = runCatching { obsidian.lireAvecDate(FOLDER, FILE) }.getOrNull()
+        // Une erreur SAF ne doit jamais être interprétée comme une note absente : sinon une
+        // copie locale plus ancienne pourrait remplacer la mémoire réelle du coffre.
+        val note = try { obsidian.lireAvecDateStrict(FOLDER, FILE) }
+        catch (e: Exception) {
+            loadError = e.message ?: e.javaClass.simpleName
+            return // loaded reste false : le prochain accès pourra réessayer après rétablissement du coffre.
+        }
         val copie = runCatching { local.takeIf { it.exists() }?.let { it.readText() to it.lastModified() } }.getOrNull()
         val choix = choisirSource(note, copie)
-        if (choix != null) parse(choix.first)
+        if (choix != null) {
+            if (note == null && obsidian.coffreConfigure()) {
+                // Note réellement absente : migration unique de la copie de secours, uniquement
+                // après une lecture du coffre réussie et une écriture vérifiée.
+                obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), choix.first)
+            } else if (note != null && choix.second) {
+                obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), choix.first)
+            }
+            parse(choix.first)
+        }
         loadCandidates()
         loaded = true
-        if (choix != null && note != null && choix.second) runCatching { obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), render()) }
-        if (choix != null && copie == null) runCatching { local.writeText(render()) }
+        loadError = null
+        if (choix != null && copie == null) runCatching { persisterCopieHermes(local, render()) }
     }
 
     @Synchronized
-    private fun ensure() { if (!loaded) load() }
+    private fun ensure() {
+        if (!loaded) runCatching { load() }.onFailure { loadError = it.message ?: it.javaClass.simpleName }
+        if (!loaded) throw IOException("Mémoire Obsidian indisponible : ${loadError ?: "lecture non confirmée"}. Aucune ancienne copie locale n'a été utilisée.")
+    }
+
+    /** Une panne d'écriture locale annule la mutation en mémoire ; une panne du miroir Obsidian
+     * après écriture locale conserve au contraire l'état durable local pour permettre sa resynchronisation. */
+    private class EcritureLocaleMemoireException(cause: Exception) :
+        IOException("Échec de l'écriture locale de la mémoire Jarvis.", cause)
+
+    private fun <T> avecRollbackSiEcritureLocaleEchoue(action: () -> T): T {
+        val avant = LinkedHashMap(items)
+        return try { action() } catch (e: EcritureLocaleMemoireException) {
+            items.clear()
+            items.putAll(avant)
+            throw e
+        }
+    }
 
     @Synchronized
     private fun persist(): String {
         val md = render()
-        runCatching { local.writeText(md) }
+        // L'écriture locale fait partie de la validation : ne jamais annoncer une consigne
+        // enregistrée si le fichier durable n'a pas été remplacé correctement.
+        try { persisterCopieHermes(local, md) }
+        catch (e: Exception) { throw EcritureLocaleMemoireException(e) }
+        // Si seul le miroir Obsidian échoue, la copie locale est déjà durable : ne pas annuler
+        // le cache en mémoire, sinon l'état visible divergerait de la copie qui sera resynchronisée.
         return obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), md)
     }
 
     @Synchronized
-    fun set(sujet: String, texte: String): String {
-        ensure(); items[sujet.trim().lowercase().ifBlank { "general" }] = texte.trim(); return persist()
+    fun set(sujet: String, texte: String): String = avecRollbackSiEcritureLocaleEchoue {
+        ensure(); items[sujet.trim().lowercase().ifBlank { "general" }] = texte.trim(); persist()
     }
 
     /**
@@ -254,23 +356,23 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      * Une consigne très proche d'une ligne existante la remplace (mise à jour) ; déjà présente : rien ne change.
      */
     @Synchronized
-    fun ajouterConsigne(sujet: String, texte: String): String {
+    fun ajouterConsigne(sujet: String, texte: String): String = avecRollbackSiEcritureLocaleEchoue {
         ensure()
         val k = sujet.trim().lowercase().ifBlank { "general" }
         val nouvelle = texte.trim().removePrefix("-").trim()
-        if (nouvelle.isBlank()) return "rien à enregistrer"
+        if (nouvelle.isBlank()) return@avecRollbackSiEcritureLocaleEchoue "rien à enregistrer"
         val lignes = items[k].orEmpty().lines().map { it.trim() }.filter { it.isNotBlank() }.map { it.removePrefix("-").trim() }.toMutableList()
         val n = fr.dd.jarvis.societe.core.normaliser(nouvelle)
         // Une consigne « (vocal) » et une « (écrit) » sur le même sujet coexistent : la comparaison se fait par canal.
         val canal = fr.dd.jarvis.ai.CanalDemande.de(nouvelle)
         fun memeCanal(l: String) = fr.dd.jarvis.ai.CanalDemande.de(l) == canal
-        if (lignes.any { memeCanal(it) && (fr.dd.jarvis.societe.core.normaliser(it) == n || fr.dd.jarvis.societe.core.normaliser(it).contains(n)) }) return "déjà enregistrée"
+        if (lignes.any { memeCanal(it) && (fr.dd.jarvis.societe.core.normaliser(it) == n || fr.dd.jarvis.societe.core.normaliser(it).contains(n)) }) return@avecRollbackSiEcritureLocaleEchoue "déjà enregistrée"
         // Une consigne voisine n'est mise à jour que si elle parle VRAIMENT de la même chose (voir [memeSujet]) : celle du
         // poêle de l'étage n'écrase plus celle du salon, ni « retirer le mode nuit » celle qui l'active.
         val proche = lignes.indexOfFirst { memeCanal(it) && memeSujet(it, nouvelle) }
         if (proche >= 0) lignes[proche] = nouvelle else lignes += nouvelle
         items[k] = lignes.joinToString("\n") { "- $it" }
-        return persist()
+        persist()
     }
 
 
@@ -286,11 +388,11 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      * était effacée, consignes des poêles comprises).
      */
     @Synchronized
-    fun remplacerSujet(sujet: String, texte: String): String {
+    fun remplacerSujet(sujet: String, texte: String): String = avecRollbackSiEcritureLocaleEchoue {
         ensure()
         val k = sujet.trim().lowercase().ifBlank { "general" }
         val nouvelle = texte.trim().removePrefix("-").trim()
-        if (nouvelle.isBlank()) return "rien à enregistrer"
+        if (nouvelle.isBlank()) return@avecRollbackSiEcritureLocaleEchoue "rien à enregistrer"
         val lignes = items[k].orEmpty().lines().map { it.trim() }.filter { it.isNotBlank() }.map { it.removePrefix("-").trim() }
         val canal = fr.dd.jarvis.ai.CanalDemande.de(nouvelle)
         val n = fr.dd.jarvis.societe.core.normaliser(nouvelle)
@@ -298,31 +400,31 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         items[k] = (gardees + nouvelle).joinToString("\n") { "- $it" }
         val r = persist()
         val retirees = lignes.size - gardees.size
-        return if (retirees > 0) "$r ; $retirees consigne(s) sur le même sujet remplacée(s), les ${gardees.size} autre(s) gardée(s)" else r
+        if (retirees > 0) "$r ; $retirees consigne(s) sur le même sujet remplacée(s), les ${gardees.size} autre(s) gardée(s)" else r
     }
 
     @Synchronized
-    fun remplacerConsigne(sujet: String, texte: String, meme: (String) -> Boolean): String {
+    fun remplacerConsigne(sujet: String, texte: String, meme: (String) -> Boolean): String = avecRollbackSiEcritureLocaleEchoue {
         ensure()
         val k = sujet.trim().lowercase().ifBlank { "general" }
         val nouvelle = texte.trim().removePrefix("-").trim()
-        if (nouvelle.isBlank()) return "rien à enregistrer"
+        if (nouvelle.isBlank()) return@avecRollbackSiEcritureLocaleEchoue "rien à enregistrer"
         val lignes = items[k].orEmpty().lines().map { it.trim() }.filter { it.isNotBlank() }.map { it.removePrefix("-").trim() }.toMutableList()
-        if (lignes.any { it == nouvelle }) return "déjà enregistrée"
+        if (lignes.any { it == nouvelle }) return@avecRollbackSiEcritureLocaleEchoue "déjà enregistrée"
         val i = lignes.indexOfFirst(meme)
         if (i >= 0) lignes[i] = nouvelle else lignes += nouvelle
         lignes.removeAll { it != nouvelle && meme(it) }
         items[k] = lignes.joinToString("\n") { "- $it" }
-        return persist()
+        persist()
     }
 
     @Synchronized
-    fun remove(sujet: String): Boolean {
-        ensure(); val r = items.remove(sujet.trim().lowercase()) != null; if (r) persist(); return r
+    fun remove(sujet: String): Boolean = avecRollbackSiEcritureLocaleEchoue {
+        ensure(); val r = items.remove(sujet.trim().lowercase()) != null; if (r) persist(); r
     }
 
     @Synchronized
-    fun clear() { ensure(); items.clear(); persist() }
+    fun clear() = avecRollbackSiEcritureLocaleEchoue { ensure(); items.clear(); persist(); Unit }
 
     @Synchronized
     fun all(): Map<String, String> { ensure(); return LinkedHashMap(items) }
@@ -354,18 +456,45 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     fun majHermes(brut: String): Boolean {
         val texte = brut.take(20_000)
-        if (texte == hermes()) return false
-        hermesCache = texte
-        runCatching { hermesLocal.writeText(texte) }
+        val change = texte != hermes()
+        if (change) {
+            // Ne pas mettre à jour le cache avant la copie durable : sinon un échec disque serait
+            // considéré comme synchronisé et le hook Hermès ne réessaierait plus.
+            persisterCopieHermes(hermesLocal, texte)
+            hermesCache = texte
+        }
         val (notes, profil) = entreesHermes(texte)
         val md = "# Mémoire d'Hermès\n\n_Synchronisée automatiquement depuis Hermès (Termux). Pour corriger une information, demande-le à Jarvis ou à Hermès._\n\n" +
             "## Notes d'Hermès\n" + notes.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } +
             "\n\n## Profil de l'utilisateur (vu par Hermès)\n" + profil.joinToString("\n") { "- " + it.replace("\n", " ") }.ifBlank { "_(vide)_" } + "\n"
-        runCatching { obsidian.saveIn(FOLDER, "Mémoire Hermès", md) }
-        return true
+        // Conserver la source brute dans le coffre : le résumé Markdown ne suffit pas à reconstruire
+        // fidèlement la mémoire après une réinstallation de Jarvis.
+        obsidian.saveIn(FOLDER, "Mémoire Hermès source", texte)
+        // Même sans changement, retenter les deux miroirs : un échec temporaire ne doit pas laisser
+        // une mémoire locale correcte mais des notes Obsidian durablement périmées.
+        obsidian.saveIn(FOLDER, "Mémoire Hermès", md)
+        return change
     }
 
-    fun hermes(): String = hermesCache ?: runCatching { hermesLocal.takeIf { it.exists() }?.readText() }.getOrNull().orEmpty().also { hermesCache = it }
+    @Synchronized
+    fun hermes(): String {
+        hermesCache?.let { return it }
+        val source = if (obsidian.coffreConfigure()) {
+            // Une erreur d'accès SAF remonte : la copie privée n'est pas une source concurrente.
+            val distante = obsidian.lireAvecDateStrict(FOLDER, "Mémoire Hermès source.md")?.first
+            if (distante != null) distante else {
+                // Migration unique d'une ancienne installation : le fichier local n'est utilisé
+                // que si la note est réellement absente, jamais si le coffre est inaccessible.
+                val ancienne = hermesLocal.takeIf { it.isFile }?.readText().orEmpty()
+                if (ancienne.isNotBlank()) obsidian.saveIn(FOLDER, "Mémoire Hermès source", ancienne)
+                ancienne
+            }
+        } else {
+            hermesLocal.takeIf { it.isFile }?.readText().orEmpty()
+        }
+        hermesCache = source
+        return source
+    }
 
     /** Toutes les entrées de la mémoire d'Hermès (notes puis profil). */
     fun entreesHermesListe(): List<String> = entreesHermes(hermes()).let { (n, p) -> n + p }
@@ -387,14 +516,30 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     @Synchronized
     fun majCapacitesHermes(json: String) {
-        val j = runCatching { org.json.JSONObject(json) }.getOrNull() ?: return
+        require(json.length <= 60_000) { "Les capacités Hermès dépassent la taille maximale autorisée." }
+        val j = org.json.JSONObject(json)
+        // Même garantie que la mémoire : pas d'accusé de réception si le fichier durable
+        // n'a pas été remplacé correctement, afin que le hook réessaie.
+        persisterCopieHermes(capacitesLocal, json)
+        obsidian.saveBytes(FOLDER, "Capacités Hermès.json", json.toByteArray(Charsets.UTF_8), "application/json")
         capacitesCache = j
-        runCatching { capacitesLocal.writeText(json.take(60_000)) }
     }
 
-    private fun capacites(): org.json.JSONObject = capacitesCache
-        ?: runCatching { org.json.JSONObject(capacitesLocal.readText()) }.getOrNull()?.also { capacitesCache = it }
-        ?: org.json.JSONObject()
+    @Synchronized
+    private fun capacites(): org.json.JSONObject {
+        capacitesCache?.let { return it }
+        val brut = if (obsidian.coffreConfigure()) {
+            val distante = obsidian.lireAvecDateStrict(FOLDER, "Capacités Hermès.json")?.first
+            if (distante != null) distante else {
+                val ancienne = capacitesLocal.takeIf { it.isFile }?.readText().orEmpty()
+                if (ancienne.isNotBlank()) obsidian.saveBytes(FOLDER, "Capacités Hermès.json", ancienne.toByteArray(Charsets.UTF_8), "application/json")
+                ancienne
+            }
+        } else capacitesLocal.takeIf { it.isFile }?.readText().orEmpty()
+        val resultat = if (brut.isBlank()) org.json.JSONObject() else org.json.JSONObject(brut)
+        capacitesCache = resultat
+        return resultat
+    }
 
     /** Automatismes (cron) d'Hermès tels que synchronisés par le hook : nom, quand, prochaine, derniere, statut… */
     fun automatismesHermes(): List<org.json.JSONObject> = capacites().optJSONArray("automatismes")?.let { a ->
@@ -402,7 +547,10 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     }.orEmpty()
 
     /** Heure de la dernière synchronisation des capacités d'Hermès (0 si jamais). */
-    fun capacitesHermesDate(): Long = runCatching { capacitesLocal.lastModified() }.getOrDefault(0L)
+    fun capacitesHermesDate(): Long = runCatching {
+        if (obsidian.coffreConfigure()) obsidian.lireAvecDateStrict(FOLDER, "Capacités Hermès.json")?.second ?: 0L
+        else capacitesLocal.takeIf { it.isFile }?.lastModified() ?: 0L
+    }.getOrDefault(0L)
 
     /** Skills ajoutés à Hermès (nom → description). */
     fun skillsHermes(): List<Pair<String, String>> = capacites().optJSONArray("skills")?.let { a ->
@@ -449,7 +597,12 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      * déjà, en entier, dans le bloc « notes utiles » (NotesPertinentes).
      */
     @Synchronized
-    fun pourPrompt(): String { ensure(); return blocPrompt(items, vocal = fr.dd.jarvis.ai.CanalDemande.vocal) }
+    fun pourPrompt(): String = try {
+        ensure()
+        blocPrompt(items, vocal = fr.dd.jarvis.ai.CanalDemande.vocal)
+    } catch (e: Exception) {
+        "\n\nMÉMOIRE DURABLE TEMPORAIREMENT INACCESSIBLE : le coffre Obsidian n'a pas pu être lu. N'affirme pas qu'aucune consigne n'existe et ne remplace pas la mémoire par une ancienne copie locale. Réessaie lorsque l'accès sera rétabli."
+    }
 
     /** Consignes (de JARVIS et d'Hermès) qui concernent cette demande, à placer en fin de prompt ; vide sinon. */
     fun consignesPour(demande: String): String {
