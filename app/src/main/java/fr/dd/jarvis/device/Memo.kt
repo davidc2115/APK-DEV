@@ -19,6 +19,10 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     private val candidates = linkedMapOf<String, MutableSet<String>>()
     @Volatile private var loaded = false
     @Volatile private var loadError: String? = null
+    private var empreinteCoffreMemoire: String? = null
+    private var empreinteEtatCharge: String? = null
+    @Volatile private var conflitMemoireExterne = false
+    @Volatile private var derniereRelectureCoffre = 0L
 
     /** Registre commun Jarvis/Hermès, rangé dans le coffre Obsidian configuré. */
     private val registreApprentissage by lazy {
