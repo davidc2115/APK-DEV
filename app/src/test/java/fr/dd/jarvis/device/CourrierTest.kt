@@ -145,4 +145,18 @@ class CourrierTest {
         assertEquals(19, date.hour)
     }
 
+    @Test fun exemplesCapturesNeSontPasClassesCommeRdvFactureOuDevis() {
+        val base = LocalDate.of(2026, 11, 26)
+        assertTrue(Courrier.analyser("SUEZ", "Relevez votre compteur d'eau avant le 24/11/2026 ! Relevez compteur", "Mail", 0L, base).isEmpty())
+        assertTrue(Courrier.analyser("Leroy Merlin", "Votre simulation est sauvegardée. Nos experts vous aident à la peaufiner.", "Mail", 0L, base).isEmpty())
+        assertTrue(Courrier.analyser("Google Play — 4,99 €", "Confirmation de votre commande Google Play du 18 nov. Votre abonnement a été prolongé et facturé en conséquence.", "Mail", 0L, base).isEmpty())
+        assertTrue(Courrier.analyser("Rendez-vous Chaussea — date inconnue", "Plus que 48 h pour profiter de vos -25%. David, votre code expire bientôt.", "Mail", 0L, base).isEmpty())
+    }
+
+    @Test fun vraiRappelDeRendezVousResteDetecteMalgreObjetCourt() {
+        val r = Courrier.analyser("Cabinet Martin", "Rappel : votre rendez-vous est confirmé le 3 décembre 2026 à 14h30 au 12 rue des Lilas.", "Mail", 0L, LocalDate.of(2026, 11, 26)).single()
+        assertEquals(Courrier.RDV, r.type)
+        assertTrue(r.dateRdv != null)
+    }
+
 }
