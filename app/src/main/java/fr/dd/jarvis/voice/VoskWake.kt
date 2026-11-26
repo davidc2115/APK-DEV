@@ -164,7 +164,7 @@ class VoskWake(
         else when (exigence) { 1 -> 0.88; 2 -> 0.93; else -> 0.97 }
 
     companion object {
-        /** Tranche d'écoute continue pendant la musique, en voiture : 3 s (30 trames de 0,1 s). */
+        /** Tranche d'écoute continue pendant la musique, en voiture : 1,5 s (30 trames de 0,05 s). */
         internal const val FENETRE_MUSIQUE = 30
 
         /** Micro qui écoute « Jarvis » en ce moment (affiché dans Réglages › Écoute), null si aucune écoute. */
@@ -246,6 +246,10 @@ class VoskWake(
             }
             return false
         }
+
+        /** Même validation sur les mots partiels Vosk : confiance, durée et position restent obligatoires. */
+        internal fun detectePartiel(mots: org.json.JSONArray?, seuil: Double, partout: Boolean = false): Boolean =
+            if (partout) contientMot(mots, seuil) else estReveil(mots, seuil)
     }
 
     private fun detecte(mots: org.json.JSONArray?) = if (partout) contientMot(mots, seuil()) else estReveil(mots, seuil())
@@ -262,6 +266,7 @@ class VoskWake(
             if (model == null) model = VoskModel.partage(ctx) ?: return false
             val rec = Recognizer(model, 16000f, (if (francais) GRAMMAIRE_FR else GRAMMAIRE).joinToString(", ", "[", "]") { "\"$it\"" })
             rec.setWords(true)
+            rec.setPartialWords(true)
             fired = false
             if (econome) {
                 // Écoute économe : le modèle ne travaille que quand il y a du son (porte de silence), pas en continu.
@@ -278,7 +283,8 @@ class VoskWake(
                             if (detecte(org.json.JSONObject(j).optJSONArray("result"))) { fired = true; JournalVoix.noter("Vosk", "« Jarvis » détecté${if (francais) "" else " (modèle anglais)"}"); onWake() }
                         } catch (_: Throwable) {}
                     }
-                    override fun onPartialResult(hypothesis: String?) {}
+                    // Ne pas attendre la fin de phrase : les mots partiels contiennent maintenant confiance et durée.
+                    override fun onPartialResult(hypothesis: String?) = verifierPartiel(hypothesis)
                     override fun onResult(hypothesis: String?) = check(hypothesis)
                     override fun onFinalResult(hypothesis: String?) = check(hypothesis)
                     // Le service de Vosk s'arrête sur une erreur micro : on prévient pour qu'il soit relancé.
@@ -296,6 +302,18 @@ class VoskWake(
         boucle?.arreter(); boucle = null
     }
 
+    private fun verifierPartiel(j: String?, nImporteOu: Boolean = false) {
+        if (fired || j == null) return
+        try {
+            val mots = org.json.JSONObject(j).optJSONArray("partial_result")
+            if (detectePartiel(mots, seuil(), nImporteOu)) {
+                fired = true
+                JournalVoix.noter("Vosk", "« Jarvis » détecté dès le résultat partiel${if (nImporteOu) " malgré la musique" else ""}")
+                onWake()
+            }
+        } catch (_: Throwable) {}
+    }
+
     private fun verifier(j: String?, nImporteOu: Boolean = false) {
         if (fired || j == null) return
         try {
@@ -309,13 +327,16 @@ class VoskWake(
     }
 
     private fun nouveauRecognizer(): Recognizer? = runCatching {
-        Recognizer(model, 16000f, (if (francais) GRAMMAIRE_FR else GRAMMAIRE).joinToString(", ", "[", "]") { "\"$it\"" }).apply { setWords(true) }
+        Recognizer(model, 16000f, (if (francais) GRAMMAIRE_FR else GRAMMAIRE).joinToString(", ", "[", "]") { "\"$it\"" }).apply {
+            setWords(true)
+            setPartialWords(true)
+        }
     }.getOrNull()
 
     /**
-     * Micro lu par trames de 0,1 s ; tant que c'est le silence (ou le bruit de fond habituel), rien n'est envoyé au
+     * Micro lu par trames de 0,05 s ; tant que c'est le silence (ou le bruit de fond habituel), rien n'est envoyé au
      * modèle (c'était lui qui consommait : il décodait le silence sans arrêt). Dès qu'un son dépasse le bruit de fond,
-     * les 0,6 s précédentes puis la suite sont analysées, jusqu'à 1,2 s de calme.
+     * les 0,6 s précédentes puis la suite sont analysées, jusqu'à 0,6 s de calme.
      */
     private inner class BoucleEconome(private val rec: Recognizer) {
         @Volatile private var actif = true
@@ -325,7 +346,7 @@ class VoskWake(
 
         @android.annotation.SuppressLint("MissingPermission")
         fun demarrer(): Boolean {
-            val taille = 1600   // 0,1 s à 16 kHz
+            val taille = 800   // 0,05 s à 16 kHz : réduit l'attente maximale avant décodage (20 lectures/s).
             val min = android.media.AudioRecord.getMinBufferSize(16000, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
             val ar = try {
                 android.media.AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000,
@@ -355,7 +376,7 @@ class VoskWake(
          * En voiture : micro plus sensible (gain automatique ×10 au plus, réduction du bruit, seuil plus bas : un « Jarvis »
          * presque chuchoté passe) et écoute CONTINUE sans porte, musique ou pas : la musique et le bruit de la route la
          * gardaient ouverte en permanence, la phrase reconnue ne finissait jamais et « Jarvis » n'était plus en tête →
-         * jamais détecté. Deux reconnaissances décalées de 1,5 s, remises à zéro toutes les 3 s, repèrent « Jarvis »
+         * jamais détecté. Deux reconnaissances décalées d'environ 0,75 s, remises à zéro toutes les 1,5 s, repèrent « Jarvis »
          * n'importe où dans ce qu'elles entendent.
          */
         private fun boucle(ar: android.media.AudioRecord, taille: Int) {
@@ -393,13 +414,15 @@ class VoskWake(
                     // Gain automatique partout (×5 au plus sur le téléphone, ×10 en voiture) : « Jarvis » dit doucement ou de loin.
                     val trame = if (voiture) gain.appliquer(buf, n, rms) else gainTel.appliquer(buf, n, rms)
                     if (musique) {
-                        // Écoute continue : chaque reconnaissance travaille sur des tranches de 3 s, la 2e décalée de 1,5 s.
+                        // Écoute continue : fenêtres de 1,5 s, avec une seconde reconnaissance décalée d'environ 0,75 s pour réduire la latence.
                         if (rec.acceptWaveForm(trame, n)) verifier(rec.result, nImporteOu = true)
+                        else verifierPartiel(rec.partialResult, nImporteOu = true)
                         if (++trames1 >= FENETRE_MUSIQUE) { verifier(rec.finalResult, nImporteOu = true); rec.reset(); trames1 = 0 }
                         rec2?.let { r2 ->
                             if (trames2 < 0) trames2++
                             else {
                                 if (r2.acceptWaveForm(trame, n)) verifier(r2.result, nImporteOu = true)
+                                else verifierPartiel(r2.partialResult, nImporteOu = true)
                                 if (++trames2 >= FENETRE_MUSIQUE) { verifier(r2.finalResult, nImporteOu = true); r2.reset(); trames2 = 0 }
                             }
                         }
@@ -409,11 +432,11 @@ class VoskWake(
                     when (porte.trame(rms)) {
                         PorteVocale.Decision.IGNORER -> { avant.addLast(trame.copyOf(n)); while (avant.size > PorteVocale.PRE_ROULEMENT) avant.removeFirst() }
                         PorteVocale.Decision.OUVRIR -> {
-                            avant.forEach { if (rec.acceptWaveForm(it, it.size)) verifier(rec.result) }
+                            avant.forEach { if (rec.acceptWaveForm(it, it.size)) verifier(rec.result) else verifierPartiel(rec.partialResult) }
                             avant.clear()
-                            if (rec.acceptWaveForm(trame, n)) verifier(rec.result)
+                            if (rec.acceptWaveForm(trame, n)) verifier(rec.result) else verifierPartiel(rec.partialResult)
                         }
-                        PorteVocale.Decision.CONTINUER -> if (rec.acceptWaveForm(trame, n)) verifier(rec.result)
+                        PorteVocale.Decision.CONTINUER -> if (rec.acceptWaveForm(trame, n)) verifier(rec.result) else verifierPartiel(rec.partialResult)
                         PorteVocale.Decision.FERMER -> {
                             rec.acceptWaveForm(trame, n)
                             verifier(rec.finalResult)
@@ -472,17 +495,17 @@ internal class GainAuto(private val cible: Double = 2500.0, private val max: Dou
 }
 
 /**
- * Porte de silence de l'écoute économe (trames de 0,1 s). Elle suit le bruit de fond (pièce calme, ventilation, télé)
- * et ne s'ouvre que sur un son nettement plus fort ; elle se referme après 1,2 s de calme, ou au bout de 8 s d'un son
+ * Porte de silence de l'écoute économe (trames de 0,05 s). Elle suit le bruit de fond (pièce calme, ventilation, télé)
+ * et ne s'ouvre que sur un son nettement plus fort ; elle se referme après 0,6 s de calme, ou au bout de 8 s d'un son
  * continu (télé, musique) dont elle prend alors le niveau comme nouveau bruit de fond.
  */
 internal class PorteVocale {
     enum class Decision { IGNORER, OUVRIR, CONTINUER, FERMER }
 
     companion object {
-        const val PRE_ROULEMENT = 6     // 0,6 s gardées avant l'ouverture (début du mot)
-        const val MAINTIEN = 12         // 1,2 s de calme avant de refermer
-        const val DUREE_MAX = 80        // 8 s de son continu au plus
+        const val PRE_ROULEMENT = 12    // 0,6 s gardées avant l'ouverture (début du mot)
+        const val MAINTIEN = 12         // 0,6 s de calme avant de refermer
+        const val DUREE_MAX = 160       // 8 s de son continu au plus
 
         fun rms(b: ShortArray, n: Int): Double {
             var somme = 0.0
