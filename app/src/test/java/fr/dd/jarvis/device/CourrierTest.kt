@@ -129,4 +129,19 @@ class CourrierTest {
         assertEquals(Courrier.COLIS, c.type)
     }
 
+    @Test fun lesPublicitesNeDeviennentPasDesRendezVousFacturesOuColis() {
+        assertTrue(a("Option Budget", "Découvrez notre option budget et profitez de nos offres exclusives.").isEmpty())
+        assertTrue(a("Garage", "Découvrez notre garage et nos offres promotionnelles sur l'entretien.").isEmpty())
+        assertTrue(a("Banque", "Votre option budget évolue, un prélèvement sera effectué selon votre choix.").isEmpty())
+        assertTrue(a("Transport", "Profitez de la livraison gratuite sur toutes nos commandes.").isEmpty())
+    }
+
+    @Test fun rendezVousPersonnelSansMotRendezVousEstDetecte() {
+        val r = Courrier.analyser("Ma chérie", "Je passerai chez toi jeudi 3 décembre vers 19h.", "Mail", 0L, LocalDate.of(2026, 11, 26)).single()
+        assertEquals(Courrier.RDV, r.type)
+        val date = java.time.Instant.ofEpochMilli(r.dateRdv!!).atZone(java.time.ZoneId.systemDefault())
+        assertEquals(LocalDate.of(2026, 12, 3), date.toLocalDate())
+        assertEquals(19, date.hour)
+    }
+
 }
