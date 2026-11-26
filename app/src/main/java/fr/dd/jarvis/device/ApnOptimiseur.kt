@@ -155,15 +155,33 @@ object ApnOptimiseur {
             return "Changement de DNS annulé."
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val p = app.getSharedPreferences("reseau_mobile", 0)
-            val modeAvant = ApnConfig.executer(app, "settings get global private_dns_mode").trim().ifBlank { "null" }
-            val hoteAvant = ApnConfig.executer(app, "settings get global private_dns_specifier").trim().ifBlank { "null" }
-            if (!p.contains("dns_mode_avant")) p.edit().putString("dns_mode_avant", modeAvant).putString("dns_hote_avant", hoteAvant).apply()
-            ApnConfig.executer(app, "settings put global private_dns_specifier $hote; settings put global private_dns_mode hostname")
-            Thread.sleep(3_000)
+            val modeAvant = ApnConfig.executer(app, "settings get global private_dns_mode").trim()
+            val hoteAvant = ApnConfig.executer(app, "settings get global private_dns_specifier").trim()
+            if (ApnConfig.refuse(modeAvant) || ApnConfig.refuse(hoteAvant)) {
+                return@withContext "❌ Lecture du DNS actuel impossible : \${listOf(modeAvant, hoteAvant).filter { ApnConfig.refuse(it) }.joinToString(" ; ")}"
+            }
+            if (!p.contains("dns_mode_avant")) p.edit()
+                .putString("dns_mode_avant", modeAvant.ifBlank { "null" })
+                .putString("dns_hote_avant", hoteAvant.ifBlank { "null" }).apply()
+            val ecriture = ApnConfig.executer(app, "settings put global private_dns_specifier $hote && settings put global private_dns_mode hostname")
+            if (ApnConfig.refuse(ecriture)) {
+                val retour = restaurerDns(app)
+                return@withContext "❌ Écriture du DNS refusée : $ecriture" + if (retour) " Le réglage précédent a été restauré." else " ⚠️ La restauration doit être vérifiée dans les réglages DNS."
+            }
+            Thread.sleep(1_500)
+            val modeApres = ApnConfig.executer(app, "settings get global private_dns_mode").trim()
+            val hoteApres = ApnConfig.executer(app, "settings get global private_dns_specifier").trim()
+            if (modeApres != "hostname" || hoteApres != hote) {
+                val retour = restaurerDns(app)
+                return@withContext "❌ Le DNS demandé n'a pas été confirmé (mode=$modeApres, hôte=$hoteApres)." +
+                    if (retour) " Le réglage précédent a été restauré." else " ⚠️ Vérifie manuellement le DNS privé."
+            }
+            Thread.sleep(1_500)
             val ok = TestDebit.ping(app) || internetActuelOk(app)
             if (!ok) {
-                restaurerDns(app)
-                return@withContext "↩️ Avec le DNS $nom, internet ne répondait pas : j'ai remis le réglage d'avant."
+                val retour = restaurerDns(app)
+                return@withContext "↩️ Avec le DNS $nom, internet ne répondait pas : " +
+                    if (retour) "le réglage d'avant a été restauré." else "⚠️ la restauration n'a pas pu être confirmée."
             }
             "✅ DNS privé $nom activé et vérifié. (« remets le DNS d'origine » pour revenir en arrière.)"
         }
@@ -174,18 +192,29 @@ object ApnOptimiseur {
             .newCall(okhttp3.Request.Builder().url("https://speed.cloudflare.com/__down?bytes=0").build()).execute().use { it.isSuccessful }
     }.getOrDefault(false)
 
-    private fun restaurerDns(app: JarvisApp) {
+    private fun restaurerDns(app: JarvisApp): Boolean {
         val p = app.getSharedPreferences("reseau_mobile", 0)
         val mode = p.getString("dns_mode_avant", "null").orEmpty()
         val hote = p.getString("dns_hote_avant", "null").orEmpty()
-        ApnConfig.executer(app, (if (hote == "null" || hote.isBlank()) "settings delete global private_dns_specifier" else "settings put global private_dns_specifier $hote") + "; " +
-            (if (mode == "null" || mode.isBlank()) "settings put global private_dns_mode opportunistic" else "settings put global private_dns_mode $mode"))
-        p.edit().remove("dns_mode_avant").remove("dns_hote_avant").apply()
+        val commande = (if (hote == "null" || hote.isBlank()) "settings delete global private_dns_specifier" else "settings put global private_dns_specifier $hote") + " && " +
+            (if (mode == "null" || mode.isBlank()) "settings put global private_dns_mode opportunistic" else "settings put global private_dns_mode $mode")
+        val ecriture = ApnConfig.executer(app, commande)
+        if (ApnConfig.refuse(ecriture)) return false
+        val modeLu = ApnConfig.executer(app, "settings get global private_dns_mode").trim()
+        val hoteLu = ApnConfig.executer(app, "settings get global private_dns_specifier").trim().ifBlank { "null" }
+        val modeAttendu = if (mode == "null" || mode.isBlank()) "opportunistic" else mode
+        val hoteAttendu = if (hote == "null" || hote.isBlank()) "null" else hote
+        val ok = modeLu == modeAttendu && hoteLu == hoteAttendu
+        if (ok) p.edit().remove("dns_mode_avant").remove("dns_hote_avant").apply()
+        return ok
     }
 
     suspend fun dnsRestaurer(app: JarvisApp): String {
         if (!PhoneShell.ready(app)) return "Il me faut Shizuku ou l'ADB intégré pour remettre le DNS."
-        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { restaurerDns(app); "↩️ DNS d'origine remis." }
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            if (restaurerDns(app)) "↩️ DNS d'origine remis et vérifié."
+            else "❌ Restauration du DNS non confirmée : les informations d'origine sont conservées pour réessayer."
+        }
     }
 
     /** MTU seule : mesure et explication. */
