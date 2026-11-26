@@ -309,7 +309,8 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
         val debutTranscription = android.os.SystemClock.elapsedRealtime()
         val texte = try {
             Pcm.nettoyerTranscription(withContext(Dispatchers.IO) { app.llm.groq.transcrire(Pcm.wav(pcm)) })
-        } catch (e: Throwable) { terminer("Transcription impossible : ${e.message?.take(120) ?: e.javaClass.simpleName}"); return }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Throwable) { terminer("Transcription impossible : ${e.message?.take(120) ?: e.javaClass.simpleName}"); return }
         fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "transcription Groq en ${android.os.SystemClock.elapsedRealtime() - debutTranscription} ms")
         if (fermee) return
         if (texte.isBlank()) { if (++incompris < 3) ecouter() else terminer("Je n'ai pas compris."); return }
@@ -327,7 +328,8 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
             try {
                 // En voiture : les actions sensibles (envoi de SMS, appel…) qui exigent une confirmation forcée sont refusées.
                 cerveau.reply(CarBridge.contexte(), vocal = true) { }
-            } catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
         }
         fr.dd.jarvis.voice.JournalVoix.noter("android-auto", "compréhension + action en ${android.os.SystemClock.elapsedRealtime() - debutTraitement} ms")
         if (fermee) return
@@ -432,6 +434,7 @@ class ReponseTexteScreen(ctx: CarContext, private val question: String) : Screen
             app.chatAjouter(userMessage)
             val rep = withContext(Dispatchers.IO) {
                 try { Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(CarBridge.contexte(), vocal = true) { } }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
                 catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
             }
             val propre = rep.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim().ifBlank { "C'est fait." }

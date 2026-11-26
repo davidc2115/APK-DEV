@@ -35,7 +35,7 @@ object ConversationAuto {
         if (ctx == null || enCours) { fin(); return }
         enCours = true
         CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
-            try { boucle(app, ctx) } catch (_: Throwable) { } finally {
+            try { boucle(app, ctx) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Throwable) { } finally {
                 enCours = false; fin()
                 // Musique demandée pendant la conversation : elle doit jouer maintenant que micro et voix sont libérés.
                 runCatching { fr.dd.jarvis.device.LectureGarantie.surveiller(app) }
@@ -102,7 +102,7 @@ object ConversationAuto {
                 withTimeoutOrNull(20_000) {
                     withContext(Dispatchers.IO) { Pcm.nettoyerTranscription(app.llm.groq.transcrire(Pcm.wav(pcm))) }
                 }
-            } catch (_: Throwable) { null }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Throwable) { null }
             journal.noter("android-auto", "transcription Groq en ${System.currentTimeMillis() - debutTranscription} ms")
             if (texte == null) { parler(app, "La transcription a pris trop de temps. Réessaie."); return }
             if (texte.isBlank()) { if (++incompris < 3) continue else { parler(app, "Je n'ai pas compris."); return } }
@@ -144,6 +144,7 @@ object ConversationAuto {
             val rep = withTimeoutOrNull(90_000) {
                 withContext(Dispatchers.IO) {
                     try { brain.reply(CarBridge.contexte(), vocal = true) { } }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
                     catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
                 }
             } ?: run {
