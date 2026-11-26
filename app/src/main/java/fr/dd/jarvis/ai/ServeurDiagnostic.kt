@@ -427,30 +427,67 @@ internal object ServeurDiagnostic {
     /** Commande d'un remède : « sudo » (mot de passe enregistré utilisé), mesure avant / après. */
     fun commandeRemede(r: Remede): String = when (r) {
         Remede.NETTOYER_DISQUE -> sh("""
+            set -euo pipefail
             avant=¤(df -Pm / | awk 'NR==2 {print ¤4}')
             sudo journalctl --vacuum-size=200M 2>&1 | tail -1
             sudo apt-get clean 2>&1 | tail -1
-            if command -v docker >/dev/null 2>&1; then sudo docker image prune -f 2>&1 | tail -1; sudo docker builder prune -f 2>&1 | tail -1; fi
+            if command -v docker >/dev/null 2>&1; then
+              sudo docker image prune -f 2>&1 | tail -1
+              sudo docker builder prune -f 2>&1 | tail -1
+            fi
             apres=¤(df -Pm / | awk 'NR==2 {print ¤4}')
             echo "@LIBERE ¤((apres - avant)) ¤apres"
         """, "")
         Remede.RELANCER_ECHECS -> sh("""
-            U=¤(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print ¤1}' | head -10)
-            [ -z "¤U" ] && echo 'Aucun service en échec.'
-            for u in ¤U; do sudo systemctl restart "¤u" 2>&1 | tail -2; sleep 2; echo "¤u → ¤(systemctl is-active "¤u" 2>/dev/null)"; done
-            sudo systemctl reset-failed 2>/dev/null
+            set -euo pipefail
+            U=¤(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print ¤1}' | sed -n '1,10p')
+            if [ -z "¤U" ]; then
+              echo 'Aucun service en échec.'
+            else
+              for u in ¤U; do
+                sudo systemctl restart "¤u" 2>&1 | tail -2
+                sleep 2
+                etat=¤(systemctl is-active "¤u" 2>/dev/null)
+                echo "¤u → ¤etat"
+                [ "¤etat" = active ]
+              done
+              sudo systemctl reset-failed
+            fi
         """, "")
-        Remede.SYNCHRONISER_HEURE -> "sudo timedatectl set-ntp true 2>&1; sleep 3; echo \"synchronisée : $(timedatectl show -p NTPSynchronized --value 2>/dev/null)\""
-        Remede.REDEMARRER_DOCKER -> "sudo systemctl restart docker 2>&1 | tail -2; sleep 5; echo \"docker : $(systemctl is-active docker)\"; sudo docker ps --format '{{.Names}} {{.Status}}' 2>&1 | head -15"
+        Remede.SYNCHRONISER_HEURE -> sh("""
+            set -euo pipefail
+            sudo timedatectl set-ntp true
+            sleep 3
+            synchronisee=¤(timedatectl show -p NTPSynchronized --value 2>/dev/null)
+            echo "Synchronisation NTP : ¤synchronisee"
+            [ "¤synchronisee" = yes ]
+        """, "")
+        Remede.REDEMARRER_DOCKER -> sh("""
+            set -euo pipefail
+            sudo systemctl restart docker
+            sleep 5
+            sudo systemctl is-active --quiet docker
+            echo "Docker : actif"
+            sudo docker ps --format '{{.Names}} {{.Status}}' | sed -n '1,15p'
+        """, "")
     }
 
-    /** Compte rendu d'un remède appliqué. */
-    fun resultatRemede(r: Remede, sortie: String): String = when (r) {
-        Remede.NETTOYER_DISQUE -> Regex("@LIBERE (-?\\d+) (\\d+)").find(sortie)?.let { m ->
-            val lib = m.groupValues[1].toLong(); val libre = m.groupValues[2].toLong()
-            String.format(java.util.Locale.FRANCE, "🧹 Disque nettoyé : %s, %.1f Go libres sur /.", if (lib > 0) "$lib Mo libérés" else "rien de plus à libérer", libre / 1024.0)
-        } ?: ("🧹 Nettoyage lancé :\n" + sortie.take(800))
-        else -> "✅ " + r.question.substringBefore(" ?").substringBefore(" (") + " : fait.\n" + sortie.trim().take(1200)
+    /** Compte rendu d'un remède : aucun succès n'est annoncé si la commande échoue. */
+    fun resultatRemede(r: Remede, sortie: String, codeSortie: Int = 0): String {
+        if (codeSortie == -2) {
+            return "⏳ Dépannage toujours en cours sur le serveur : aucune réussite annoncée. La commande continue sans être interrompue. Vérifie son état avec le suivi des tâches serveur.\n" + sortie.trim().take(1200)
+        }
+        if (codeSortie != 0) {
+            return "⚠️ Échec du dépannage « " + r.question.substringBefore(" ?") +
+                " » (code de sortie $codeSortie). L'opération n'est pas confirmée.\n" + sortie.trim().take(1200)
+        }
+        return when (r) {
+            Remede.NETTOYER_DISQUE -> Regex("@LIBERE (-?\\d+) (\\d+)").find(sortie)?.let { m ->
+                val lib = m.groupValues[1].toLong(); val libre = m.groupValues[2].toLong()
+                String.format(java.util.Locale.FRANCE, "🧹 Disque nettoyé : %s, %.1f Go libres sur /.", if (lib > 0) "$lib Mo libérés" else "rien de plus à libérer", libre / 1024.0)
+            } ?: ("⚠️ Nettoyage non confirmé : mesure avant/après absente.\n" + sortie.take(800))
+            else -> "✅ " + r.question.substringBefore(" ?").substringBefore(" (") + " : vérifié.\n" + sortie.trim().take(1200)
+        }
     }
 
     /**
