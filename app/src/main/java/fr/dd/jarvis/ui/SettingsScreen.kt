@@ -2172,6 +2172,12 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
         }
         if (empreinteEnAttente != null) {
             val cle = empreinteEnAttente!!
+            val nomCle = when (cle.type) {
+                "ssh-ed25519" -> "ed25519"
+                "ssh-rsa" -> "rsa"
+                "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521" -> "ecdsa"
+                else -> ""
+            }
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { empreinteEnAttente = null },
                 title = { Text("Vérifier la clé du serveur SSH") },
@@ -2181,7 +2187,7 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
                         Text(cle.empreinte, color = HudText)
                         Spacer(Modifier.height(8.dp))
                         Text("Compare cette empreinte à celle affichée directement sur Debian avec :")
-                        Text("ssh-keygen -lf /etc/ssh/ssh_host_\${cle.type}_key.pub", color = HudText)
+                        Text(if (nomCle.isNotBlank()) "ssh-keygen -lf /etc/ssh/ssh_host_\${nomCle}_key.pub" else "Type de clé inconnu : vérifie son empreinte avec ssh-keygen -lf sur la clé publique d'hôte correspondante.", color = HudText)
                         Spacer(Modifier.height(8.dp))
                         Text("Si les valeurs ne correspondent pas exactement, refuse. Aucune commande SSH ne sera exécutée avant cette approbation.")
                     }
