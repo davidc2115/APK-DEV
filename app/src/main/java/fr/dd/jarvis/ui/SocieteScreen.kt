@@ -148,6 +148,24 @@ private fun InterventionsTab(app: JarvisApp) {
         }
         photoTarget = null
     }
+
+    // Sauvegarde automatique après chaque modification du formulaire de reprise.
+    // Le délai court évite une écriture disque à chaque caractère, sans dépendre de la fermeture de l'écran.
+    LaunchedEffect(draftTarget, date, categorie, description, diagnostic, actions, pieces, mesures, statut, prochaine, notes) {
+        val target = draftTarget ?: return@LaunchedEffect
+        delay(650)
+        withContext(Dispatchers.IO) {
+            runCatching {
+                app.societe.enregistrerBrouillonIntervention(target.third.copy(
+                    date = date.trim(), categorie = categorie.trim(), description = description.trim(),
+                    diagnostic = diagnostic.trim(), actions = actions.trim(), pieces = pieces.trim(),
+                    mesures = mesures.trim(), statut = statut.trim().lowercase(),
+                    prochaineMaintenance = prochaine.trim(), notes = notes.trim()
+                ))
+            }
+        }
+    }
+
     val sites = app.societe.data.clients.flatMap { client -> client.sites.map { site -> client to site } }.sortedBy { it.first.nom.lowercase() + " " + it.second.nom.lowercase() }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { HudPanel(Modifier.fillMaxWidth(), title = "🛠️ Carnet technique photovoltaïque") {
