@@ -63,7 +63,7 @@ object Courrier {
     )
     private val MOTS_COLIS = Regex("\\b(colis|livraison|livre|livree|expedie|expediee|expedition|point relais|relais|consigne|locker|avis de passage|suivi|tracking|envoi|transporteur)\\b")
     /** Une commande ou un numéro de commande Amazon ne prouvent jamais qu'un colis est expédié. */
-    private val INDICES_EXPEDITION = Regex("\\b(votre colis|colis (?:a ete |est |sera )?(?:expedie|livre|en route|en transit)|commande (?:a ete |est )?expediee?|vient d etre expedie|a ete expedie|en cours d acheminement|pris en charge par|numero de suivi|suivre votre colis|suivi de (?:votre )?(?:colis|commande)|livraison (?:est |sera )?(?:prevue|confirmee|en cours|effectuee)|sera livre|est en transit|est en cours de livraison|avis de passage|disponible au point relais)\\b")
+    private val INDICES_EXPEDITION = Regex("\\b(votre colis|colis (?:a ete |est |sera )?(?:expedie|livre|en route|en transit|disponible|arrive)|commande (?:a ete |est )?expediee?|vient d etre expedie|a ete expedie|en cours d acheminement|pris en charge par|numero de suivi|suivre votre colis|suivi de (?:votre )?(?:colis|commande)|livraison (?:est |sera )?(?:prevue|confirmee|en cours|effectuee)|sera livre|est en transit|est en cours de livraison|avis de passage|disponible au point relais|votre envoi est|votre paquet|a ete remis au transporteur|en cours d expedition)\\b")
     private val NUMERO_GENERIQUE = Regex("\\b([A-Z]{2}\\d{9}[A-Z]{2}|\\d[A-Z]\\d{11}|1Z[0-9A-Z]{16}|\\d{13,15})\\b")
     private val CODE_RETRAIT = Regex("(?i)code (?:de retrait|de collecte|d'ouverture|d’ouverture|de deverrouillage|de déverrouillage|pin|de livraison|de recuperation|de récupération|a presenter|à présenter)\\s*[:=]?\\s*([A-Z0-9]{4,10})")
 
