@@ -289,11 +289,19 @@ object VisibiliteAuto {
         }
     }
 
-    /** Arrêt forcé d'Android Auto : il revérifie ses applis au prochain lancement (à faire à l'arrêt). */
+    /** Arrête Android Auto pour forcer sa réinitialisation à la prochaine connexion voiture (à faire à l'arrêt). */
     fun relancerAndroidAuto(ctx: Context): String {
         if (!possible(ctx)) return "❌ Il faut Shizuku démarré ou l'ADB intégré appairé. Sinon : Réglages Android › Applications › Android Auto › Forcer l'arrêt."
-        val r = fr.dd.jarvis.device.PhoneShell.exec(ctx, "am force-stop com.google.android.projection.gearhead")
-        return if (r.startsWith("Erreur") || r.startsWith("ADB non")) "❌ $r" else "✅ Android Auto relancé : il revérifie ses applis à la prochaine connexion. Rebranche le téléphone."
+        val packageAuto = "com.google.android.projection.gearhead"
+        if (runCatching { ctx.packageManager.getPackageInfo(packageAuto, 0) }.isFailure) {
+            return "❌ Android Auto n'est pas installé sur ce téléphone."
+        }
+        val r = fr.dd.jarvis.device.PhoneShell.exec(ctx, "am force-stop $packageAuto")
+        return if (r.startsWith("Erreur") || r.startsWith("ADB non") || r.startsWith("Aucun accès") || r.startsWith("⏱️")) {
+            "❌ Arrêt d'Android Auto non confirmé : $r"
+        } else {
+            "⏹️ Arrêt forcé d'Android Auto confirmé. Je ne prétends pas l'avoir redémarré : Android le relancera lors de la prochaine connexion à la voiture. Rebranche le téléphone à l'arrêt."
+        }
     }
 
     /** Tout ce que JARVIS peut vérifier lui-même sur sa visibilité dans Android Auto (à copier pour un dépannage). Bloquant. */
