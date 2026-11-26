@@ -154,7 +154,7 @@ object GmailApi {
         if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler (Réglages › Comptes › Mails › Ajouter un compte Google).")
         val token = auth.accessToken ?: throw IllegalStateException("jeton Google indisponible.")
         return withContext(Dispatchers.IO) {
-            val qs = listOfNotNull(if (unreadOnly) "is:unread" else null, if (lusSeulement) "is:read" else null, if (everywhere) "-in:spam -in:trash -in:drafts" else null).joinToString(" ")
+            val qs = listOfNotNull(if (unreadOnly) "is:unread" else null, if (lusSeulement) "is:read" else null, if (everywhere) "-in:spam -in:trash -in:drafts -in:sent" else null).joinToString(" ")
             val q = if (qs.isNotBlank()) "&q=" + java.net.URLEncoder.encode(qs, "UTF-8") else ""
             val inbox = if (everywhere) "" else "&labelIds=INBOX"
             // Pagination : l'API Gmail renvoie au plus 100 mails par page.
