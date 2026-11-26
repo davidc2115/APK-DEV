@@ -74,7 +74,10 @@ object Courrier {
     private val RDV_RE = Regex("\\b(rendez vous|rdv|convocation|rappel de votre rendez vous|confirmation de rendez vous|confirmation du rendez vous|votre rendez vous|rdv confirme|visite prevue|visite est prevue|votre visite|visite technique|rappel de visite|visite a domicile|votre consultation|consultation prevue|creneau confirme|creneau reserve|reservation confirmee|confirmation de reservation|votre reservation est confirmee|intervention prevue|intervention programmee|intervention planifiee|intervention confirmee|votre intervention|votre venue|vous etes attendu|nous vous attendons|passage de notre technicien|passage du technicien|technicien passera|confirmation de visite)\\b")
     private val RDV_AUTO_RE = Regex("\\b(vidange|controle technique|ct|revision|entretien du vehicule|pneumatiques?|changement de pneus)\\b")
     private val RENCONTRE_RE = Regex("\\b(on se voit|on se retrouve|on se rejoint|je passe te voir|je passerai te voir|je viens te voir|je viendrai te voir|je serai chez toi|je serai chez vous|je t attends|je vous attends|je passe chez toi|je passerai chez toi|je viens chez toi|je viendrai chez toi)\\b")
-    private val PROMOTION_RE = Regex("\\b(option budget|code promo|promotion|promotions|offre speciale|offre exclusive|profitez de|decouvrez notre offre|remise exceptionnelle|vente privee|abonnez vous|souscrivez|jusqu a -?\\d{1,2} ?%)\\b")
+    private val PROMOTION_RE = Regex("\\b(option budget|code promo|promotion|promotions|offre speciale|offre exclusive|profitez de|decouvrez notre offre|remise exceptionnelle|vente privee|abonnez vous|souscrivez|jusqu a -?\\d{1,2} ?%|plus que \\d+ h|votre code expire|code expire bientot|profitez de vos|soldes|nouvelle collection)\\b")
+    private val PUB_RDV_RE = Regex("\\b(plus que \\d+ h|code expire|votre code expire|profitez de vos|\\d{1,2} ?%|reduction|remise|offre exclusive|offre speciale|soldes|nouvelle collection|simulation est sauvegardee|relevez votre compteur|releve de compteur|index de compteur|transmettez votre index|confirmation de votre commande|abonnement .* (prolonge|renouvele) et facture)\\b")
+    private val RELEVE_COMPTEUR_RE = Regex("\\b(relevez? votre compteur|releve de compteur|index de compteur|transmettez votre index|auto releve)\\b")
+    private val FINANCE_HORS_FACTURE_RE = Regex("\\b(simulation est sauvegardee|confirmation de votre commande|abonnement .* (prolonge|renouvele) et facture|achat confirme|merci pour votre achat)\\b")
     private val HEURE = Regex("\\b(\\d{1,2}) ?(?:h|:) ?(\\d{2})?\\b")
     private val ADRESSE = Regex("(\\d{1,4}(?: ?bis| ?ter)?,? (?:rue|avenue|av\\.?|bd|boulevard|chemin|place|allee|allée|impasse|route|quai|cours|faubourg|zone|za|zi|lieu[- ]dit)[^,\\n.]{2,60}(?:,? ?\\d{5} [A-Za-zÀ-ÿ' -]{2,40})?)", RegexOption.IGNORE_CASE)
     private val GARAGE_RDV = Regex("\\bgarage\\s+([A-ZÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\\s+[A-ZÀ-ÿ][A-Za-zÀ-ÿ'’-]*){0,2})", RegexOption.IGNORE_CASE)
@@ -134,10 +137,13 @@ object Courrier {
         val nd = DatesFr.normaliser(brut)
         val jourTrouve = DatesFr.jour(nd, aujourdhui)?.date
         val heurePresente = HEURE.containsMatchIn(nd)
-        val rdvExplicite = RDV_RE.containsMatchIn(n)
-        val rdvAutomobile = RDV_AUTO_RE.containsMatchIn(n) && jourTrouve != null && heurePresente
-        val rdvPersonnel = RENCONTRE_RE.containsMatchIn(n) && jourTrouve != null
-        if ((rdvExplicite || rdvAutomobile || rdvPersonnel) && !FACTURE_RE.containsMatchIn(n) && !DEVIS_RE.containsMatchIn(n)) {
+        val corpsNormalise = normaliser(texte)
+        val contenuPromotionnel = PUB_RDV_RE.containsMatchIn(corpsNormalise)
+        val rdvExpliciteDansCorps = RDV_RE.containsMatchIn(corpsNormalise)
+        val rdvExplicite = rdvExpliciteDansCorps && (jourTrouve != null || !contenuPromotionnel)
+        val rdvAutomobile = RDV_AUTO_RE.containsMatchIn(corpsNormalise) && jourTrouve != null && heurePresente
+        val rdvPersonnel = RENCONTRE_RE.containsMatchIn(corpsNormalise) && jourTrouve != null
+        if ((rdvExplicite || rdvAutomobile || rdvPersonnel) && !contenuPromotionnel && !FACTURE_RE.containsMatchIn(n) && !DEVIS_RE.containsMatchIn(n)) {
             val jourTrouve = DatesFr.jour(nd, aujourdhui)?.date
             val jour = jourTrouve?.takeIf { !it.isBefore(aujourdhui) }
             val h = if (jour != null) HEURE.findAll(nd).firstOrNull { (it.groupValues[1].toIntOrNull() ?: 99) in 6..21 } else null
@@ -151,8 +157,9 @@ object Courrier {
         }
         // Facture / devis : le montant est facultatif, car souvent absent de l'aperçu d'un SMS ou d'un mail.
         val m = montant(brut)
-        val documentFinancier = FACTURE_RE.containsMatchIn(n) || DEVIS_RE.containsMatchIn(n)
-        val contenuPromotionnel = PROMOTION_RE.containsMatchIn(n)
+        val documentFinancier = (FACTURE_RE.containsMatchIn(n) || DEVIS_RE.containsMatchIn(n)) &&
+            !RELEVE_COMPTEUR_RE.containsMatchIn(n) && !FINANCE_HORS_FACTURE_RE.containsMatchIn(n)
+        val contenuPromotionnel = PROMOTION_RE.containsMatchIn(n) || PUB_RDV_RE.containsMatchIn(n)
         if (documentFinancier && !contenuPromotionnel) {
             val devis = DEVIS_RE.containsMatchIn(n) && !FACTURE_RE.containsMatchIn(n)
             val ech = Regex("\\b(?:avant le|au plus tard le|date limite(?: de paiement)?|echeance(?: le| du)?|preleve le|sera preleve le|a payer (?:avant )?le|valable jusqu au|le) ?:? ?(.{4,30})").find(DatesFr.normaliser(brut))
@@ -459,8 +466,8 @@ object Courrier {
     /** Dernier rendez-vous détecté, à venir et non traité. */
     fun dernierRdv(c: Context): Element? = liste(c).filter { it.type == RDV && !it.traite && (it.dateRdv ?: 0) > System.currentTimeMillis() }.maxByOrNull { it.ts }
 
-    fun argsEvenement(e: Element): JSONObject {
-        val debut = Instant.ofEpochMilli(e.dateRdv ?: System.currentTimeMillis()).atZone(ZoneId.systemDefault()).toLocalDateTime()
+    fun argsEvenement(e: Element, debutChoisi: java.time.LocalDateTime? = null): JSONObject {
+        val debut = debutChoisi ?: Instant.ofEpochMilli(e.dateRdv ?: System.currentTimeMillis()).atZone(ZoneId.systemDefault()).toLocalDateTime()
         return JSONObject().put("title", titreRdv(e)).put("start", debut.toString().take(16)).put("end", debut.plusHours(1).toString().take(16))
             .put("location", e.lieu).put("description", "Détecté par JARVIS dans un message reçu :\n${e.resume}")
     }
