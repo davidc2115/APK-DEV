@@ -384,6 +384,34 @@ class RegistreApprentissage(
         persisterMutation(avant)
     }
 
+    data class HabitudeApprentissage(val id: String, val titre: String, val etat: String, val preuves: Int)
+
+    /** Détail relu depuis le registre canonique, sans cache de candidats parallèle dans Memo. */
+    @Synchronized
+    fun habitudeApprentissage(id: String): HabitudeApprentissage? {
+        synchroniserAvantLecture()
+        val item = entree(id) ?: return null
+        if (item.optString("type") != "habit") return null
+        return HabitudeApprentissage(id, item.optString("title").trim(), item.optString("state"),
+            item.optJSONArray("evidence")?.length() ?: 0)
+    }
+
+    /** Toutes les habitudes non actives encore dans le cycle de proposition/validation. */
+    @Synchronized
+    fun habitudesEnApprentissage(): List<HabitudeApprentissage> {
+        synchroniserAvantLecture()
+        val entries = donnees.optJSONArray("entries") ?: return emptyList()
+        val etats = setOf(ETAT_OBSERVED, ETAT_CANDIDATE, ETAT_NEEDS_REVIEW, ETAT_APPROVED, ETAT_TESTING)
+        return (0 until entries.length()).mapNotNull { index ->
+            val item = entries.optJSONObject(index) ?: return@mapNotNull null
+            if (item.optString("type") != "habit" || item.optString("state") !in etats) return@mapNotNull null
+            val titre = item.optString("title").trim()
+            if (titre.isBlank()) return@mapNotNull null
+            HabitudeApprentissage(item.optString("id"), titre, item.optString("state"),
+                item.optJSONArray("evidence")?.length() ?: 0)
+        }
+    }
+
     /** Habitudes explicitement activées, relues depuis la source partagée à chaque demande. */
     @Synchronized
     fun habitudesActives(): List<Pair<String, String>> {
