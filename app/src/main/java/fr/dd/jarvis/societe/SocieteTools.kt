@@ -290,29 +290,6 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "brouillon_id" to prop("ID exact du brouillon.")
         ), listOf("brouillon_id")),
 
-        tool("intervention_brouillon_enregistrer", "Crée ou met à jour un BROUILLON de rapport d'intervention. Sauvegarde durablement sur le téléphone, sans créer d'entrée dans l'historique et sans générer de note Obsidian/PDF. Réutilise brouillon_id pour reprendre un brouillon existant. Les champs non fournis restent inchangés lors d'une mise à jour.", mapOf(
-            "brouillon_id" to prop("ID du brouillon à reprendre ; vide pour en créer un nouveau."),
-            "client" to prop("Nom exact du client."),
-            "installation" to prop("Nom exact de l'installation si plusieurs."),
-            "date" to prop("Date yyyy-MM-dd, défaut aujourd'hui."),
-            "categorie" to prop("maintenance | panne | diagnostic | nettoyage | remplacement | contrôle | autre."),
-            "description" to prop("Résumé factuel dicté par l'utilisateur."),
-            "diagnostic" to prop("Constat dit par l'utilisateur."),
-            "actions" to prop("Actions réalisées, une par ligne."),
-            "pieces" to prop("Pièces et références communiquées."),
-            "mesures" to prop("Mesures avec unités, sans rien inventer."),
-            "onduleurs" to prop("Onduleurs concernés, un par ligne."),
-            "statut" to prop("terminee | a_suivre | en_attente."),
-            "prochaine_maintenance" to prop("Date yyyy-MM-dd si communiquée."),
-            "notes" to prop("Notes complémentaires.")
-        ), listOf("client", "description")),
-        tool("intervention_brouillons_liste", "Liste les brouillons de rapports non validés, avec leur ID et leur état, pour reprendre le travail. N'affiche pas les interventions déjà validées.", mapOf(
-            "client" to prop("Filtrer par nom de client (facultatif).")
-        )),
-        tool("intervention_brouillon_valider", "Valide explicitement un brouillon après accord clair de l'utilisateur. Le brouillon est transféré dans l'historique et le rapport Obsidian/PDF est généré. Ne jamais appeler sans confirmation explicite « oui ».", mapOf(
-            "brouillon_id" to prop("ID exact retourné par intervention_brouillons_liste."),
-            "confirmation" to prop("Doit être exactement « oui » après accord explicite de l'utilisateur.")
-        ), listOf("brouillon_id", "confirmation")),
         tool("intervention_enregistrer", "Enregistre une intervention photovoltaïque réellement effectuée dans l'historique du site et dans Obsidian (note + rapport PDF). RÈGLE ABSOLUE : le rapport ne contient QUE ce que l'utilisateur a dit, avec ses mots (reformulés proprement au besoin). N'ajoute JAMAIS d'action, de mesure, de valeur (température, tension, courant…), de constat, d'état (« parfait état », « conforme »), de recommandation ni de date qu'il n'a pas donnés ; un champ non dicté reste vide. Pas de commentaire sur le rapport lui-même. Les éléments non dits sont retirés automatiquement et signalés.", mapOf(
             "client" to prop("Nom exact du client."), "installation" to prop("Nom exact de l'installation si plusieurs."),
             "date" to prop("Date de l'intervention au format yyyy-MM-dd (défaut : aujourd'hui)."),
@@ -453,9 +430,6 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "rapport_brouillon_modifier" -> rapportBrouillonModifier(a)
         "rapport_brouillon_valider" -> ok(svc.validerBrouillon(a.s("brouillon_id")))
         "rapport_brouillon_supprimer" -> ok(if (svc.supprimerBrouillon(a.s("brouillon_id"))) "Brouillon supprimé." else "Brouillon introuvable ou déjà supprimé.")
-        "intervention_brouillon_enregistrer" -> interventionBrouillonEnregistrer(a)
-        "intervention_brouillons_liste" -> interventionBrouillonsListe(a)
-        "intervention_brouillon_valider" -> interventionBrouillonValider(a)
         "intervention_enregistrer" -> interventionEnregistrer(a)
         "intervention_modifier" -> interventionModifier(a)
         "intervention_supprimer" -> interventionSupprimer(a)
@@ -1066,69 +1040,6 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "\n\nLe suivi est conservé dans la fiche de l'installation et dans Obsidian." + garde.message())
     }
 
-
-    private fun interventionBrouillonEnregistrer(a: JSONObject): ToolResult {
-        val (client, erreur) = clientParNom(a.s("client"))
-        if (client == null) return err(erreur!!)
-        val site = siteDe(client, a.s("installation"))
-            ?: return err(if (client.sites.isEmpty()) "Aucune installation n'est enregistrée." else "Précise l'installation parmi : " + client.sites.joinToString { it.nom })
-        val id = a.s("brouillon_id").ifBlank { svc.newId() }
-        val ancien = svc.data.brouillonsInterventions.firstOrNull { it.id == id }
-        if (ancien != null && (ancien.clientId != client.id || ancien.siteId != site.id))
-            return err("Ce brouillon appartient à un autre client ou à une autre installation.")
-        val date = a.s("date").ifBlank { ancien?.date ?: LocalDate.now().toString() }
-        if (runCatching { LocalDate.parse(date) }.isFailure) return err("Date invalide : utilise yyyy-MM-dd.")
-        fun champ(k: String): String = if (a.has(k)) a.s(k) else when(k) {
-            "description" -> ancien?.description.orEmpty()
-            "diagnostic" -> ancien?.diagnostic.orEmpty()
-            "actions" -> ancien?.actions.orEmpty()
-            "pieces" -> ancien?.pieces.orEmpty()
-            "mesures" -> ancien?.mesures.orEmpty()
-            "onduleurs" -> ancien?.onduleurs.orEmpty()
-            else -> ancien?.notes.orEmpty()
-        }
-        if (champ("description").isBlank()) return err("La description est obligatoire pour conserver le brouillon.")
-        val b = BrouillonIntervention(
-            id = id, clientId = client.id, siteId = site.id, date = date,
-            categorie = a.s("categorie").ifBlank { ancien?.categorie ?: "maintenance" },
-            description = champ("description"), diagnostic = champ("diagnostic"), actions = champ("actions"),
-            pieces = champ("pieces"), mesures = champ("mesures"), onduleurs = champ("onduleurs"),
-            statut = a.s("statut").ifBlank { ancien?.statut ?: "terminee" },
-            prochaineMaintenance = a.s("prochaine_maintenance").ifBlank { ancien?.prochaineMaintenance.orEmpty() },
-            notes = champ("notes"), photosAvant = ancien?.photosAvant.orEmpty(), photosApres = ancien?.photosApres.orEmpty(),
-            creeLe = ancien?.creeLe ?: System.currentTimeMillis()
-        )
-        val sauve = runCatching { svc.enregistrerBrouillonIntervention(b) }.getOrElse { return err("Brouillon non enregistré : ${it.message}") }
-        return ok("💾 Brouillon enregistré sur le téléphone — ${client.nom} · ${site.nom}\nID : ${sauve.id}\nModifié le : " +
-            java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.FRANCE).format(java.util.Date(sauve.modifieLe)) +
-            "\nIl reste dans les brouillons : aucun historique, PDF ou note Obsidian n'a encore été créé.")
-    }
-
-    private fun interventionBrouillonsListe(a: JSONObject): ToolResult {
-        val filtre = a.s("client")
-        val drafts = svc.repo.refresh().brouillonsInterventions
-        val visibles = if (filtre.isBlank()) drafts else drafts.filter { b ->
-            svc.data.client(b.clientId)?.nom?.contains(filtre, true) == true
-        }
-        if (visibles.isEmpty()) return ok("Aucun brouillon de rapport non validé.")
-        return ok("📝 BROUILLONS DE RAPPORTS NON VALIDÉS\n" + visibles.joinToString("\n\n") { b ->
-            val cl = svc.data.client(b.clientId)
-            val st = cl?.sites?.firstOrNull { it.id == b.siteId }
-            "• ${cl?.nom ?: "Client supprimé"} · ${st?.nom ?: "Installation supprimée"} · ${b.date}\n  ID : ${b.id}\n  ${b.description.take(220)}\n  Dernière sauvegarde : " +
-                java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.FRANCE).format(java.util.Date(b.modifieLe))
-        } + "\n\nPour reprendre : intervention_brouillon_enregistrer avec le même brouillon_id. Pour finaliser, demande d'abord l'accord explicite de l'utilisateur.")
-    }
-
-    private fun interventionBrouillonValider(a: JSONObject): ToolResult {
-        if (a.s("confirmation").lowercase() != "oui")
-            return err("Validation refusée : il faut l'accord explicite « oui » de l'utilisateur.")
-        val id = a.s("brouillon_id")
-        if (id.isBlank()) return err("ID de brouillon obligatoire.")
-        val result = runCatching { svc.validerBrouillonIntervention(id) }
-            .getOrElse { return err("Validation impossible : ${it.message}") }
-        val b = result.first
-        return ok("✅ Rapport validé et transféré dans l'historique.\nID : ${b.id}\nNote : ${result.second.first}\nPDF : ${result.second.second}")
-    }
 
     /** Résultat du contrôle de fidélité d'un rapport. */
     private class Garde(val champs: Map<String, String>, val retires: List<String>, val verifie: Boolean) {
