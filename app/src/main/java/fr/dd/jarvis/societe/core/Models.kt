@@ -131,28 +131,6 @@ data class BrouillonRapportIntervention(
 )
 
 
-/** Brouillon durable d'un rapport : séparé de l'historique tant qu'il n'est pas explicitement validé. */
-@Serializable
-data class BrouillonIntervention(
-    val id: String,
-    val clientId: String,
-    val siteId: String,
-    val date: String,
-    val categorie: String = "maintenance",
-    val description: String = "",
-    val diagnostic: String = "",
-    val actions: String = "",
-    val pieces: String = "",
-    val mesures: String = "",
-    val statut: String = "terminee",
-    val prochaineMaintenance: String = "",
-    val notes: String = "",
-    val onduleurs: String = "",
-    val photosAvant: List<String> = emptyList(),
-    val photosApres: List<String> = emptyList(),
-    val creeLe: Long = System.currentTimeMillis(),
-    val modifieLe: Long = System.currentTimeMillis()
-)
 
 /** Historique daté des opérations réellement réalisées sur une installation. */
 @Serializable
