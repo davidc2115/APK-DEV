@@ -135,7 +135,7 @@ object Courrier {
                 val heure = h?.groupValues?.get(1)?.toIntOrNull()
                 val minute = h?.groupValues?.get(2)?.toIntOrNull() ?: 0
                 val debut = jour.atTime(heure ?: 9, minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                val lieu = ADRESSE.find(brut)?.value?.trim().orEmpty().ifBlank { GARAGE_RDV.find(brut)?.groupValues?.get(1)?.let { "Garage " + it.trim() }.orEmpty() }
+                val lieu = ADRESSE.find(brut)?.value?.trim().orEmpty().ifBlank { GARAGE_RDV.find(texte)?.groupValues?.get(1)?.let { "Garage " + it.trim() }.orEmpty() }
                 out += Element(id(RDV, emetteur, jour.toString(), "${heure ?: ""}"), RDV, source, emetteur, resume, ts, dateRdv = debut, lieu = lieu,
                     statut = if (heure == null) "heure non précisée" else "")
                 return out
