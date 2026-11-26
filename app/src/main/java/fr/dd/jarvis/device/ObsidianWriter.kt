@@ -676,7 +676,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Lecture stricte : null signifie uniquement « note absente » ; une panne du coffre lève IOException. */
     fun readNoteStrict(path: String): String? {
-        val p = withMd(path)
+        // Les notes structurées (JSON) conservent leur extension : ne pas ajouter .md artificiellement.
+        val p = path.trim().trim('/').let { brut ->
+            if (brut.substringAfterLast('/').contains('.')) brut else "$brut.md"
+        }
         val folder = p.substringBeforeLast('/', "")
         val name = p.substringAfterLast('/')
         return lireAvecDateStrict(folder, name)?.first
