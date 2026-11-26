@@ -1,5 +1,7 @@
 package fr.dd.jarvis.ui
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,6 +22,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,6 +34,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 /**
  * Onglet « Courrier » (à part de la Société) : colis, rendez-vous, factures et devis repérés dans les SMS et mails, à
@@ -54,6 +59,7 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
             when (domaine) { "tous" -> true; "a_classer" -> e.domaine.isBlank(); else -> e.domaine == domaine }
     }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     LaunchedEffect(app) {
         val resultat = withContext(Dispatchers.IO) {
             val anciensFauxPositifs = Courrier.revaliderHistorique(app)
@@ -116,17 +122,32 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
                         if (e.domaine.isBlank()) Courrier.classer(app, e.id, Courrier.SOCIETE)
                         Courrier.marquer(app, e.id); version++
                     }
-                    if (e.type == Courrier.RDV && e.dateRdv != null) HudChip("📅 Ajouter à l'agenda") {
-                        scope.launch {
-                            val result = withContext(Dispatchers.IO) {
-                                runCatching { fr.dd.jarvis.ai.ToolBox(app) { _, _ -> true }.execute("create_event", Courrier.argsEvenement(e)) }
-                                    .getOrElse { fr.dd.jarvis.ai.ToolResult("Échec de création : " + (it.message ?: "erreur inconnue")) }
+                    if (e.type == Courrier.RDV) HudChip("📅 Ajouter au planning") {
+                        val initial = e.dateRdv?.let { java.time.Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDateTime() }
+                            ?: LocalDate.now().plusDays(1).atTime(9, 0)
+                        fun creerEvenement(debut: LocalDateTime) {
+                            scope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    runCatching { fr.dd.jarvis.ai.ToolBox(app) { _, _ -> true }.execute("create_event", Courrier.argsEvenement(e, debut)) }
+                                        .getOrElse { fr.dd.jarvis.ai.ToolResult("Échec de création : " + (it.message ?: "erreur inconnue")) }
+                                }
+                                actionInfo = result.text
+                                if (result.text.startsWith("Événement «")) {
+                                    Courrier.marquer(app, e.id)
+                                    version++
+                                }
                             }
-                            actionInfo = result.text
-                            if (result.text.startsWith("Événement «")) {
-                                Courrier.marquer(app, e.id)
-                                version++
-                            }
+                        }
+                        if (e.dateRdv != null && !e.statut.contains("heure non précisée")) {
+                            creerEvenement(initial)
+                        } else {
+                            android.app.DatePickerDialog(context, { _, annee, mois, jour ->
+                                android.app.TimePickerDialog(context, { _, heure, minute ->
+                                    creerEvenement(LocalDate.of(annee, mois + 1, jour).atTime(heure, minute))
+                                }, initial.hour, initial.minute, true).show()
+                            }, initial.year, initial.monthValue - 1, initial.dayOfMonth).apply {
+                                datePicker.minDate = System.currentTimeMillis() - 1000
+                            }.show()
                         }
                     }
                     if (e.lien.isNotBlank()) HudChip("🔗 Suivi") {
