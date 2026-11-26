@@ -26,7 +26,7 @@ class ToolBox(
         fr.dd.jarvis.device.Autorisations.confirmer(app, outil, q) { confirmBrut(q, force) }
     }
     private val societe = SocieteTools(app, confirm)
-    private val serveur = ServeurTools(app, confirm)
+    private val serveur = ServeurTools(app, confirm) { question, force -> confirmBrut(question, force) }
     private val discord = DiscordTools(app, confirm)
     private val tiktok = TikTokTools(app, confirm)
     private val musique = MusicTools(app)
@@ -549,11 +549,12 @@ class ToolBox(
 
     /** Les outils Société ne sont proposés au modèle que si la conversation les concerne (économie de contexte). */
     fun schemaFor(recentUserText: String): JSONArray {
+        val maisonSimple = ServeurTools.actionMaisonSimple(recentUserText)
         val soc = SocieteTools.concerned(recentUserText); val srv = ServeurTools.concerned(recentUserText)
         val dis = DiscordTools.concerned(recentUserText); val tik = TikTokTools.concerned(recentUserText)
         val mus = MusicTools.concerned(recentUserText)
         val plx = PlexTools.concerned(recentUserText)
-        val adm = ServeurAdminTools.concerned(recentUserText)
+        val adm = !maisonSimple && ServeurAdminTools.concerned(recentUserText)
         val web = SitesWebTools.concerned(recentUserText)
         if (!soc && !srv && !dis && !tik && !mus && !plx && !adm && !web) return schema
         return JSONArray().also { out ->
@@ -568,7 +569,10 @@ class ToolBox(
                 val haDisponibilite = ServeurTools.prioriteHaDisponibilite(recentUserText)
                 serveur.schema.forEach {
                     val nom = it.optJSONObject("function")?.optString("name").orEmpty()
-                    if (if (haDisponibilite) nom in setOf("ha_entites", "ha_etat") else ssh || !serveurSeul(it)) out.put(it)
+                    val outilsMaisonRapides = setOf("ha_entites", "ha_etat", "ha_service")
+                    if (if (maisonSimple) nom in outilsMaisonRapides
+                        else if (haDisponibilite) nom in setOf("ha_entites", "ha_etat")
+                        else ssh || !serveurSeul(it)) out.put(it)
                 }
             }
             if (ssh && (srv || adm)) serveurAdmin.schema.forEach { out.put(it) }

@@ -18,7 +18,15 @@ object AccesDistant {
         631 to "Imprimante (IPP)", 9100 to "Imprimante", 8009 to "Chromecast", 21 to "FTP",
     )
     /** Services dangereux à ouvrir sur Internet (préférer le VPN WireGuard de la Freebox). */
-    private val SENSIBLES = setOf(22, 3389, 5900, 445, 5555, 21, 1883, 631, 9100, 8009)
+    private val SENSIBLES = setOf(21, 22, 23, 80, 445, 554, 1883, 3389, 5000, 5555, 5900, 631, 8000, 8009, 8080, 8123, 8883, 9000, 9100, 32400)
+
+    /** Services qui ne doivent JAMAIS être publiés tels quels : contrôle distant via tunnel SSH ou VPN uniquement. */
+    private val TUNNEL_OBLIGATOIRE = setOf(21, 22, 23, 80, 445, 554, 1883, 3389, 5000, 5555, 5900, 631, 8000, 8009, 8080, 8123, 8883, 9000, 9100, 32400)
+
+    internal fun tunnelObligatoire(port: Int): Boolean = port in TUNNEL_OBLIGATOIRE
+
+    /** Seuls les points d'entrée HTTPS connus peuvent recevoir une redirection directe. */
+    internal fun publicationDirecteAutorisee(port: Int): Boolean = port in setOf(443, 8443, 9443)
 
     fun service(port: Int) = SERVICES[port] ?: "port $port"
 
@@ -55,20 +63,44 @@ object AccesDistant {
             runCatching { Registre.marquerAbsents(app, (freebox.map { it.ip } + retenus.filter { !it.faible }.map { it.ip }).toSet()) }
         }
         val oublies = runCatching { Registre.purger(app) }.getOrDefault(0)
+        val redirections = if (freebox != null) runCatching { FreeboxOs.gerer(app, "redirections", JSONObject()) { _, _ -> true } }.getOrDefault("") else ""
+        val redirectionsDangereuses = lignesRedirectionsDangereuses(redirections)
+        val redirectionsTlsAControler = lignesRedirectionsTlsAControler(redirections)
+        val dmzEtat = if (freebox != null) runCatching { FreeboxOs.gerer(app, "dmz", JSONObject()) { _, _ -> true } }.getOrDefault("") else ""
+        val dmzDejaActive = dmzActive(dmzEtat)
         (FreeboxOs.ipPublique(app) ?: Reseau.ippPublique()).takeIf { it.isNotBlank() }?.let { Registre.ipPublique(app, it, reseau) }
         val enLigne = Registre.tous(app).filter { Registre.enLigne(it) }
         val wifi = enLigne.count { it.optString("lien") == "wifi" }; val cable = enLigne.count { it.optString("lien") == "ethernet" }
         return "✅ ${enLigne.size} appareil(s) connecté(s) sur $reseau" + (if (wifi + cable > 0) " — $wifi en Wi-Fi, $cable par câble" else "") +
             (if (freebox != null) " (liste de la Freebox)" else " (analyse du téléphone ; associe la Freebox pour une liste exacte)") +
             (if (neufs > 0) " · $neufs nouveau(x)" else "") + (if (oublies > 0) " · $oublies ancien(s) ou fantôme(s) oublié(s)" else "") + "." +
+            (if (redirectionsDangereuses.isNotEmpty()) "\n⛔ Redirections Freebox actives vers des ports interdits (aucune modification automatique) :\n" + redirectionsDangereuses.joinToString("\n") + "\nDésactive-les après vérification ou utilise le tunnel SSH/WireGuard." else "") +
+            (if (redirectionsTlsAControler.isNotEmpty()) "\n⚠️ Redirections sur ports HTTPS conventionnels : TLS réel non vérifiable depuis l'inventaire ; contrôle du reverse proxy et du certificat nécessaire :\n" + redirectionsTlsAControler.joinToString("\n") else "") +
+            (if (dmzDejaActive) "\n⚠️ " + dmzEtat + " : tous les ports entrants sont exposés. Dis « désactive la DMZ » pour fermer cet accès." else "") +
             Reseau.diag.lines().firstOrNull { it.startsWith("⚠️") }?.let { "\n$it" }.orEmpty()
     }
+
+    internal fun dmzActive(texte: String): Boolean = texte.trimStart().startsWith("DMZ : activée")
+
+    /** Redirections actives dont le port LAN n'est pas un point d'entrée HTTPS autorisé. Lecture seule : aucune règle n'est supprimée. */
+    internal fun lignesRedirectionsDangereuses(texte: String): List<String> = texte.lineSequence().filter { ligne ->
+        ligne.trimStart().startsWith("🟢") &&
+            Regex("→\\s*[^:]+:(\\d+)").find(ligne)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?.let { !publicationDirecteAutorisee(it) } == true
+    }.toList()
+
+    /** Redirections actives vers des ports conventionnellement HTTPS : le port ne prouve pas que le service chiffre réellement. */
+    internal fun lignesRedirectionsTlsAControler(texte: String): List<String> = texte.lineSequence().filter { ligne ->
+        ligne.trimStart().startsWith("🟢") &&
+            Regex("→\\s*[^:]+:(\\d+)").find(ligne)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?.let { publicationDirecteAutorisee(it) } == true
+    }.toList()
 
     /** Port à ouvrir : celui demandé, sinon le service principal de l'appareil (ou null si plusieurs, à demander). */
     fun portPrincipal(e: JSONObject): Int? {
         val ports = e.optJSONArray("ports")?.let { a -> (0 until a.length()).map { a.optInt(it) } }.orEmpty()
         val utiles = SERVICES.keys.filter { it in ports && it !in SENSIBLES }
-        return utiles.firstOrNull()?.takeIf { utiles.size == 1 || it in setOf(8123, 32400) } ?: ports.singleOrNull()
+        return utiles.singleOrNull() ?: ports.singleOrNull()
     }
 
     /** Port externe libre : le même que l'appareil s'il n'est pas déjà pris, sinon un port haut libre. */
@@ -91,6 +123,8 @@ object AccesDistant {
         val p = port ?: portPrincipal(e)
             ?: return "CHOIX_REQUIS : quel service de « $nom » rendre accessible ? Ports ouverts : " +
                 (if (ports.isEmpty()) "aucun détecté (précise le port)" else ports.joinToString { "$it (${service(it)})" }) + "."
+        if (tunnelObligatoire(p)) return "⛔ Le port $p (${service(p)}) ne sera pas redirigé directement sur Internet : il expose une interface d’administration ou un protocole insuffisamment protégé. Utilise le tunnel SSH sécurisé du serveur ou le VPN WireGuard. Pour Home Assistant, configure une URL distante HTTPS dans Réglages › Maison › Home Assistant."
+        if (!publicationDirecteAutorisee(p)) return "⛔ La publication directe du port $p (${service(p)}) n'est pas autorisée. JARVIS n'ouvre directement que les services HTTPS connus (443, 8443, 9443). Pour les autres appareils, utilise le tunnel SSH sécurisé ou WireGuard ; pour Plex, utilise l'accès distant Plex."
         val publique = (FreeboxOs.ipPublique(app) ?: Reseau.ippPublique()).ifBlank { Registre.derniereIpPublique(app) }
         if (app.store.freeboxAppToken.value.isBlank())
             return "Pour ouvrir l'accès automatiquement, associe d'abord JARVIS à la Freebox (Réglages › Maison › Box Internet). " +
@@ -98,14 +132,13 @@ object AccesDistant {
                 (if (publique.isNotBlank()) " Adresse publique actuelle : $publique." else "")
         val sensible = p in SENSIBLES
         val externe = portExterne(p, FreeboxOs.portsRediriges(app))
-        if (!confirm("Rendre « $nom » ($ip, ${service(p)}) accessible depuis Internet ? JARVIS va réserver son adresse IP et ouvrir le port $externe de la Freebox vers $ip:$p." +
-                (if (sensible) "\n⚠️ ${service(p)} exposé sur Internet est risqué : le VPN WireGuard de la Freebox est plus sûr." else ""), true))
+        if (!confirm("Rendre « $nom » ($ip, ${service(p)}) accessible depuis Internet ? JARVIS va réserver son adresse IP et ouvrir le port $externe de la Freebox vers $ip:$p.\n\nVÉRIFICATION OBLIGATOIRE : confirme uniquement si tu as configuré un reverse proxy HTTPS/TLS réel sur ce port, avec certificat valide et sans accès HTTP non chiffré. Le numéro 443/8443/9443 ne garantit pas le chiffrement du service derrière la box.", true))
             return "Annulé : rien n'a été modifié."
         val oui: suspend (String, Boolean) -> Boolean = { _, _ -> true }
         val bail = if (mac.isNotBlank()) runCatching { FreeboxOs.gerer(app, "ajouter_bail", JSONObject().put("mac", mac).put("ip", ip).put("commentaire", "JARVIS · $nom"), oui) }
             .getOrElse { "⚠️ ${it.message}" } else "⚠️ Adresse MAC inconnue : IP non réservée (elle pourrait changer)."
         val redir = FreeboxOs.gerer(app, "ajouter_redirection", JSONObject().put("ip", ip).put("port", p.toString()).put("port_externe", externe.toString())
-            .put("protocole", if (p == 554) "les deux" else "tcp").put("commentaire", "JARVIS · $nom · ${service(p)}"), oui)
+            .put("https_verifie", true).put("protocole", "tcp").put("commentaire", "JARVIS · $nom · ${service(p)}"), oui)
         if (!redir.contains("✅")) return "❌ La redirection n'a pas pu être créée : $redir"
         val schema = when (p) { 443, 8443, 9443 -> "https"; 80, 8123, 32400, 8080, 8000, 5000, 9000 -> "http"; 554 -> "rtsp"; 22 -> "ssh"; else -> "" }
         val adresse = if (publique.isBlank()) "" else (if (schema == "ssh") "ssh -p $externe utilisateur@$publique" else (if (schema.isBlank()) "" else "$schema://") + "$publique:$externe")

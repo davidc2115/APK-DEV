@@ -34,15 +34,26 @@ object Tele {
 
     data class Candidat(val ip: String, val nom: String, val type: String, val raison: String)
 
+    internal fun estEnceinteGoogle(texte: String, type: String = ""): Boolean =
+        Regex("google.?home|google.?nest|chromecast.?audio|nest.?audio|nest.?mini|nest.?hub|home.?mini|speaker|enceinte|haut.?parleur").containsMatchIn(texte.lowercase()) ||
+            type.contains("🔊")
+
+    /** Le port ADB seul ne prouve pas qu’un équipement est une télévision : exiger une identité Android TV explicite. */
+    internal fun portAdbIdentifieUneTele(ports: List<Int>, texte: String): Boolean =
+        5555 in ports && Regex("android ?tv|google ?tv|chromecast|shield|mibox|freebox (pop|player)").containsMatchIn(texte.lowercase())
+
     /** Télés trouvées dans l'inventaire du Wi-Fi (ports et noms caractéristiques). */
     fun detecter(app: JarvisApp): List<Candidat> = Registre.tous(app).mapNotNull { e ->
         val ports = e.optJSONArray("ports")?.let { a -> (0 until a.length()).map { a.optInt(it) } }.orEmpty()
         val texte = listOf("alias", "hote", "titre", "info", "type").joinToString(" ") { e.optString(it) }.lowercase()
         val ip = e.optString("ip")
+        val enceinteGoogle = estEnceinteGoogle(texte, e.optString("type"))
         when {
-            texte.contains("bravia") || texte.contains("sony") && (texte.contains("tv") || 8009 in ports) -> Candidat(ip, Registre.nomDe(e), "bravia", "Sony Bravia")
-            5555 in ports -> Candidat(ip, Registre.nomDe(e), "androidtv", "débogage réseau ouvert (port 5555)")
-            6466 in ports || 6467 in ports || (8009 in ports && 8008 in ports) || Regex("android ?tv|google ?tv|chromecast|shield|mibox|freebox (pop|player)").containsMatchIn(texte) ->
+            // Un Nest/Google Home expose lui aussi le port Cast 8009 (parfois 8008) : ne jamais le proposer comme télé.
+            enceinteGoogle -> null
+            texte.contains("bravia") || texte.contains("sony") && (texte.contains("tv") || texte.contains("tele")) -> Candidat(ip, Registre.nomDe(e), "bravia", "Sony Bravia")
+            portAdbIdentifieUneTele(ports, texte) -> Candidat(ip, Registre.nomDe(e), "androidtv", "Android TV avec débogage réseau ouvert (port 5555)")
+            6466 in ports || 6467 in ports || Regex("android ?tv|google ?tv|chromecast|shield|mibox|freebox (pop|player)").containsMatchIn(texte) ->
                 Candidat(ip, Registre.nomDe(e), "androidtv", "Android TV / Google TV")
             8001 in ports || 8002 in ports || texte.contains("samsung") && texte.contains("tv") -> Candidat(ip, Registre.nomDe(e), "samsung", "Samsung (Tizen)")
             3000 in ports || 3001 in ports || texte.contains("webos") || texte.contains("lg") && texte.contains("tv") -> Candidat(ip, Registre.nomDe(e), "lg", "LG (webOS)")
@@ -57,7 +68,9 @@ object Tele {
     private fun adb(app: JarvisApp, args: String, delai: Int = 40): Pair<Int, String> {
         if (!Serveur.sshConfigure(app)) throw IllegalStateException("Le pilotage direct de la télé passe par le serveur de la maison : configure l'accès SSH (Réglages › Maison › Serveur).")
         val cible = q(ip(app).let { if (it.contains(':')) it else "$it:5555" })
-        val prep = "command -v adb >/dev/null 2>&1 || { sudo apt-get update -qq >/dev/null 2>&1; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq adb >/dev/null 2>&1; }; " +
+        // Ne jamais installer de paquet ni lancer apt/sudo implicitement lors d'une commande TV.
+        // L'administrateur installe adb explicitement sur Debian ; Jarvis ne fait que le vérifier.
+        val prep = "command -v adb >/dev/null 2>&1 || { echo 'JARVIS_ADB_ABSENT'; exit 127; }; " +
             "adb connect $cible >/dev/null 2>&1; "
         return Serveur.exec(app, prep + "adb -s $cible $args 2>&1", delai)
     }
@@ -69,7 +82,7 @@ object Tele {
             t.contains("unauthorized", true) -> throw IllegalStateException("La télé n'a pas encore autorisé le serveur : accepte « Autoriser le débogage ? » sur l'écran de la télé (coche « Toujours autoriser »), puis réessaie.")
             t.contains("failed to connect", true) || t.contains("cannot connect", true) || t.contains("device offline", true) || t.contains("not found", true) && t.contains("device", true) ->
                 throw IllegalStateException("Connexion à la télé (${ip(app)}) impossible : vérifie qu'elle est allumée et que le débogage réseau est activé (Options pour les développeurs).")
-            r.first == 127 -> throw IllegalStateException("adb n'a pas pu être installé sur le serveur (sudo requis).")
+            r.first == 127 -> throw IllegalStateException("ADB n'est pas installé sur le serveur Debian. Installe-le explicitement avec « sudo apt-get update && sudo apt-get install adb », puis réessaie. Jarvis n'installe aucun paquet automatiquement.")
         }
         return t
     }

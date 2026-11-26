@@ -73,7 +73,7 @@ object AppareilsLies {
                 ?: ouverts.firstOrNull { it.startsWith("http") }
                 ?: if (haLan != null && Serveur.ipPrivee(haLan) && ssh && (haLan == s.sshHost.value.trim() || haLan == s.serveurIpLocale.value.trim())) "tunnel SSH par le serveur (dernier recours)" else null
             val autres = ouverts.filter { it != distant }
-            l += Lien("ha", "🏠", "Home Assistant", "lumières, volets, prises, chauffage, télé, positions — par son API avec le jeton",
+            l += Lien("ha", "🏠", "Home Assistant", "lumières, volets, prises, chauffage, téléviseurs, enceintes Google/Cast, annonces vocales TTS et notifications compatibles, positions — par son API avec le jeton",
                 local?.let { "$it (API + jeton)" } ?: "—",
                 (distant ?: "aucune adresse extérieure : dis « rends Home Assistant accessible à distance »") +
                     (if (autres.isNotEmpty()) " · aussi : ${autres.joinToString(", ")}" else ""),
@@ -172,9 +172,18 @@ object AppareilsLies {
 
     /** Le téléphone est-il sur le réseau de la maison ? (même réseau que le serveur, sinon que les appareils relevés) */
     fun aLaMaison(app: JarvisApp): Boolean {
-        val lan = listOf(app.store.sshHost.value.trim(), app.store.serveurIpLocale.value.trim()).firstOrNull { Serveur.ipPrivee(it) }
-        if (lan != null) return Serveur.telephoneSurReseau(lan)
-        return runCatching { Registre.tous(app).take(10).any { Serveur.telephoneSurReseau(it.optString("ip")) } }.getOrDefault(false)
+        val lan = listOf(app.store.serveurIpLocale.value.trim(), app.store.sshHost.value.trim()).firstOrNull { Serveur.ipPrivee(it) }
+        val portsSsh = listOf(app.store.sshPort.value.toIntOrNull() ?: 22, 22).distinct()
+        if (lan != null && portsSsh.any { Serveur.telephoneSurReseau(app, lan, it) }) return true
+        // Sans IP serveur mémorisée, une simple égalité de sous-réseau ne suffit pas : vérifie un port
+        // réellement annoncé par un appareil connu pour éviter les faux positifs sur un autre Wi-Fi.
+        return runCatching {
+            Registre.tous(app).take(10).any { appareil ->
+                val ip = appareil.optString("ip")
+                val ports = appareil.optJSONArray("ports") ?: return@any false
+                (0 until ports.length()).any { Serveur.telephoneSurReseau(app, ip, ports.optInt(it)) }
+            }
+        }.getOrDefault(false)
     }
 
     /**
