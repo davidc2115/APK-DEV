@@ -55,12 +55,14 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     }
     val scope = rememberCoroutineScope()
     LaunchedEffect(app) {
-        val ajoutes = withContext(Dispatchers.IO) {
+        val resultat = withContext(Dispatchers.IO) {
             val sms = Courrier.importerSmsRecents(app)
-            val mails = runCatching { Courrier.importerMailsRecents(app, 200) }.getOrDefault(0)
-            sms + mails
+            val mails = runCatching { Courrier.importerMailsRecents(app, 200) }
+            Triple(sms, mails.getOrDefault(0), mails.exceptionOrNull())
         }
-        if (ajoutes > 0) version++
+        if (resultat.first + resultat.second > 0) version++
+        actionInfo = resultat.third?.let { "⚠️ Import des mails impossible : ${it.message ?: it.javaClass.simpleName}. Vérifie Réglages › Comptes › Mails." }
+            ?: "Synchronisation terminée : ${resultat.first} nouvel(aux) SMS et ${resultat.second} nouvel(aux) mail(s) détecté(s)."
     }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
