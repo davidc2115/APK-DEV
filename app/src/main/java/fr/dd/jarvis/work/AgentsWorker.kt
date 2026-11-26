@@ -224,9 +224,9 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
     private suspend fun mailsLus() {
         if (!store.agentRanger.value || store.gmailAccounts.isEmpty()) return
         val deja = readSet("agent_tri_lus.txt")
-        val (classes, ranges) = MailTri.trierLus(app, 60, deja = deja)
+        val (classes, ranges) = MailTri.trierLus(app, 60, deja = deja, archiver = store.agentArchiver.value)
         if (classes.isEmpty()) return
-        journal.append("  - 🗂️ $ranges mail(s) lus rangés dans tes libellés\n")
+        journal.append("  - 🗂️ $ranges mail(s) lus rangés dans leurs libellés" + if (store.agentArchiver.value) " et archivés\n" else " (conservés dans la boîte de réception)\n")
         writeSet("agent_tri_lus.txt", (deja + classes.map { it.mail.account + it.mail.id }).toList().takeLast(3000).toSet())
     }
 
