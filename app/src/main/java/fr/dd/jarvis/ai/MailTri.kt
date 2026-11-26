@@ -108,12 +108,12 @@ N'invente rien et ne saute aucun numéro.
      * principale ; les NON LUS ne sont jamais touchés (ils restent dans la boîte, triés une fois lus). [deja] : mails à
      * ne pas reclasser (déjà traités au passage précédent). Renvoie le classement et le nombre de mails rangés.
      */
-    suspend fun trierLus(app: JarvisApp, max: Int, compte: String? = null, deja: Set<String> = emptySet()): Pair<List<Classe>, Int> {
+    suspend fun trierLus(app: JarvisApp, max: Int, compte: String? = null, deja: Set<String> = emptySet(), archiver: Boolean = true): Pair<List<Classe>, Int> {
         val mails = app.mail.fetchRecent(max, unreadOnly = false, compte = compte, full = true, lusSeulement = true)
             .filter { !it.unread && (it.id.isBlank() || (it.account + it.id) !in deja) }
         if (mails.isEmpty()) return emptyList<Classe>() to 0
         val classes = classer(app, mails)
-        val ranges = if (app.store.gmailAccounts.isNotEmpty()) ranger(app, classes, archiver = true) else 0
+        val ranges = if (app.store.gmailAccounts.isNotEmpty()) ranger(app, classes, archiver = archiver) else 0
         return classes to ranges
     }
 
