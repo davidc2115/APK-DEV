@@ -79,6 +79,82 @@ class SocieteService(
     }
 
 
+
+    // ------------------------------------------------------------------ Brouillons de rapports d'intervention
+
+    /** Crée un brouillon durable sans créer d'entrée dans l'historique ni de fichier Obsidian/PDF. */
+    @Synchronized
+    fun creerBrouillon(clientId: String, siteId: String): BrouillonRapportIntervention? {
+        val client = repo.data.client(clientId) ?: return null
+        if (client.sites.none { it.id == siteId }) return null
+        val now = java.time.Instant.now().toString()
+        val brouillon = BrouillonRapportIntervention(
+            id = newId(), clientId = clientId, siteId = siteId,
+            date = LocalDate.now().toString(), creeLe = now, modifieLe = now
+        )
+        repo.update { it.copy(brouillonsRapport = it.brouillonsRapport + brouillon) }
+        return repo.data.brouillonsRapport.firstOrNull { it.id == brouillon.id }
+    }
+
+    /** Chaque modification est écrite et relue dans data.json avant de rendre la main. */
+    @Synchronized
+    fun enregistrerBrouillon(brouillon: BrouillonRapportIntervention): Boolean {
+        if (repo.data.client(brouillon.clientId)?.sites?.none { it.id == brouillon.siteId } != false) return false
+        val actuel = repo.data.brouillonsRapport.firstOrNull { it.id == brouillon.id } ?: return false
+        val maj = brouillon.copy(
+            creeLe = actuel.creeLe.ifBlank { java.time.Instant.now().toString() },
+            modifieLe = java.time.Instant.now().toString()
+        )
+        repo.update { d -> d.copy(brouillonsRapport = d.brouillonsRapport.map { if (it.id == maj.id) maj else it }) }
+        return repo.data.brouillonsRapport.any { it == maj }
+    }
+
+    /** Abandon explicite d'un brouillon ; ne touche jamais à l'historique validé. */
+    @Synchronized
+    fun supprimerBrouillon(id: String): Boolean {
+        if (repo.data.brouillonsRapport.none { it.id == id }) return false
+        repo.update { it.copy(brouillonsRapport = it.brouillonsRapport.filterNot { b -> b.id == id }) }
+        return repo.data.brouillonsRapport.none { it.id == id }
+    }
+
+    /**
+     * Validation explicite : crée l'entrée d'historique et le rapport final, puis retire le brouillon.
+     * L'identifiant est conservé afin qu'une reprise après interruption ne crée pas de doublon.
+     */
+    @Synchronized
+    fun validerBrouillon(id: String): String {
+        val b = repo.data.brouillonsRapport.firstOrNull { it.id == id } ?: return "Brouillon introuvable."
+        val client = repo.data.client(b.clientId) ?: return "Client introuvable : le brouillon est conservé."
+        val site = client.sites.firstOrNull { it.id == b.siteId } ?: return "Installation introuvable : le brouillon est conservé."
+        if (b.description.isBlank()) return "Le résumé est obligatoire avant validation. Le brouillon est conservé."
+        if (runCatching { LocalDate.parse(b.date) }.isFailure) return "Date invalide : utilise yyyy-MM-dd. Le brouillon est conservé."
+        if (b.prochaineMaintenance.isNotBlank() && runCatching { LocalDate.parse(b.prochaineMaintenance) }.isFailure)
+            return "Date de prochaine maintenance invalide. Le brouillon est conservé."
+        if (b.statut !in setOf("terminee", "a_suivre", "en_attente"))
+            return "Statut invalide. Le brouillon est conservé."
+        val intervention = Intervention(
+            id = b.id, date = b.date, categorie = b.categorie.ifBlank { "maintenance" },
+            description = b.description.trim(), diagnostic = b.diagnostic, actions = b.actions,
+            pieces = b.pieces, mesures = b.mesures, statut = b.statut,
+            prochaineMaintenance = b.prochaineMaintenance, notes = b.notes, onduleurs = b.onduleurs
+        )
+        val existante = site.interventions.firstOrNull { it.id == b.id }
+        if (existante == null) {
+            repo.update { current -> current.copy(clients = current.clients.map { c ->
+                if (c.id != client.id) c else c.copy(sites = c.sites.map { s ->
+                    if (s.id != site.id) s else s.copy(interventions = (s.interventions + intervention).sortedByDescending { it.date })
+                })
+            }) }
+        }
+        val clientRelu = repo.data.client(client.id) ?: return "Échec de relecture du client : le brouillon est conservé."
+        val siteRelu = clientRelu.sites.firstOrNull { it.id == site.id } ?: return "Échec de relecture du site : le brouillon est conservé."
+        if (siteRelu.interventions.none { it.id == b.id }) return "L'intervention n'a pas été vérifiée dans l'historique : brouillon conservé."
+        val fichiers = runCatching { ecrireRapport(clientRelu, siteRelu, intervention) }
+            .getOrElse { return "Intervention enregistrée, mais génération du rapport échouée : ${it.message}. Le brouillon est conservé pour reprise." }
+        supprimerBrouillon(id)
+        return "✅ Rapport validé pour ${client.nom} — ${site.nom}.\\n📁 ${fichiers.first}\\n📄 ${fichiers.second}"
+    }
+
     // ------------------------------------------------------------------ distance / déplacement
 
     private fun referenceGeo(adresse: String, lat: Double?, lon: Double?): String =
