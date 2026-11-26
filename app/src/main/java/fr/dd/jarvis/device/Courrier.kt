@@ -70,9 +70,23 @@ object Courrier {
     private val MONTANT = Regex("(\\d{1,3}(?:[ .\\u202F\\u00A0]\\d{3})*(?:[,.]\\d{1,2})?)\\s?(?:€|eur\\b|euros?\\b)", RegexOption.IGNORE_CASE)
     private val FACTURE_RE = Regex("\\b(facture|factures|avis d echeance|echeancier|invoice|a regler|montant (a payer|du|preleve|de votre facture)|prelevement|votre releve|mise en demeure|relance de paiement|impaye)\\b")
     private val DEVIS_RE = Regex("\\b(devis|proposition commerciale|offre de prix|estimation)\\b")
-    private val RDV_RE = Regex("\\b(rendez vous|rdv|convocation|votre visite|intervention (prevue|programmee|planifiee)|passage (de notre |du |d un )?technicien|technicien passera|creneau (confirme|reserve)|reservation confirmee|consultation)\\b")
+    private val RDV_RE = Regex("\\b(rendez vous|rdv|convocation|votre visite|intervention (prevue|programmee|planifiee)|passage (de notre |du |d un )?technicien|technicien passera|creneau (confirme|reserve)|reservation confirmee|consultation|vidange|controle technique|ct|revision|entretien du vehicule|garage|atelier automobile|pneumatiques?)\\b")
     private val HEURE = Regex("\\b(\\d{1,2}) ?(?:h|:) ?(\\d{2})?\\b")
     private val ADRESSE = Regex("(\\d{1,4}(?: ?bis| ?ter)?,? (?:rue|avenue|av\\.?|bd|boulevard|chemin|place|allee|allée|impasse|route|quai|cours|faubourg|zone|za|zi|lieu[- ]dit)[^,\\n.]{2,60}(?:,? ?\\d{5} [A-Za-zÀ-ÿ' -]{2,40})?)", RegexOption.IGNORE_CASE)
+    private val GARAGE_RDV = Regex("\\bgarage\\s+([A-ZÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\\s+[A-ZÀ-ÿ][A-Za-zÀ-ÿ'’-]*){0,2})", RegexOption.IGNORE_CASE)
+
+    private fun titreRdv(e: Element): String {
+        val n = normaliser(e.resume)
+        val vehicule = Regex("\\b(kadjar|clio|captur|megane|scenic|twingo|zoe|arkana|austral|espace|308|208|3008|c3|c4|c5|berlingo|corsa|astra|golf|polo|tiguan|yaris|corolla|qashqai)\\b", RegexOption.IGNORE_CASE).find(n)?.value
+        val motif = when {
+            Regex("\\bvidange\\b").containsMatchIn(n) -> "Vidange"
+            Regex("\\b(controle technique|ct)\\b").containsMatchIn(n) -> "Contrôle technique"
+            Regex("\\brevision\\b").containsMatchIn(n) -> "Révision"
+            Regex("\\b(pneus?|pneumatiques?)\\b").containsMatchIn(n) -> "Pneumatiques"
+            else -> "Rendez-vous"
+        }
+        return if (vehicule != null) vehicule.replaceFirstChar { it.uppercase() } + " — " + motif else if (motif != "Rendez-vous") motif else "Rendez-vous " + e.emetteur
+    }
 
     private fun montant(t: String): Double? = MONTANT.findAll(t).mapNotNull { m ->
         m.groupValues[1].replace(Regex("[ .\\u202F\\u00A0](?=\\d{3}\\b)"), "").replace(',', '.').toDoubleOrNull()
@@ -121,7 +135,7 @@ object Courrier {
                 val heure = h?.groupValues?.get(1)?.toIntOrNull()
                 val minute = h?.groupValues?.get(2)?.toIntOrNull() ?: 0
                 val debut = jour.atTime(heure ?: 9, minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                val lieu = ADRESSE.find(brut)?.value?.trim().orEmpty()
+                val lieu = ADRESSE.find(brut)?.value?.trim().orEmpty().ifBlank { GARAGE_RDV.find(brut)?.groupValues?.get(1)?.let { "Garage " + it.trim() }.orEmpty() }
                 out += Element(id(RDV, emetteur, jour.toString(), "${heure ?: ""}"), RDV, source, emetteur, resume, ts, dateRdv = debut, lieu = lieu,
                     statut = if (heure == null) "heure non précisée" else "")
                 return out
@@ -257,6 +271,31 @@ object Courrier {
 
     // ------------------------------------------------------------------ arrivée d'un message
 
+    /** Rattrapage des SMS déjà présents dans la boîte de réception. Seuls les messages reconnus sont conservés. */
+    fun importerSmsRecents(app: JarvisApp): Int {
+        if (!app.store.courrierAnalyse.value || app.checkSelfPermission(android.Manifest.permission.READ_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return 0
+        val depuis = System.currentTimeMillis() - 60L * 86_400_000L
+        val trouves = mutableListOf<Element>()
+        runCatching {
+            app.contentResolver.query(android.provider.Telephony.Sms.Inbox.CONTENT_URI,
+                arrayOf(android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.BODY, android.provider.Telephony.Sms.DATE),
+                "${android.provider.Telephony.Sms.DATE} >= ?", arrayOf(depuis.toString()), "${android.provider.Telephony.Sms.DATE} DESC")?.use { cursor ->
+                val ia = cursor.getColumnIndex(android.provider.Telephony.Sms.ADDRESS)
+                val ib = cursor.getColumnIndex(android.provider.Telephony.Sms.BODY)
+                val idate = cursor.getColumnIndex(android.provider.Telephony.Sms.DATE)
+                var lus = 0
+                while (cursor.moveToNext() && lus++ < 300) {
+                    val corps = if (ib >= 0) cursor.getString(ib).orEmpty() else ""
+                    val adresse = if (ia >= 0) cursor.getString(ia).orEmpty() else "SMS"
+                    val date = if (idate >= 0) cursor.getLong(idate) else System.currentTimeMillis()
+                    if (corps.isNotBlank()) trouves += analyser(adresse, corps, "SMS", date).map { e ->
+                        domaine(e, "", runCatching { app.societe.data }.getOrNull(), regles(app)).let { (d, auto) -> e.copy(domaine = d, auto = auto) }
+                    }
+                }
+            }
+        }
+        return enregistrer(app, trouves.flatten()).size
+    }
     /** SMS / notification de mail reçus : analysés en arrière-plan, sans jamais bloquer. */
     fun recu(app: JarvisApp, source: String, titre: String, texte: String, ts: Long = System.currentTimeMillis(), compte: String = "") {
         if (!app.store.courrierAnalyse.value) return
@@ -322,7 +361,7 @@ object Courrier {
             if (e.lien.isNotBlank()) " · [suivi](${e.lien})" else ""
         FACTURE -> "🧾 ${e.emetteur} — ${euros(e.montant)}${if (e.echeance.isNotBlank()) " · avant le ${dateFr(e.echeance)}" else ""}"
         DEVIS -> "📄 Devis ${e.emetteur} — ${euros(e.montant)}"
-        RDV -> "📅 ${e.emetteur} — ${quand(e.dateRdv)}${if (e.lieu.isNotBlank()) " · ${e.lieu}" else ""}"
+        RDV -> "📅 ${titreRdv(e)} — ${quand(e.dateRdv)}${if (e.lieu.isNotBlank()) " · ${e.lieu}" else ""}"
         else -> e.resume
     }
 
@@ -365,7 +404,7 @@ object Courrier {
 
     fun argsEvenement(e: Element): JSONObject {
         val debut = Instant.ofEpochMilli(e.dateRdv ?: System.currentTimeMillis()).atZone(ZoneId.systemDefault()).toLocalDateTime()
-        return JSONObject().put("title", "Rendez-vous ${e.emetteur}").put("start", debut.toString().take(16)).put("end", debut.plusHours(1).toString().take(16))
+        return JSONObject().put("title", titreRdv(e)).put("start", debut.toString().take(16)).put("end", debut.plusHours(1).toString().take(16))
             .put("location", e.lieu).put("description", "Détecté par JARVIS dans un message reçu :\n${e.resume}")
     }
 }
