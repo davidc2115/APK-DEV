@@ -669,7 +669,9 @@ class PhoneControl(private val ctx: Context) {
     }
 
 
-    private fun isError(r: String) = r.startsWith("Erreur ADB") || r.startsWith("ADB non connecté") || r.startsWith("Aucun accès")
+    private fun isError(r: String) = r.startsWith("Erreur") || r.startsWith("ADB non connecté") || r.startsWith("Aucun accès") ||
+        r.startsWith("Shizuku n'est pas") || r.startsWith("⏱️") || r.startsWith("Commande Shizuku interrompue") ||
+        r.startsWith("Commande ADB interrompue")
 
     /** Exécute une commande shell (ADB intégré ou Shizuku) hors du thread appelant. */
     private fun sh(cmd: String): String {
