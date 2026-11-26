@@ -18,14 +18,22 @@ class MusicTools(private val app: JarvisApp) {
             val brut = mode.ifBlank { if (aleatoireHistorique.lowercase() in setOf("oui", "true", "1")) "aleatoire" else "normal" }
             val s = java.text.Normalizer.normalize(brut.lowercase(java.util.Locale.ROOT), java.text.Normalizer.Form.NFD)
                 .replace(Regex("\\p{M}+"), "").replace(' ', '_').replace('-', '_')
+            val retrait = listOf("desactive", "desactiver", "retire", "retirer", "enleve", "enlever", "arrete", "arreter", "stop", "sans", "off", "aucune", "aucun", "plus_de")
+                .any { s.contains(it) }
+            val parleAleatoire = s.contains("aleatoire") || s.contains("shuffle") || s.contains("melange") || s.contains("hasard")
+            val parleRepetition = s.contains("repeter") || s.contains("repeat") || s.contains("boucle") || s.contains("repetition")
             return when {
-                s.contains("aleatoire") || s.contains("shuffle") || s.contains("melange") || s.contains("hasard") -> "aleatoire"
+                retrait && parleAleatoire -> "aleatoire_off"
+                retrait && parleRepetition -> "repeter_aucune"
+                parleAleatoire -> "aleatoire"
                 (s.contains("repeter") || s.contains("repeat") || s.contains("boucle")) &&
-                    (s.contains("titre") || s.contains("morceau") || s.contains("chanson") || s.contains("song") || s.contains("une_seule") || s.contains("one") || s.contains("track")) -> "repeter_titre"
+                    (s.contains("titre") || s.contains("morceau") || s.contains("musique") || s.contains("chanson") || s.contains("song") || s.contains("une_seule") || s.contains("one") || s.contains("track")) -> "repeter_titre"
                 (s.contains("repeter") || s.contains("repeat") || s.contains("boucle")) &&
                     (s.contains("playlist") || s.contains("liste") || s.contains("tout") || s.contains("all")) -> "repeter_playlist"
                 s in setOf("repeter_titre", "repeat_one", "repeat_track", "une_chanson", "un_titre", "titre") -> "repeter_titre"
                 s in setOf("repeter_playlist", "repeat_all", "repeat_playlist", "toute_la_playlist", "playlist", "tout") -> "repeter_playlist"
+                s in setOf("repeter_aucune", "repeat_off", "sans_repetition", "aucune_repetition") -> "repeter_aucune"
+                s in setOf("aleatoire_off", "shuffle_off", "sans_aleatoire") -> "aleatoire_off"
                 else -> "normal"
             }
         }
@@ -78,7 +86,7 @@ class MusicTools(private val app: JarvisApp) {
             .put("name", "musique_choisir")
             .put("description", "Lance le résultat n° numero de la DERNIÈRE liste de musique montrée (« mets le 2 », « plutôt le troisième »). mode=normal par défaut, aleatoire, repeter_titre ou repeter_playlist. radio=oui : lance la radio de ce titre (titres similaires à la suite).")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("numero", prop("Numéro dans la liste (1, 2, 3…)."))
-                .put("radio", prop("oui pour la radio du titre.")).put("mode", prop("normal | aleatoire | repeter_titre | repeter_playlist (défaut normal)."))).put("required", JSONArray().put("numero")))),
+                .put("radio", prop("oui pour la radio du titre.")).put("mode", prop("normal | aleatoire | aleatoire_off | repeter_titre | repeter_playlist | repeter_aucune (défaut normal)."))).put("required", JSONArray().put("numero")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_bibliotheque")
             .put("description", "Bibliothèque PERSONNELLE de YT Music Morphe. À utiliser impérativement pour les demandes de lecture de bibliothèque, notamment « lis ma bibliothèque J'aime », « lance mes titres aimés », « mets ma playlist … », « lis mes albums ». section = jaime pour J'aime/titres aimés/favoris, sinon playlists, titres, albums, artistes ou telechargements. Sans nom : pour J'aime, lance toute la liste ; pour les autres sections, affiche les éléments. Avec nom : lance cet élément. mode=normal par défaut (ordre d'origine, shuffle désactivé), aleatoire, repeter_titre (boucle sur un morceau) ou repeter_playlist (boucle sur toute la liste). Ne réponds jamais que la lecture a démarré sans confirmation du lecteur.")
@@ -87,8 +95,8 @@ class MusicTools(private val app: JarvisApp) {
                 .put("aleatoire", prop("Ancien paramètre compatible : oui pour la lecture aléatoire.")).put("mode", prop("normal | aleatoire | repeter_titre | repeter_playlist (défaut normal)."))).put("required", JSONArray().put("section")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_action")
-            .put("description", "Action sur le titre en cours : jaime, jaimepas, normal (désactive shuffle et répétition), aleatoire, repeter_titre, repeter_playlist, repeter (ancienne action), radio.")
-            .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("action", prop("jaime | jaimepas | normal | aleatoire | repeter_titre | repeter_playlist | repeter | radio"))).put("required", JSONArray().put("action")))),
+            .put("description", "Action sur le titre en cours : jaime, jaimepas, normal (désactive les deux), aleatoire, aleatoire_off (désactive uniquement le mélange), repeter_titre, repeter_playlist, repeter_aucune (désactive uniquement la répétition), repeter (ancienne action), radio.")
+            .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("action", prop("jaime | jaimepas | normal | aleatoire | aleatoire_off | repeter_titre | repeter_playlist | repeter_aucune | repeter | radio"))).put("required", JSONArray().put("action")))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "musique_file")
             .put("description", "File d'attente du lecteur : sans numéro, liste les prochains titres ; avec numero, saute à ce titre.")
