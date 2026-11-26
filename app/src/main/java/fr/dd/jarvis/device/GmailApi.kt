@@ -129,7 +129,9 @@ object GmailApi {
             }
         }
         if (all.isEmpty() && errors.isNotEmpty()) throw IllegalStateException(errors.joinToString("\n"))
-        return all.sortedByDescending { it.date }.take(count)
+        // count est appliqué par compte dans fetchOne : ne pas tronquer ici, sinon les comptes à faible volume
+        // disparaissent dès qu'un autre compte contient davantage de messages récents.
+        return all.sortedByDescending { it.date }
     }
 
     /** Texte brut d'un message Gmail (partie text/plain, sinon HTML nettoyé). */
