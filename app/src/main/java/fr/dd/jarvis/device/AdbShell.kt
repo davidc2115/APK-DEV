@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import io.github.muntashirakon.adb.AbsAdbConnectionManager
 import io.github.muntashirakon.adb.android.AdbMdns
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -17,6 +18,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.bouncycastle.x509.X509V3CertificateGenerator
 import java.io.File
+import java.io.InputStream
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.math.BigInteger
 import java.net.InetAddress
 import java.security.KeyFactory
@@ -195,15 +201,53 @@ object AdbShell {
         }
     }
 
-    /** Exécute une commande shell (bloquant ; appeler hors thread principal). */
+    /** Lit tout le flux distant pour libérer le shell, mais ne conserve que [limite] caractères. */
+    internal fun lireSortieLimitee(flux: InputStream, limite: Int = 4000): String {
+        val texte = StringBuilder(minOf(limite, 1024))
+        var tronque = false
+        flux.bufferedReader(Charsets.UTF_8).use { lecteur ->
+            val tampon = CharArray(1024)
+            while (true) {
+                val n = lecteur.read(tampon)
+                if (n < 0) break
+                val restant = (limite - texte.length).coerceAtLeast(0)
+                if (restant > 0) texte.append(tampon, 0, minOf(n, restant))
+                if (n > restant) tronque = true
+            }
+        }
+        if (tronque) texte.append("\n… (sortie tronquée)")
+        return texte.toString().trim()
+    }
+
+    /** Exécute une commande shell avec délai maximal ; appeler hors thread principal. */
     suspend fun exec(ctx: Context, command: String): String = withContext(Dispatchers.IO) {
         try {
             val m = mgr(ctx)
             if (!m.isConnected && !m.connectTls(ctx.applicationContext, 6000)) return@withContext "ADB non connecté (Réglages › Téléphone › Contrôle)."
-            m.openStream("shell:$command").use { s ->
-                val out = s.openInputStream().bufferedReader().readText().trim()
-                if (out.isEmpty()) "(commande exécutée)" else out.take(4000)
+            val stream = m.openStream("shell:$command")
+            val lecteur = Executors.newSingleThreadExecutor()
+            try {
+                val sortie = lecteur.submit(Callable { stream.openInputStream().use { lireSortieLimitee(it) } })
+                try {
+                    sortie.get(20, TimeUnit.SECONDS).ifEmpty { "(commande exécutée)" }
+                } catch (_: TimeoutException) {
+                    runCatching { stream.close() }
+                    sortie.cancel(true)
+                    "⏱️ Commande ADB interrompue après 20 secondes."
+                } catch (e: InterruptedException) {
+                    // Ne pas transformer une interruption du worker en simple erreur métier :
+                    // fermer le flux distant, annuler le lecteur et restaurer le flag du thread.
+                    sortie.cancel(true)
+                    runCatching { stream.close() }
+                    Thread.currentThread().interrupt()
+                    throw CancellationException("Commande ADB interrompue.").also { it.initCause(e) }
+                }
+            } finally {
+                runCatching { stream.close() }
+                lecteur.shutdownNow()
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
             "Erreur ADB : ${e.message ?: e.javaClass.simpleName}"
         }
