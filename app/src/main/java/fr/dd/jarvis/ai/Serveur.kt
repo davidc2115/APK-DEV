@@ -96,7 +96,7 @@ object Serveur {
                     erreur = java.net.NoRouteToHostException("Route Wi-Fi/VPN indisponible vers ${cibleAdr.first}")
                     continue
                 }
-                s.setSocketFactory(socketFactoryLieeAuReseau(reseauCible))
+                s.setSocketFactory(socketFactoryLieeAuReseau(reseauCible, if (i < ordre.size - 1) 5_000 else 12_000))
             }
             // Si une ancienne clé privée est encore renseignée, ne pas empêcher le repli sur le mot de passe.
             // JSch n'essaie l'authentification password que si le mot de passe est explicitement fourni à la session.
@@ -194,12 +194,12 @@ object Serveur {
     }.getOrNull()
 
     /** SocketFactory JSch explicitement liée au réseau Android choisi (Wi-Fi ou VPN). */
-    private fun socketFactoryLieeAuReseau(reseau: android.net.Network): com.jcraft.jsch.SocketFactory =
+    private fun socketFactoryLieeAuReseau(reseau: android.net.Network, delaiMs: Int): com.jcraft.jsch.SocketFactory =
         object : com.jcraft.jsch.SocketFactory {
             override fun createSocket(host: String, port: Int): Socket {
                 val adresse = reseau.getByName(host)
                 return reseau.socketFactory.createSocket().apply {
-                    connect(InetSocketAddress(adresse, port), 12_000)
+                    connect(InetSocketAddress(adresse, port), delaiMs)
                 }
             }
 
