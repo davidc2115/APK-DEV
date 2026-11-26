@@ -249,4 +249,45 @@ class RegistreApprentissageTest {
         } finally { dir.deleteRecursively() }
     }
 
+    @Test
+    fun permissionsSkillSontDesDemandesEtNeSontJamaisAccordeesParLeRegistre() {
+        val dir = Files.createTempDirectory("registre-permissions").toFile()
+        try {
+            val r = registre(dir)
+            val id = r.creer("skill", "Briefing agenda", "Prépare un briefing", "usage répété")
+            r.demanderPermissions(id, listOf("calendar:read", "memory:read", "calendar:read"))
+            val item = JSONObject(r.snapshot()).getJSONArray("entries").getJSONObject(0)
+            assertEquals(2, item.getJSONArray("requestedPermissions").length())
+            assertEquals(0, item.getJSONArray("permissions").length())
+            assertEquals(RegistreApprentissage.ETAT_OBSERVED, item.getString("state"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun permissionsTropLargesOuInconnuesSontRefuseesSansEcriture() {
+        val dir = Files.createTempDirectory("registre-permissions-refus").toFile()
+        try {
+            val r = registre(dir)
+            val id = r.creer("tool", "Outil agenda", "Recherche agenda", "usage répété")
+            assertThrows(SecurityException::class.java) { r.demanderPermissions(id, listOf("*")) }
+            assertThrows(SecurityException::class.java) { r.demanderPermissions(id, listOf("shell:execute")) }
+            assertThrows(IllegalArgumentException::class.java) { r.demanderPermissions(id, emptyList()) }
+            val item = JSONObject(r.snapshot()).getJSONArray("entries").getJSONObject(0)
+            assertFalse(item.has("requestedPermissions"))
+            assertEquals(0, item.getJSONArray("permissions").length())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun permissionsNePeuventPasEtreDemandeesPourUneHabitude() {
+        val dir = Files.createTempDirectory("registre-permissions-habitude").toFile()
+        try {
+            val r = registre(dir)
+            val id = r.creer("habit", "Préférence de réponse", "Réponse concise", "conversation")
+            assertThrows(IllegalArgumentException::class.java) {
+                r.demanderPermissions(id, listOf("memory:read"))
+            }
+        } finally { dir.deleteRecursively() }
+    }
+
 }
