@@ -425,6 +425,28 @@ class VoiceManager(private val ctx: Context) {
                     main.removeCallbacks(finSegments)
                     main.postDelayed(finSegments, pauseMs + 1500)
                 }
+
+                /**
+                 * Repli pour les moteurs Android qui publient les mots progressivement dans onPartialResults,
+                 * mais n'envoient jamais onResults. En mode conversation, la garde de silence est désactivée
+                 * dès que l'utilisateur parle : sans ce repli, le service peut rester en écoute sans fin.
+                 */
+                @Volatile private var secoursDemande = false
+                private val secoursFinPartiel = Runnable {
+                    if (!actif() || segmente) return@Runnable
+                    if (texte(partielSur()).isBlank()) return@Runnable
+                    secoursDemande = true
+                    JournalVoix.noter(nom, "partiels reçus sans résultat final : clôture de reconnaissance")
+                    runCatching { r.stopListening() }
+                    main.postDelayed({
+                        if (!actif()) return@postDelayed
+                        val dernier = texte(partielSur())
+                        if (dernier.isNotBlank()) {
+                            JournalVoix.noter(nom, "récupération du dernier partiel en résultat final")
+                            livrer(dernier, "fin de phrase (secours)")
+                        }
+                    }, 1800)
+                }
                 /** Écoute longue : voix détectée mais aucun mot reconnu en 6 s → traité comme « rien compris ». */
                 private val sansTexte = Runnable {
                     if (actif() && segments.isEmpty() && dernierPartiel.isBlank()) { runCatching { r.cancel() }; onError(SpeechRecognizer.ERROR_NO_MATCH) }
@@ -441,7 +463,10 @@ class VoiceManager(private val ctx: Context) {
                     main.postDelayed(garde, 60_000)
                     if (fenetreFin <= 0) main.postDelayed(sansParole, 8000)
                 }
-                private fun annulerGardes() { main.removeCallbacks(finSegments); main.removeCallbacks(garde); main.removeCallbacks(sansParole); main.removeCallbacks(sansTexte) }
+                private fun annulerGardes() {
+                    main.removeCallbacks(finSegments); main.removeCallbacks(garde); main.removeCallbacks(sansParole)
+                    main.removeCallbacks(sansTexte); main.removeCallbacks(secoursFinPartiel)
+                }
 
                 override fun onReadyForSpeech(params: Bundle?) {}
                 override fun onBeginningOfSpeech() { if (actif()) aParle() }
@@ -459,6 +484,16 @@ class VoiceManager(private val ctx: Context) {
 
                 override fun onError(error: Int) {
                     if (!actif()) return
+                    // stopListening() peut être suivi d'un ERROR_NO_MATCH au lieu de onResults.
+                    // Dans ce cas, le dernier partiel constitue déjà une transcription exploitable.
+                    if (secoursDemande) {
+                        val dernier = texte(partielSur())
+                        if (dernier.isNotBlank()) {
+                            JournalVoix.noter(nom, "résultat final absent après clôture : récupération sur erreur")
+                            livrer(dernier, "fin de phrase (secours)")
+                            return
+                        }
+                    }
                     termine = true
                     JournalVoix.noter(nom, "reconnaissance : erreur $error${if (parole) " (après parole)" else ""}")
                     ecoute = false
@@ -592,6 +627,12 @@ class VoiceManager(private val ctx: Context) {
                         aParle()
                         main.removeCallbacks(sansTexte)
                         relancerFinSegments()
+                        // Les moteurs non segmentés n'ont pas de finSegments : armer un secours,
+                        // réinitialisé à chaque partiel pour laisser finir une phrase en cours.
+                        if (!segmente) {
+                            main.removeCallbacks(secoursFinPartiel)
+                            main.postDelayed(secoursFinPartiel, pauseMs + 1800)
+                        }
                         val vu = texte(sansMorceaux(t))
                         Presence.entendu = vu
                         onPartial(vu)
