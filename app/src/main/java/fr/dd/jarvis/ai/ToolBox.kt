@@ -451,6 +451,19 @@ class ToolBox(
             "preuve" to prop("Exemple distinct et factuel de correction ou de choix validé qui soutient cette préférence.")
         ), listOf("sujet", "preference", "preuve")))
         put(tool("memoire_apprentissages", "Affiche les préférences en cours d'apprentissage et leur nombre de preuves."))
+        put(tool("apprentissage_durable", "Registre durable partagé avec Hermès : crée et consulte les observations, habitudes candidates, skills et outils proposés ; ajoute preuves et contre-exemples ; fait évoluer leur cycle de validation. Une entrée commence en observed. Toute approbation, phase de test ou activation exige une confirmation explicite. Cet outil ne génère, n'installe ni n'exécute aucun code.", mapOf(
+            "action" to prop("list | read | create | evidence | counterexample | state"),
+            "id" to prop("Identifiant exact retourné par create."),
+            "type" to prop("habit | skill | tool | error ; obligatoire pour create."),
+            "titre" to prop("Titre de l'observation ou proposition."),
+            "description" to prop("Description concrète et limitée."),
+            "provenance" to prop("Origine : demande utilisateur, tâche répétée, journal, correction, etc."),
+            "contenu" to prop("Texte de la preuve ou du contre-exemple."),
+            "contexte" to prop("Contexte précis dans lequel la preuve a été observée."),
+            "source" to prop("Source de la preuve : conversation, tâche, appareil, journal, etc."),
+            "etat" to prop("observed | candidate | needs_review | approved | testing | active | paused | rejected | failed | superseded."),
+            "confirmation_explicite" to prop("true uniquement après accord explicite de l'utilisateur pour l'approbation, le test ou l'activation.")
+        ), listOf("action")))
         put(tool("agents_centre", "Centre de contrôle des agents IA : consulte leur état, active/désactive un agent, lance un cycle immédiat ou règle la fréquence. Respecte l'interrupteur général des agents autonomes.", mapOf(
             "action" to prop("etat | historique | activer | desactiver | lancer | intervalle"),
             "agent" to prop("global | mails | factures | planning | notifications | rangement_gmail | archivage_gmail"),
@@ -1393,6 +1406,7 @@ class ToolBox(
             runCatching { fr.dd.jarvis.device.Faits.apprendre(app, a.optString("sujet") + " : " + a.optString("texte")) }.getOrDefault(emptyList()).let { r -> if (r.isEmpty()) "" else "\nMémoire fiable : " + r.joinToString(" ; ") })
         "memoire_apprendre" -> ToolResult(app.memo.apprendre(a.optString("sujet"), a.optString("preference"), a.optString("preuve")))
         "memoire_apprentissages" -> ToolResult(app.memo.apprentissagesEnCours(), direct = true)
+        "apprentissage_durable" -> ToolResult(app.memo.registreApprentissage().executer(a), direct = true)
         "agents_centre" -> agentsCentre(a)
         "graphe_suggere_lien" -> ToolResult(app.knowledgeRepository.suggestRelation(a.optString("source"), a.optString("cible"), a.optString("type", "RELATED_TO")))
         "routine_contextuelle" -> routineContextuelle(a)
