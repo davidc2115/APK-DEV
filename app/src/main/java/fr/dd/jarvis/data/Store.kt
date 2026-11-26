@@ -197,6 +197,10 @@ class Store(context: Context) {
     val sshPass = SecretPref("sshPass")
     val sshKey = SecretPref("sshKey")
     val sshFp = SPref("sshFp", "")
+    /** Clé publique du serveur SSH principal, chiffrée et approuvée explicitement. */
+    val sshHostKey = SecretPref("sshHostKey")
+    /** Empreintes SSH des machines secondaires approuvées explicitement, stockées dans le coffre chiffré. */
+    val sshEmpreintesCibles = SecretPref("sshEmpreintesCibles")
     /** Jeton Plex Media Server : toujours conservé dans le stockage chiffré du Keystore. */
     val plexToken = SecretPref("plexToken")
     /** Termux protégé contre l'arrêt par Android (processus enfants, batterie) par le shell système. */
