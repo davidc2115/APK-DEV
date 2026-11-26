@@ -81,6 +81,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     }
 
     /** Enregistre une préférence candidate après une correction ou observation pertinente. */
+    /** Enregistre une preuve dans l'unique registre durable partagé Jarvis/Hermès. */
     @Synchronized
     fun apprendre(sujet: String, preference: String, preuve: String): String {
         ensure()
@@ -90,18 +91,8 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         if (value.length < 5 || evidence.length < 8) return "Apprentissage ignoré : préférence ou preuve trop courte."
         if (sensitivePattern.containsMatchIn(value) || sensitivePattern.containsMatchIn(evidence))
             return "Apprentissage refusé : les informations sensibles ne sont pas mémorisées automatiquement."
-        val key = "$category|${value.lowercase()}"
-        // Une même preuve ne doit pas compter plusieurs fois à cause des accents, de la casse ou de la ponctuation.
-        val preuveNormalisee = java.text.Normalizer.normalize(evidence.lowercase(), java.text.Normalizer.Form.NFD)
-            .replace(Regex("\\p{M}"), "")
-            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
-            .trim()
-        val hash = MessageDigest.getInstance("SHA-256").digest(preuveNormalisee.toByteArray())
-            .joinToString("") { "%02x".format(it) }.take(20)
-        val proofs = candidates.getOrPut(key) { linkedSetOf() }
-        // Le registre Jarvis/Hermès reçoit les mêmes preuves, sans attendre la migration legacy.
-        // Il garde leur contexte et ne passe en candidate qu'après trois preuves distinctes.
-        registreApprentissage.enregistrerPreuveHabitude(
+
+        val id = registreApprentissage.enregistrerPreuveHabitude(
             "[$category] $value",
             "Préférence candidate de la rubrique $category",
             "Memo.apprendre",
@@ -110,34 +101,32 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
             "memo.apprendre",
             "jarvis"
         )
-        if (!proofs.add(hash)) {
-            // Si la confirmation précédente a échoué sur Obsidian, les trois preuves restent présentes :
-            // retenter aussi la mémoire durable avant d'annoncer que l'habitude est enregistrée.
-            if (proofs.size >= 3) {
-                // Trois preuves rendent la proposition candidate, jamais active automatiquement.
-                // Le registre partagé conserve l'état candidate jusqu'à une validation explicite.
-                persistCandidates()
-                return "Habitude candidate prête pour validation explicite (3/3 preuves) : $value"
-            }
-            persistCandidates()
-            return "Cette preuve a déjà été prise en compte (${proofs.size}/3)."
+        val entree = registreApprentissage.habitudeApprentissage(id)
+            ?: throw IllegalStateException("L'habitude enregistrée est introuvable dans le registre partagé.")
+        return when (entree.etat) {
+            RegistreApprentissage.ETAT_CANDIDATE,
+            RegistreApprentissage.ETAT_NEEDS_REVIEW ->
+                "Habitude candidate prête pour validation explicite (${entree.preuves}/3 preuves) : $value"
+            RegistreApprentissage.ETAT_APPROVED ->
+                "Habitude approuvée, en attente de sa phase de test (${entree.preuves} preuves) : $value"
+            RegistreApprentissage.ETAT_TESTING ->
+                "Habitude en phase de test (${entree.preuves} preuves) : $value"
+            RegistreApprentissage.ETAT_ACTIVE ->
+                "Habitude déjà active dans la mémoire partagée ; nouvelle preuve enregistrée (${entree.preuves}) : $value"
+            RegistreApprentissage.ETAT_PAUSED ->
+                "Habitude en pause ; la preuve est conservée sans réactivation : $value"
+            else ->
+                "Préférence candidate conservée (${entree.preuves}/3 preuves distinctes). Elle ne sera pas appliquée avant validation explicite."
         }
-        if (proofs.size < 3) {
-            persistCandidates()
-            return "Préférence candidate conservée (${proofs.size}/3 preuves distinctes). Elle ne sera pas appliquée comme habitude avant validation explicite."
-        }
-        // Ne pas injecter dans items["habitudes"] : cette rubrique alimente directement les prompts.
-        // L'entrée reste candidate dans le registre Jarvis/Hermès jusqu'à confirmation explicite.
-        persistCandidates()
-        return "Habitude candidate prête pour validation explicite (3/3 preuves) : $value"
     }
 
     @Synchronized
     fun apprentissagesEnCours(): String {
         ensure()
-        if (candidates.isEmpty()) return "Aucune préférence en cours d'apprentissage."
-        return candidates.entries.joinToString("\n") { (key, proofs) ->
-            "- ${key.substringAfter('|')} : ${proofs.size}/3 preuves"
+        val entries = registreApprentissage.habitudesEnApprentissage()
+        if (entries.isEmpty()) return "Aucune préférence en cours d'apprentissage."
+        return entries.joinToString("\n") { entree ->
+            "- ${entree.titre} : ${entree.preuves}/3 preuves — ${entree.etat}"
         }
     }
 
