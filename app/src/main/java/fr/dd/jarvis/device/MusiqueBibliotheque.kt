@@ -280,6 +280,13 @@ object MusiqueBibliotheque {
             "playlist", "repeter playlist", "repeter_playlist", "all" -> PlaybackStateCompat.REPEAT_MODE_ALL
             else -> PlaybackStateCompat.REPEAT_MODE_NONE
         }
+        // Ne pas envoyer les commandes avant que le contrôleur distant ait terminé sa négociation.
+        var pret = false
+        repeat(10) {
+            if (runCatching { compat.isSessionReady() }.getOrDefault(false)) { pret = true; return@repeat }
+            android.os.SystemClock.sleep(100)
+        }
+        if (!pret) return false
         val envoye = runCatching {
             if (aleatoire != null) compat.transportControls.setShuffleMode(modeShuffle)
             if (repetition != null) compat.transportControls.setRepeatMode(modeRepeat)
@@ -287,12 +294,10 @@ object MusiqueBibliotheque {
         if (!envoye) return false
 
         // Les sessions peuvent publier leur nouvel état quelques instants après la commande.
-        repeat(8) {
-            if (runCatching { compat.isSessionReady() }.getOrDefault(false)) {
-                val shuffleOk = aleatoire == null || runCatching { compat.shuffleMode == modeShuffle }.getOrDefault(false)
-                val repeatOk = repetition == null || runCatching { compat.repeatMode == modeRepeat }.getOrDefault(false)
-                if (shuffleOk && repeatOk) return true
-            }
+        repeat(10) {
+            val shuffleOk = aleatoire == null || runCatching { compat.shuffleMode == modeShuffle }.getOrDefault(false)
+            val repeatOk = repetition == null || runCatching { compat.repeatMode == modeRepeat }.getOrDefault(false)
+            if (shuffleOk && repeatOk) return true
             android.os.SystemClock.sleep(100)
         }
         return false
