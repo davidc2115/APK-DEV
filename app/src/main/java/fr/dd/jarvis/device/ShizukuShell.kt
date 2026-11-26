@@ -104,8 +104,8 @@ object ShizukuShell {
             }
             val brut = listOf(out, err).filter { it.isNotBlank() }.joinToString("\n").trim()
             val texte = if (brut.length > LIMITE_SORTIE) brut.take(LIMITE_SORTIE) + "\n… (sortie totale limitée à $LIMITE_SORTIE caractères)" else brut
-            val resultat = texte.ifEmpty { "(commande exécutée)" }
-            return if (termine) resultat else "⏱️ Commande interrompue après $DELAI_COMMANDE_SECONDES secondes.\n$resultat"
+            if (!termine) return "⏱️ Commande interrompue après $DELAI_COMMANDE_SECONDES secondes.\n$texte"
+            return ShellResult.format(p.exitValue(), texte)
         } catch (interruption: InterruptedException) {
             processus?.destroyForcibly()
             Thread.currentThread().interrupt()
