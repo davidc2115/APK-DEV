@@ -1076,7 +1076,7 @@ class ToolBox(
                 val destination = a.optString("destination").trim()
                 val pt = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     val loc = fr.dd.jarvis.societe.Geo.localiser(destination)
-                    val numeroDemande = Regex("""(?:^|[\\s,])\\d{1,4}(?:\\s*(?:bis|ter|quater|[a-d])\\b)?(?=[\\s,]+[^\\d\\s,])""", RegexOption.IGNORE_CASE).containsMatchIn(destination)
+                    val numeroDemande = Regex("""(?:^|[\s,])\d{1,4}(?:\s*(?:bis|ter|quater|[a-d])\b)?(?=[\s,]+[^\d\s,])""", RegexOption.IGNORE_CASE).containsMatchIn(destination)
                     loc?.takeIf { it.precision == fr.dd.jarvis.societe.Geo.Precision.NUMERO ||
                         (!numeroDemande && it.precision == fr.dd.jarvis.societe.Geo.Precision.RUE) }?.point
                 } }.getOrNull()
@@ -1097,7 +1097,7 @@ class ToolBox(
                 val destination = a.optString("destination").trim()
                 val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) runCatching {
                     val loc = fr.dd.jarvis.societe.Geo.localiser(destination)
-                    val numeroDemande = Regex("""(?:^|[\\s,])\\d{1,4}(?:\\s*(?:bis|ter|quater|[a-d])\\b)?(?=[\\s,]+[^\\d\\s,])""", RegexOption.IGNORE_CASE).containsMatchIn(destination)
+                    val numeroDemande = Regex("""(?:^|[\s,])\d{1,4}(?:\s*(?:bis|ter|quater|[a-d])\b)?(?=[\s,]+[^\d\s,])""", RegexOption.IGNORE_CASE).containsMatchIn(destination)
                     loc?.takeIf { it.precision == fr.dd.jarvis.societe.Geo.Precision.NUMERO ||
                         (!numeroDemande && it.precision == fr.dd.jarvis.societe.Geo.Precision.RUE) }?.point
                 }.getOrNull() else null
