@@ -30,8 +30,8 @@ class AccesDistantTest {
     }
 
     @Test fun inventaireSignaleAussiQueLeTlsDesPortsHttpsResteAControler() {
-        val texte = "🟢 #1 TCP 443 → 192.168.1.10:443 (reverse proxy)\\n" +
-            "🟢 #2 TCP 8443 → 192.168.1.11:8443 (service inconnu)\\n" +
+        val texte = "🟢 #1 TCP 443 → 192.168.1.10:443 (reverse proxy)\n" +
+            "🟢 #2 TCP 8443 → 192.168.1.11:8443 (service inconnu)\n" +
             "🟢 #3 TCP 8123 → 192.168.1.20:8123 (Home Assistant)"
         val aVerifier = AccesDistant.lignesRedirectionsTlsAControler(texte)
         assertEquals(2, aVerifier.size)
