@@ -26,7 +26,7 @@ class ToolBox(
         fr.dd.jarvis.device.Autorisations.confirmer(app, outil, q) { confirmBrut(q, force) }
     }
     private val societe = SocieteTools(app, confirm)
-    private val serveur = ServeurTools(app, confirm)
+    private val serveur = ServeurTools(app, confirm) { question, force -> confirmBrut(question, force) }
     private val discord = DiscordTools(app, confirm)
     private val tiktok = TikTokTools(app, confirm)
     private val musique = MusicTools(app)
