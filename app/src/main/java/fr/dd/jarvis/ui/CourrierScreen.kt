@@ -56,13 +56,14 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     val scope = rememberCoroutineScope()
     LaunchedEffect(app) {
         val resultat = withContext(Dispatchers.IO) {
+            val anciensFauxPositifs = Courrier.revaliderHistorique(app)
             val sms = Courrier.importerSmsRecents(app)
             val mails = runCatching { Courrier.importerMailsRecents(app, 200) }
-            Triple(sms, mails.getOrDefault(0), mails.exceptionOrNull())
+            Triple(anciensFauxPositifs, sms, mails)
         }
-        if (resultat.first + resultat.second > 0) version++
-        actionInfo = resultat.third?.let { "⚠️ Import des mails impossible : ${it.message ?: it.javaClass.simpleName}. Vérifie Réglages › Comptes › Mails." }
-            ?: "Synchronisation terminée : ${resultat.first} nouvel(aux) SMS et ${resultat.second} nouvel(aux) mail(s) détecté(s)."
+        if (resultat.first > 0 || resultat.second > 0 || resultat.third.getOrDefault(0) > 0) version++
+        actionInfo = resultat.third.exceptionOrNull()?.let { "⚠️ Import des mails impossible : ${it.message ?: it.javaClass.simpleName}. Vérifie Réglages › Comptes › Mails." }
+            ?: "Synchronisation terminée : ${resultat.second} nouveau(x) SMS, ${resultat.third.getOrDefault(0)} nouveau(x) mail(s), ${resultat.first} ancienne(s) publicité(s) retirée(s)."
     }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
