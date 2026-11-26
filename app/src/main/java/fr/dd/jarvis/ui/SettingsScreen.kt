@@ -1300,18 +1300,51 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     store.obsidianUri.set(uri.toString())
                 }
             }
-            HudPanel(Modifier.fillMaxWidth(), title = "Obsidian — fiches contacts") {
+            var etatAccesObsidian by remember { mutableStateOf<Boolean?>(null) }
+            HudPanel(Modifier.fillMaxWidth(), title = "Obsidian — coffre de référence") {
                 Text(
-                    if (store.obsidianUri.value.isBlank()) "Aucun dossier choisi : les fiches sont enregistrées dans le dossier de l'application."
-                    else "Dossier choisi : " + Uri.decode(store.obsidianUri.value).substringAfterLast(":"),
+                    if (store.obsidianUri.value.isBlank()) "Aucun coffre choisi : les notes restent dans l'espace privé de l'application. Choisis ton coffre pour centraliser la mémoire et les documents."
+                    else "Coffre choisi : " + Uri.decode(store.obsidianUri.value).substringAfterLast(":"),
                     color = HudDim, fontSize = 12.sp
                 )
+                if (store.obsidianUri.value.isNotBlank()) {
+                    Text(
+                        when (etatAccesObsidian) {
+                            true -> "✓ Test réussi : lecture, écriture et suppression temporaires confirmées."
+                            false -> "⚠ Test échoué : coffre inaccessible, en lecture seule ou suppression refusée. Les opérations d'écriture seront bloquées."
+                            null -> "L'accès n'a pas encore été testé. Lance un contrôle pour vérifier les droits Android."
+                        },
+                        color = if (etatAccesObsidian == true) HudText else if (etatAccesObsidian == false) Color(0xFFFF6B6B) else HudDim,
+                        fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp)
+                    )
+                    Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HudButton("Tester l'accès") {
+                            scope.launch {
+                                etatAccesObsidian = runCatching {
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.testerAccesComplet() }
+                                }.getOrDefault(false)
+                            }
+                        }
+                        HudButton("Contrôler les doublons") {
+                            onAsk("Analyse les doublons de mon coffre Obsidian : recherche les notes au contenu identique et celles qui portent le même nom. Ne supprime rien, présente-moi les chemins et attends mon choix.")
+                        }
+                        HudButton("Vérifier les modifications") {
+                            onAsk("Contrôle les notes de mon coffre Obsidian par rapport à la dernière référence validée. Signale les notes ajoutées, modifiées ou supprimées, sans rien importer ni écraser.")
+                        }
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HudButton("Choisir le coffre Obsidian") { picker.launch(null) }
-                    if (store.obsidianUri.value.isNotBlank()) HudButton("Retirer") { store.obsidianUri.set("") }
+                    HudButton("Choisir le coffre Obsidian") {
+                        etatAccesObsidian = null
+                        picker.launch(null)
+                    }
+                    if (store.obsidianUri.value.isNotBlank()) HudButton("Retirer") {
+                        store.obsidianUri.set("")
+                        etatAccesObsidian = null
+                    }
                 }
-                Text("Les fiches sont écrites dans le sous-dossier « Contacts » du coffre.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                Text("Les fiches Société et la mémoire durable utilisent le coffre configuré comme source de référence. Le contrôle des doublons est en lecture seule ; toute suppression exige une confirmation.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             }
         },
         VoletReglages("comptes", "discord", "Discord", "discord bot roles salons serveur") {

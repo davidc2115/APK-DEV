@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import fr.dd.jarvis.data.Store
+import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 
@@ -464,6 +465,139 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 runCatching { f.readText() }.getOrNull()?.let { action(f.relativeTo(localRoot()).path, it) }
             }
         }
+    }
+
+    private fun instantaneNotes(limite: Int): JSONObject {
+        if (coffreConfigure() && !coffreLisible())
+            throw IOException("Le coffre Obsidian n'est pas accessible en lecture.")
+        val max = limite.coerceIn(1, 3000)
+        val fichiers: List<Pair<String, Any>> = if (coffreConfigure()) {
+            if (vaultRoot() == null) throw IOException("Autorisation de lecture du coffre perdue.")
+            allNotes(max + 1).also {
+                if (it.size > max) throw IOException("Le coffre contient plus de $max notes : augmente la limite avant de comparer les versions.")
+            }.map { it.first to it.second }
+        } else {
+            val localFiles = localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }.take(max + 1).toList()
+            if (localFiles.size > max) throw IOException("Le dossier local contient plus de $max notes : augmente la limite avant de comparer les versions.")
+            localFiles.map { it.relativeTo(localRoot()).path to it }
+        }
+        val snapshot = JSONObject()
+        fichiers.forEach { (path, fichier) ->
+            val bytes = when (fichier) {
+                is DocumentFile -> ctx.contentResolver.openInputStream(fichier.uri)?.use { it.readBytes() }
+                    ?: throw IOException("Lecture impossible : $path")
+                is File -> fichier.readBytes()
+                else -> throw IOException("Type de fichier non pris en charge : $path")
+            }
+            if (bytes.size > 1_000_000) throw IOException("La note « $path » dépasse 1 Mo. Analyse interrompue sans modifier la référence.")
+            snapshot.put(path, empreinteContenu(bytes.toString(Charsets.UTF_8)))
+        }
+        return snapshot
+    }
+
+    /** Compare le coffre à la dernière référence validée ; l'analyse ne valide jamais elle-même les changements. */
+    fun analyserModificationsDepuisReference(limite: Int = 1500): RapportChangementsObsidian {
+        signalerFilPrincipal("analyserModificationsDepuisReference")
+        val prefs = ctx.getSharedPreferences("obsidian_sync", Context.MODE_PRIVATE)
+        val courant = instantaneNotes(limite)
+        val baseRaw = prefs.getString("reference", null)
+        if (baseRaw.isNullOrBlank()) {
+            prefs.edit().putString("reference", courant.toString()).remove("en_attente").apply()
+            return RapportChangementsObsidian(true, emptyList())
+        }
+        val base = runCatching { JSONObject(baseRaw) }
+            .getOrElse { throw IOException("La référence de synchronisation est illisible. Aucune note n'a été modifiée.") }
+        val changements = mutableListOf<ChangementObsidian>()
+        val clesCourantes = courant.keys().asSequence().toSet()
+        val clesBase = base.keys().asSequence().toSet()
+        (clesCourantes - clesBase).sorted().forEach { changements += ChangementObsidian("ajoutée", it) }
+        (clesBase - clesCourantes).sorted().forEach { changements += ChangementObsidian("supprimée", it) }
+        (clesCourantes intersect clesBase).sorted().forEach { chemin ->
+            if (courant.optString(chemin) != base.optString(chemin))
+                changements += ChangementObsidian("modifiée", chemin)
+        }
+        prefs.edit().putString("en_attente", courant.toString()).apply()
+        return RapportChangementsObsidian(false, changements)
+    }
+
+    private fun memesEmpreintes(a: JSONObject, b: JSONObject): Boolean {
+        val ak = a.keys().asSequence().toSet()
+        val bk = b.keys().asSequence().toSet()
+        return ak == bk && ak.all { a.optString(it) == b.optString(it) }
+    }
+
+    /** Valide la référence uniquement si le coffre n'a pas changé depuis le dernier rapport. */
+    fun validerReferenceModifications(limite: Int = 1500): Boolean {
+        val prefs = ctx.getSharedPreferences("obsidian_sync", Context.MODE_PRIVATE)
+        val attente = prefs.getString("en_attente", null) ?: return false
+        val courant = instantaneNotes(limite)
+        val attendu = runCatching { JSONObject(attente) }.getOrNull() ?: return false
+        if (!memesEmpreintes(courant, attendu)) return false
+        prefs.edit().putString("reference", attente).remove("en_attente").apply()
+        return true
+    }
+
+    /** Détecte les contenus strictement identiques et les noms répétés, sans modifier le coffre. */
+    fun analyserDoublons(limite: Int = 1500): List<DoublonObsidian> {
+        signalerFilPrincipal("analyserDoublons")
+        if (coffreConfigure() && !coffreLisible())
+            throw IOException("Le coffre Obsidian est configuré mais illisible. Vérifie les autorisations Android.")
+
+        val maxTailleNote = 1_000_000L
+        val cheminsParEmpreinte = linkedMapOf<String, MutableList<String>>()
+        val cheminsParNom = linkedMapOf<String, MutableList<String>>()
+        val maximum = limite.coerceIn(1, 3000)
+
+        fun empreinte(fichier: java.io.InputStream): String? {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            var total = 0L
+            fichier.buffered().use { flux ->
+                val tampon = ByteArray(8192)
+                while (true) {
+                    if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Analyse Obsidian interrompue.")
+                    val n = flux.read(tampon)
+                    if (n < 0) break
+                    total += n
+                    if (total > maxTailleNote) return null
+                    digest.update(tampon, 0, n)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
+
+        val notes: List<Pair<String, Any>> = if (coffreConfigure()) {
+            if (vaultRoot() == null) throw IOException("Autorisation de lecture du coffre perdue.")
+            allNotes(maximum).map { it.first to it.second }
+        } else {
+            localRoot().walkTopDown().filter { it.isFile && it.name.endsWith(".md", true) }
+                .take(maximum).map { it.relativeTo(localRoot()).path to it }.toList()
+        }
+
+        notes.forEach { (path, fichier) ->
+            if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Analyse Obsidian interrompue.")
+            val taille = when (fichier) { is DocumentFile -> fichier.length(); is File -> fichier.length(); else -> -1L }
+            if (taille > maxTailleNote) return@forEach
+            val flux = when (fichier) {
+                is DocumentFile -> ctx.contentResolver.openInputStream(fichier.uri)
+                is File -> fichier.inputStream()
+                else -> null
+            } ?: throw IOException("Lecture impossible pour la note : $path")
+            val hash = empreinte(flux) ?: return@forEach
+            cheminsParEmpreinte.getOrPut(hash) { mutableListOf() }.add(path)
+            val nom = normaliseNom(path.substringAfterLast('/').removeSuffix(".md"))
+            if (nom.isNotBlank()) cheminsParNom.getOrPut(nom) { mutableListOf() }.add(path)
+        }
+
+        val groupes = mutableListOf<DoublonObsidian>()
+        cheminsParEmpreinte.filterValues { it.size > 1 }.forEach { (hash, paths) ->
+            groupes += DoublonObsidian("contenu identique", paths.distinct().sorted(), hash.take(12))
+        }
+        cheminsParNom.forEach { (nom, pathsBruts) ->
+            val paths = pathsBruts.distinct().sorted()
+            if (paths.size > 1 && groupes.none { it.chemins.containsAll(paths) && it.chemins.size == paths.size })
+                groupes += DoublonObsidian("même nom, contenu à comparer", paths, nom)
+        }
+        return groupes.sortedWith(compareBy<DoublonObsidian> { if (it.type == "contenu identique") 0 else 1 }.thenBy { it.chemins.firstOrNull().orEmpty() })
     }
 
     /** Notes du coffre (chemins relatifs), éventuellement dans un dossier. */
