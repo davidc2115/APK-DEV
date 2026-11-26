@@ -40,8 +40,10 @@ class MusicToolsTest {
         assertEquals("repeter_aucune", MusicTools.modeLecture("désactive la répétition"))
         assertEquals("repeter_aucune", MusicTools.modeLecture("retire la répétition"))
         assertEquals("repeter_aucune", MusicTools.modeLecture("sans répétition"))
+        assertEquals("repeter_aucune", MusicTools.modeLecture("ne répète plus"))
         assertEquals("aleatoire_off", MusicTools.modeLecture("désactive le mode aléatoire"))
         assertEquals("aleatoire_off", MusicTools.modeLecture("retire le mélange aléatoire"))
+        assertEquals("aleatoire_off", MusicTools.modeLecture("ne mélange plus"))
     }
 
     @Test fun reconnaitLesAutresSectionsDeBibliotheque() {
