@@ -104,6 +104,7 @@ class JarvisMediaService : MediaBrowserService() {
     /** Fin de la dernière écoute / dernier appui micro : un ▶ envoyé juste après par la voiture n'est pas un vrai appui. */
     private var derniereFin = 0L
     private var dernierParler = 0L
+    private var dernierPlayRecu = 0L
     private val abonne: (ActiviteVoiture.Evt) -> Unit = { surActivite(it) }
 
     override fun onCreate() {
@@ -431,9 +432,9 @@ class JarvisMediaService : MediaBrowserService() {
             }
             ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("🎙️ « ${e.texte.take(90)} »", "…", PlaybackState.STATE_PLAYING)
             ActiviteVoiture.Etape.REFLEXION -> if (pilote) {
-                // La demande a bien atteint le service ; il peut terminer une réponse précédente avant d'ouvrir le micro.
+                // La voix progressive peut commencer avant la fin du traitement : PLAYING évite qu'Android Auto coupe le premier segment TTS.
                 enCours = true; veille?.cancel()
-                afficher("« ${e.question.take(90)} »", e.question.ifBlank { "JARVIS prépare l'écoute…" }.take(120), PlaybackState.STATE_BUFFERING)
+                afficher("« ${e.question.take(90)} »", e.question.ifBlank { "JARVIS prépare sa réponse…" }.take(120), PlaybackState.STATE_PLAYING)
             }
             ActiviteVoiture.Etape.REPONSE -> {
                 derniere = propre(e.texte)
@@ -480,6 +481,32 @@ class JarvisMediaService : MediaBrowserService() {
         return t - app.voitureDepuis < 12_000
     }
 
+    /**
+     * Android Auto peut envoyer onPlay ET onPlayFromMediaId pour un seul appui.
+     * On ignore seulement le doublon rapproché, sans repasser l'écran en pause :
+     * les anciens délais de 5 s empêchaient aussi de relancer l'écoute juste après une réponse.
+     */
+    private fun demanderEcouteDepuisPlay() {
+        val t = SystemClock.elapsedRealtime()
+        when {
+            autoDemarrage() -> {
+                fr.dd.jarvis.voice.JournalVoix.noter("Android Auto", "Play automatique au branchement ignoré")
+                session.setPlaybackState(etat(PlaybackState.STATE_PAUSED))
+            }
+            !app.enVoiture -> {
+                fr.dd.jarvis.voice.JournalVoix.noter("Android Auto", "Play reçu hors projection : ignoré")
+                session.setPlaybackState(etat(PlaybackState.STATE_PAUSED))
+            }
+            t - dernierPlayRecu < 1_200 -> {
+                fr.dd.jarvis.voice.JournalVoix.noter("Android Auto", "événement Play doublé : ignoré sans couper l'écoute")
+            }
+            else -> {
+                dernierPlayRecu = t
+                parler()
+            }
+        }
+    }
+
     private inner class Rappels : MediaSession.Callback() {
         override fun onPlayFromSearch(query: String?, extras: Bundle?) {
             val q = query.orEmpty().trim()
@@ -489,7 +516,7 @@ class JarvisMediaService : MediaBrowserService() {
         override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
             val id = mediaId.orEmpty()
             when {
-                id == PARLER -> if (autoDemarrage()) session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)) else parler()
+                id == PARLER -> demanderEcouteDepuisPlay()
                 id == RELIRE -> relire()
                 id == MUSIQUE -> {
                     // N'importe quelle appli de musique (Spotify, YT Music, Deezer…) : sa session, jamais celle de JARVIS.
@@ -521,13 +548,7 @@ class JarvisMediaService : MediaBrowserService() {
          * ▶ (écran de lecture ou volant) = parler à JARVIS. Ignoré juste après la connexion (Android Auto relance la
          * dernière source audio) et hors voiture (boutons d'un casque Bluetooth).
          */
-        override fun onPlay() {
-            val t = SystemClock.elapsedRealtime()
-            if (autoDemarrage() || !app.enVoiture || t - derniereFin < 5_000 || t - dernierParler < 5_000) {
-                session.setPlaybackState(etat(PlaybackState.STATE_PAUSED)); return
-            }
-            parler()
-        }
+        override fun onPlay() { demanderEcouteDepuisPlay() }
 
         override fun onSkipToNext() {
             fr.dd.jarvis.device.CommandeMedia.executer(this@JarvisMediaService, fr.dd.jarvis.device.CommandeMedia.Action.NEXT, voiture = true)
