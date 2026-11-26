@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +53,10 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
             when (domaine) { "tous" -> true; "a_classer" -> e.domaine.isBlank(); else -> e.domaine == domaine }
     }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(app) {
+        val ajoutes = withContext(Dispatchers.IO) { Courrier.importerSmsRecents(app) }
+        if (ajoutes > 0) version++
+    }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             HudPanel(Modifier.fillMaxWidth(), title = if (domaineFixe == Courrier.SOCIETE) "📬 Reçus pour la Société" else "📬 Courrier reçu") {
