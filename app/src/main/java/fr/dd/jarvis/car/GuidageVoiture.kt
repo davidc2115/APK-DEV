@@ -46,6 +46,21 @@ object GuidageVoiture {
     /** Waze / Maps affiché il y a moins de [ms] (diagnostic uniquement, jamais une preuve de guidage). */
     fun fenetreRecente(ms: Long = 120_000): Boolean = fenetres.values.any { System.currentTimeMillis() - it < ms }
 
+    /** Une fenêtre Waze/Maps est-elle apparue après cette demande ? Cela confirme l'ouverture, pas le guidage. */
+    fun fenetreDepuis(depuis: Long): Boolean = fenetres.values.any { it >= depuis }
+
+    /** Attend l'ouverture effective de l'application GPS, sans la confondre avec le départ du guidage. */
+    suspend fun attendreOuverture(depuis: Long, ms: Long = 6_000): Boolean {
+        val fin = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < fin) {
+            if (fenetreDepuis(depuis)) return true
+            delay(300)
+        }
+        return fenetreDepuis(depuis)
+    }
+
+
+
     /** Bouton de départ du guidage (« Y aller », « Démarrer »…) : appuyer dessus est sans risque, aucune confirmation. */
     private val BOUTON_DEPART = Regex("(?i)^\\s*(y aller|go|démarrer|demarrer|partir|c'est parti|lancer|lancer le guidage|commencer|start|démarrer la navigation|demarrer la navigation|aller)\\s*[!.]?\\s*$")
     fun boutonDepart(texte: String): Boolean = BOUTON_DEPART.matches(texte)
@@ -161,14 +176,14 @@ object GuidageVoiture {
                 true -> { journal.noter("voiture", "guidage démarré par $nomAppli vers $nom"); return "🧭 Itinéraire vers $nom lancé dans $nomAppli." }
                 null -> return "🧭 Itinéraire vers $nom envoyé à $nomAppli."
                 false -> {
+                    val ouverte = attendreOuverture(t1, 6_000)
                     val blocage = blocageProbable(app)
-                    // Rien ne l'empêche (autorisations en place) : Waze ne signale simplement pas toujours son départ.
-                    // Avant, JARVIS annonçait un échec alors que la navigation démarrait.
-                    if (blocage == null) {
-                        journal.noter("voiture", "$nomAppli : départ non confirmé, mais aucune autorisation ne manque → annoncé comme envoyé")
-                        return "🧭 Itinéraire vers $nom envoyé à $nomAppli."
+                    if (!ouverte) {
+                        journal.noter("voiture", "$nomAppli : aucune ouverture d'application détectée après l'intent")
+                        return "⚠️ Android a accepté la demande pour $nomAppli, mais l'application GPS ne s'est pas ouverte. Le guidage n'a donc pas démarré. ${blocage ?: "Vérifie l'autorisation de lancement en arrière-plan et que l'application est installée."}"
                     }
-                    echecs += "$nomAppli ne s'est pas ouvert ($blocage)"
+                    journal.noter("voiture", "$nomAppli : application ouverte, mais aucun signal de guidage après 10 s")
+                    return "⚠️ $nomAppli s'est bien ouvert pour $nom, mais je ne détecte pas le démarrage de l'itinéraire. Je ne vais pas annoncer que le guidage est lancé : vérifie le bouton « Démarrer / Y aller » dans l'application."
                 }
             }
         } else echecs += r.removePrefix("❌ ").take(120)
