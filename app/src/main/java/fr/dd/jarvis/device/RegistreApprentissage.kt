@@ -328,6 +328,20 @@ class RegistreApprentissage(
         persisterMutation(avant)
     }
 
+    /** Habitudes explicitement activées, relues depuis la source partagée à chaque demande. */
+    @Synchronized
+    fun habitudesActives(): List<Pair<String, String>> {
+        synchroniserAvantLecture()
+        val entries = donnees.optJSONArray("entries") ?: return emptyList()
+        return (0 until entries.length()).mapNotNull { index ->
+            val item = entries.optJSONObject(index) ?: return@mapNotNull null
+            if (item.optString("type") != "habit" || item.optString("state") != ETAT_ACTIVE) return@mapNotNull null
+            val titre = item.optString("title").trim()
+            if (titre.isBlank()) return@mapNotNull null
+            titre to item.optString("description").trim()
+        }
+    }
+
     @Synchronized
     fun snapshot(): String {
         synchroniserAvantLecture()
