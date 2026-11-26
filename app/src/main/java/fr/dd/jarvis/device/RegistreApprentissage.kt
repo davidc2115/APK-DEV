@@ -227,6 +227,41 @@ class RegistreApprentissage(
         return id
     }
 
+    /**
+     * Alimente le registre partagé depuis l'apprentissage historique de Memo.
+     * Une habitude ne devient candidate qu'après trois contenus de preuve réellement distincts ;
+     * changer le contexte ou la source d'une même phrase ne gonfle pas le compteur.
+     */
+    @Synchronized
+    fun enregistrerPreuveHabitude(
+        titre: String,
+        description: String,
+        provenance: String,
+        contenu: String,
+        contexte: String,
+        source: String,
+        acteur: String = "jarvis"
+    ): String {
+        val id = creer("habit", titre, description, provenance, acteur)
+        ajouterPreuve(id, contenu, contexte, source, acteur)
+        val item = entree(id) ?: throw IllegalStateException("Habitude introuvable après enregistrement.")
+        val preuves = item.optJSONArray("evidence") ?: JSONArray()
+        val contenusDistincts = mutableSetOf<String>()
+        for (i in 0 until preuves.length()) {
+            val texte = preuves.optJSONObject(i)?.optString("content").orEmpty()
+            if (texte.isBlank()) continue
+            val normalise = java.text.Normalizer.normalize(texte.lowercase(), java.text.Normalizer.Form.NFD)
+                .replace(Regex("\\p{M}"), "")
+                .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+                .trim()
+            if (normalise.isNotBlank()) contenusDistincts.add(empreinte(normalise))
+        }
+        if (item.optString("state") == ETAT_OBSERVED && contenusDistincts.size >= 3) {
+            changerEtat(id, ETAT_CANDIDATE, false, acteur)
+        }
+        return id
+    }
+
     /** Ajoute une preuve contextualisée ; son empreinte empêche les répétitions artificielles. */
     @Synchronized
     fun ajouterPreuve(id: String, contenu: String, contexte: String, source: String, acteur: String = "jarvis"): Boolean {
@@ -347,6 +382,20 @@ class RegistreApprentissage(
         item.put("version", item.optInt("version", 1) + 1)
         journal(id, "state_changed", "$actuel → $cible", acteur)
         persisterMutation(avant)
+    }
+
+    /** Habitudes explicitement activées, relues depuis la source partagée à chaque demande. */
+    @Synchronized
+    fun habitudesActives(): List<Pair<String, String>> {
+        synchroniserAvantLecture()
+        val entries = donnees.optJSONArray("entries") ?: return emptyList()
+        return (0 until entries.length()).mapNotNull { index ->
+            val item = entries.optJSONObject(index) ?: return@mapNotNull null
+            if (item.optString("type") != "habit" || item.optString("state") != ETAT_ACTIVE) return@mapNotNull null
+            val titre = item.optString("title").trim()
+            if (titre.isBlank()) return@mapNotNull null
+            titre to item.optString("description").trim()
+        }
     }
 
     @Synchronized
