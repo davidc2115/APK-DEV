@@ -148,8 +148,10 @@ fun MusiqueEcran(app: JarvisApp, onFermer: () -> Unit) {
                 HudChip("👎") { message = MusiqueBibliotheque.action(app, "jaimepas") }
                 HudChip("▶️ Normal") { message = MusiqueBibliotheque.configurerMode(app, "normal") }
                 HudChip("🔀 Aléatoire") { message = MusiqueBibliotheque.configurerMode(app, "aleatoire") }
+                HudChip("↪️ Sans aléatoire") { message = MusiqueBibliotheque.configurerMode(app, "aleatoire_off") }
                 HudChip("🔂 Répéter titre") { message = MusiqueBibliotheque.configurerMode(app, "repeter_titre") }
                 HudChip("🔁 Répéter playlist") { message = MusiqueBibliotheque.configurerMode(app, "repeter_playlist") }
+                HudChip("↪️ Sans répétition") { message = MusiqueBibliotheque.configurerMode(app, "repeter_aucune") }
                 HudChip("📻 Radio") {
                     val x = enCours ?: return@HudChip
                     scope.launch {
