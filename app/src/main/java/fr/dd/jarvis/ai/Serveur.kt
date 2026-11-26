@@ -124,6 +124,72 @@ object Serveur {
         }
     }
 
+    /**
+     * Négocie la clé du serveur principal sans authentification.
+     * Le mot de passe/la clé privée ne sont jamais transmis pendant cette étape.
+     */
+    fun empreinteServeurPrincipal(app: JarvisApp): EmpreinteSSH {
+        val st = app.store
+        val local = st.sshHost.value.trim() to (st.sshPort.value.toIntOrNull() ?: 22)
+        val distant = st.sshHostDistant.value.trim().takeIf { it.isNotBlank() }
+            ?.let { it to (st.sshPortDistant.value.toIntOrNull() ?: local.second) }
+            ?: local.takeIf { it.first.isNotBlank() && !ipPrivee(it.first) }
+        val lanIp = st.serveurIpLocale.value.trim().takeIf { ipPrivee(it) }
+        val lan = buildList {
+            if (lanIp != null) { add(lanIp to local.second); add(lanIp to 22) }
+            if (ipPrivee(local.first)) { add(local.first to local.second); add(local.first to 22) }
+        }.distinct()
+        val surReseauMaison = (lan + listOf(local)).any { (hote, port) ->
+            ipPrivee(hote) && telephoneSurReseau(app, hote, port)
+        }
+        val ordre = ordreCiblesSsh(local, distant, lan, surReseauMaison)
+        if (ordre.isEmpty()) throw IllegalStateException("Aucune adresse SSH accessible n'est configurée.")
+        var derniere: Exception? = null
+        for ((hote, port) in ordre) {
+            val jsch = JSch()
+            val s = jsch.getSession(st.sshUser.value.trim(), hote, port)
+            if (ipPrivee(hote)) {
+                val reseau = reseauPourCible(app, hote, port) ?: continue
+                s.setSocketFactory(socketFactoryLieeAuReseau(reseau, 8000))
+            }
+            s.setConfig("StrictHostKeyChecking", "no")
+            s.setConfig("PreferredAuthentications", "none")
+            try {
+                runCatching { s.connect(8000) }
+                val key = s.hostKey ?: throw IllegalStateException("Le serveur $hote:$port n'a pas présenté de clé SSH.")
+                return EmpreinteSSH(key.getFingerPrint(jsch), key.getType(), key.getKey())
+            } catch (e: Exception) {
+                derniere = e
+            } finally {
+                runCatching { s.disconnect() }
+            }
+        }
+        throw derniere ?: IllegalStateException("Impossible de lire la clé publique du serveur SSH.")
+    }
+
+    /** Persiste la clé publique dans le coffre chiffré après confirmation de l'utilisateur. */
+    fun memoriserEmpreinteServeurPrincipal(app: JarvisApp, empreinte: EmpreinteSSH) {
+        val coffre = app.store.sshHostKey
+        if (!coffre.available) throw IllegalStateException("Le coffre chiffré Android est indisponible : aucune confiance SSH n'a été enregistrée.")
+        require(empreinte.empreinte.isNotBlank() && empreinte.type.isNotBlank() && empreinte.cle.isNotBlank()) {
+            "Clé SSH présentée invalide."
+        }
+        val connue = coffre.value.takeIf { it.isNotBlank() }?.let { JSONObject(it).optString("empreinte") }.orEmpty()
+        if (connue.isNotBlank() && connue != empreinte.empreinte)
+            throw IllegalStateException("La clé SSH du serveur principal a changé. Vérifie la machine avant de réinitialiser sa confiance.")
+        coffre.set(JSONObject().put("empreinte", empreinte.empreinte).put("type", empreinte.type).put("cle", empreinte.cle).toString())
+        app.store.sshFp.set(empreinte.empreinte)
+    }
+
+    private fun jschServeurPrincipal(app: JarvisApp): JSch {
+        val coffre = app.store.sshHostKey
+        if (!coffre.available || coffre.value.isBlank())
+            throw IllegalStateException("Première connexion SSH non approuvée : ouvre Réglages › Maison › Serveur et utilise « Vérifier et approuver la clé SSH » avant toute commande.")
+        val item = JSONObject(coffre.value)
+        val line = "jarvis-primary " + item.optString("type") + " " + item.optString("cle") + "\n"
+        return JSch().apply { setKnownHosts(ByteArrayInputStream(line.toByteArray(Charsets.UTF_8))) }
+    }
+
     private fun ouvrir(app: JarvisApp, cible: Cible? = null): Session {
         invaliderConnexionsSiReseauChange(app)
         if (cible != null) {
@@ -136,7 +202,7 @@ object Serveur {
             return s
         }
         val st = app.store
-        val jsch = JSch()
+        val jsch = jschServeurPrincipal(app)
         if (st.sshKey.value.isNotBlank()) {
             jsch.addIdentity("jarvis", st.sshKey.value.trim().replace("\r", "").plus("\n").toByteArray(), null,
                 st.sshPass.value.takeIf { it.isNotBlank() }?.toByteArray())
@@ -178,7 +244,8 @@ object Serveur {
             // Si une ancienne clé privée est encore renseignée, ne pas empêcher le repli sur le mot de passe.
             // JSch n'essaie l'authentification password que si le mot de passe est explicitement fourni à la session.
             if (st.sshPass.value.isNotBlank()) s.setPassword(st.sshPass.value)
-            s.setConfig("StrictHostKeyChecking", "no")
+            s.setHostKeyAlias("jarvis-primary")
+            s.setConfig("StrictHostKeyChecking", "yes")
             s.setConfig("PreferredAuthentications", when {
                 st.sshKey.value.isNotBlank() && st.sshPass.value.isNotBlank() -> "publickey,password,keyboard-interactive"
                 st.sshKey.value.isNotBlank() -> "publickey"
@@ -193,19 +260,6 @@ object Serveur {
                 continue
             }
             derniereAdresse = cibleAdr.first to System.currentTimeMillis()
-            // Empreinte du serveur mémorisée à la première connexion ; refus si elle change (protège d'un faux serveur).
-            val fp = s.hostKey.getFingerPrint(jsch)
-            val connu = st.sshFp.value
-            if (connu.isBlank()) st.sshFp.set(fp)
-            else if (connu != fp) {
-                s.disconnect()
-                val mismatch = IllegalStateException("Empreinte SSH inattendue sur ${cibleAdr.first}:${cibleAdr.second} ($fp au lieu de $connu).")
-                essais += "${cibleAdr.first}:${cibleAdr.second} → hôte SSH différent (empreinte non reconnue)"
-                erreur = mismatch
-                // Un Wi-Fi tiers peut réutiliser le même sous-réseau privé : on essaie l'adresse distante,
-                // mais elle devra présenter exactement la même empreinte connue.
-                continue
-            }
             return s
         }
         if (essais.size > 1) throw IllegalStateException("Connexion SSH impossible par toutes les adresses connues : " + essais.joinToString(" ; "), erreur)
