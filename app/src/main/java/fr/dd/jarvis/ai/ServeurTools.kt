@@ -349,12 +349,13 @@ class ServeurTools(
                 // Commande coupée (réponse d'IA tronquée) : refusée AVANT toute confirmation ou exécution.
                 Serveur.commandeIncomplete(cmd)?.let { return ToolResult("⛔ Commande incomplète, rien n'a été exécuté : $it. Renvoie la commande COMPLÈTE.") }
                 if (cible != null) {
-                    val presente = Serveur.empreinteCible(app, cible)
+                    val clePresentee = Serveur.empreinteCible(app, cible)
+                    val presente = clePresentee.empreinte
                     val connue = Serveur.empreinteCibleConnue(app, cible)
                     if (connue.isBlank()) {
                         if (!confirm("Première connexion à " + cible.hote + ":" + cible.port + " (utilisateur " + cible.user + ").\nEmpreinte SSH : " + presente + "\n\nN'approuve cette empreinte que si tu reconnais ce serveur. Jarvis la vérifiera à chaque connexion suivante.", true))
                             return ToolResult("Connexion SSH refusée : empreinte non approuvée.")
-                        Serveur.memoriserEmpreinteCible(app, cible, presente)
+                        Serveur.memoriserEmpreinteCible(app, cible, clePresentee)
                     } else if (connue != presente) {
                         return ToolResult("⛔ Connexion SSH bloquée : l'empreinte de " + cible.hote + ":" + cible.port + " a changé. Empreinte enregistrée : " + connue + " ; empreinte reçue : " + presente + ". Vérifie le serveur avant de réinitialiser sa confiance.")
                     }
