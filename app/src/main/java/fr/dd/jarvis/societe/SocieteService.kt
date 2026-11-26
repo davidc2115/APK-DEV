@@ -425,15 +425,30 @@ class SocieteService(
         return n
     }
 
-    /** Image d'un rapport (« idIntervention-nom ») depuis le stockage privé, réduite pour le PDF. */
+    /** Charge une image d'intervention depuis le cache privé temporaire ou le coffre Obsidian. */
     private fun imageRapport(nom: String): android.graphics.Bitmap? {
-        val id = nom.substringBefore('-'); val fichier = nom.substringAfter('-')
-        val f = File(ctx.filesDir, "societe/interventions/$id/$fichier").takeIf { it.isFile } ?: return null
-        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        android.graphics.BitmapFactory.decodeFile(f.path, o)
-        var ech = 1
-        while (o.outWidth / (ech * 2) >= 1200 || o.outHeight / (ech * 2) >= 1200) ech *= 2
-        return android.graphics.BitmapFactory.decodeFile(f.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = ech })
+        val id = nom.substringBefore('-')
+        val fichier = nom.substringAfter('-')
+        val local = File(ctx.filesDir, "societe/interventions/$id/$fichier").takeIf { it.isFile }
+        // Après génération du PDF, les copies privées sont supprimées : le coffre reste la source.
+        val dossier = data.clients.asSequence().flatMap { client ->
+            client.sites.asSequence().mapNotNull { site ->
+                if (site.interventions.any { it.id == id }) dossierIntervention(client, site) else null
+            }
+        }.firstOrNull() ?: return null
+        val temporaire = if (local != null) null else
+            obsidian.versFichierLocal("$dossier/$id-$fichier", File(ctx.cacheDir, "rapport-images"))
+        val source = local ?: temporaire ?: return null
+        return try {
+            val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(source.path, options)
+            var ech = 1
+            while (options.outWidth / (ech * 2) >= 1200 || options.outHeight / (ech * 2) >= 1200) ech *= 2
+            android.graphics.BitmapFactory.decodeFile(source.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = ech })
+        } finally {
+            // Ne jamais effacer le cache de travail d'une autre intervention ni la source locale durable.
+            if (temporaire != null) runCatching { temporaire.delete() }
+        }
     }
 
     /** Écrit la note Obsidian et le PDF (avec les photos et la signature dedans) ; renvoie (note, pdf). */
@@ -452,14 +467,19 @@ class SocieteService(
         val client = data.client(clientId) ?: return "Client introuvable."
         val site = client.sites.firstOrNull { it.id == siteId } ?: return "Installation introuvable."
         val inter = site.interventions.firstOrNull { it.id == interventionId } ?: return "Intervention introuvable."
-        File(ctx.filesDir, "societe/interventions/$interventionId").apply { mkdirs() }.let { File(it, "signature.png").writeBytes(png) }
-        runCatching { obsidian.saveBytes(dossierIntervention(client, site), "$interventionId-signature.png", png, "image/png") }
-        val maj = inter.copy(signature = "interventions/$interventionId/signature.png")
-        repo.update { d -> d.copy(clients = d.clients.map { c -> if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
-            if (s.id != siteId) s else s.copy(interventions = s.interventions.map { if (it.id == interventionId) maj else it })
-        }) }) }
-        val (_, pdf) = ecrireRapport(client, site, maj)
-        return "✍️ Signature du client ajoutée au rapport ($pdf)."
+        return try {
+            // L'original est stocké dans le coffre avant de rattacher la signature à l'intervention.
+            // imageRapport relira ensuite directement ce fichier Obsidian pour intégrer le PDF.
+            obsidian.saveBytes(dossierIntervention(client, site), "$interventionId-signature.png", png, "image/png")
+            val maj = inter.copy(signature = "interventions/$interventionId/signature.png")
+            repo.update { d -> d.copy(clients = d.clients.map { c -> if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
+                if (s.id != siteId) s else s.copy(interventions = s.interventions.map { if (it.id == interventionId) maj else it })
+            }) }) }
+            val (_, pdf) = ecrireRapport(client, site, maj)
+            "✍️ Signature du client ajoutée au rapport ($pdf)."
+        } catch (e: Exception) {
+            "Impossible d'enregistrer la signature dans le coffre Obsidian : ${e.message ?: "erreur inconnue"}"
+        }
     }
 
     /** Une fois : régénère les rapports des interventions qui ont des photos (elles n'étaient pas dans les PDF). */
@@ -504,10 +524,16 @@ class SocieteService(
                 if (totalOctets > 40L * 1024 * 1024) return@runCatching
                 val numero = existantes.size + ajoutees.size + 1
                 val nom = (if (avant) "avant" else "apres") + "-%02d.%s".format(numero, extension)
-                File(dossierLocal, nom).writeBytes(bytes)
-                val relatif = "interventions/$interventionId/$nom"
-                ajoutees += relatif
-                obsidian.saveBytes(dossierObsidian, "$interventionId-$nom", bytes, mime)
+                val copieTemporaire = File(dossierLocal, nom)
+                try {
+                    copieTemporaire.writeBytes(bytes)
+                    // Ne rattacher la photo à l'intervention qu'après confirmation de son écriture Obsidian.
+                    obsidian.saveBytes(dossierObsidian, "$interventionId-$nom", bytes, mime)
+                    ajoutees += "interventions/$interventionId/$nom"
+                } catch (e: Exception) {
+                    runCatching { copieTemporaire.delete() }
+                    throw e
+                }
             }
         }
         if (ajoutees.isEmpty()) return "Aucune image exploitable. Formats image uniquement, 15 Mo maximum par photo et 40 Mo par ajout."
@@ -515,13 +541,21 @@ class SocieteService(
             photosAvant = if (avant) intervention.photosAvant + ajoutees else intervention.photosAvant,
             photosApres = if (avant) intervention.photosApres else intervention.photosApres + ajoutees
         )
-        repo.update { d -> d.copy(clients = d.clients.map { c ->
-            if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
-                if (s.id != siteId) s else s.copy(interventions = s.interventions.map { i -> if (i.id == interventionId) maj else i })
-            })
-        }) }
-        val (emplacement, _) = ecrireRapport(client, site, maj)
-        return "${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note mise à jour : $emplacement"
+        val (emplacement, pdf) = try {
+            repo.update { d -> d.copy(clients = d.clients.map { c ->
+                if (c.id != clientId) c else c.copy(sites = c.sites.map { s ->
+                    if (s.id != siteId) s else s.copy(interventions = s.interventions.map { i -> if (i.id == interventionId) maj else i })
+                })
+            }) }
+            ecrireRapport(client, site, maj)
+        } finally {
+            // Les originaux sont déjà dans Obsidian ; les fichiers privés n'ont servi qu'à intégrer
+            // les images au PDF courant. Les rapports futurs reliront les originaux dans le coffre.
+            ajoutees.forEach { relatif ->
+                File(ctx.filesDir, "societe/$relatif").let { fichier -> runCatching { fichier.delete() } }
+            }
+        }
+        return "${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note mise à jour : $emplacement — $pdf"
     }
 
     // ------------------------------------------------------------------ export (Obsidian + PDF)
