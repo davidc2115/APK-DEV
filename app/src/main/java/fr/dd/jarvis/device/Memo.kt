@@ -258,39 +258,29 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      */
     @Synchronized
     fun load() {
-        // Une erreur SAF ne doit jamais être interprétée comme une note absente : sinon une
-        // copie locale plus ancienne pourrait remplacer la mémoire réelle du coffre.
-        val note = try { obsidian.lireAvecDateStrict(FOLDER, FILE) }
-        catch (e: Exception) {
+        val ancienneCopie = local.takeIf { it.isFile }?.readText()
+        val contenu = try {
+            obsidian.lireOuMigrer(FOLDER, FILE, ancienneCopie)
+        } catch (e: Exception) {
             loadError = e.message ?: e.javaClass.simpleName
-            return // loaded reste false : le prochain accès pourra réessayer après rétablissement du coffre.
+            return
         }
-        val copie = runCatching { local.takeIf { it.exists() }?.let { it.readText() to it.lastModified() } }.getOrNull()
-        val choix = choisirSource(note, copie)
-        if (choix != null) {
-            if (note == null && obsidian.coffreConfigure()) {
-                // Note réellement absente : migration unique de la copie de secours, uniquement
-                // après une lecture du coffre réussie et une écriture vérifiée.
-                obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), choix.first)
-            } else if (note != null && choix.second) {
-                obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), choix.first)
-            }
-            parse(choix.first)
-        }
+        if (contenu != null) parse(contenu)
         loadCandidates()
-        // Migration idempotente : les clés historiques conservent le sujet et la préférence,
-        // mais les hash seuls ne permettent pas de reconstruire le contexte des preuves.
-        // On ne vide l'ancien journal qu'après la persistance confirmée du nouveau registre.
         if (candidates.isNotEmpty()) {
             registreApprentissage.importerAnciennesHabitudes(candidates.mapValues { it.value.toSet() })
             candidates.clear()
             persistCandidates()
         }
+        empreinteCoffreMemoire = if (obsidian.coffreConfigure()) {
+            obsidian.readNoteStrict("$FOLDER/$FILE")?.let(obsidian::empreinteContenu)
+        } else null
+        empreinteEtatCharge = obsidian.empreinteContenu(render())
+        conflitMemoireExterne = false
         loaded = true
         loadError = null
-        if (choix != null && copie == null) runCatching { persisterCopieHermes(local, render()) }
+        if (contenu != null && ancienneCopie == null) runCatching { persisterCopieHermes(local, render()) }
     }
-
     @Synchronized
     private fun ensure() {
         if (!loaded) runCatching { load() }.onFailure { loadError = it.message ?: it.javaClass.simpleName }
