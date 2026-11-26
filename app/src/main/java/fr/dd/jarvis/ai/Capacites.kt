@@ -127,7 +127,7 @@ object Capacites {
             i("Créer des fichiers (PDF, Word, Excel, CSV…) et retrouver ceux déjà créés", "fais un tableau Excel de mes clients|quels fichiers as-tu créés ?", "creer_fichier,fichiers_generes"),
             i("Documents importés : lire, analyser, résumer", "résume le PDF que je t'ai envoyé", "documents_lister,document_lire,document_analyser"),
             i("Graphiques dans la conversation", "fais un graphique du chiffre d'affaires par mois", "graphique"),
-            i("Mémoire : consignes, faits (lieux, surnoms), préférences apprises", "souviens-toi que ma femme c'est Angeline|qu'as-tu retenu ?", "memoire_ajouter,memoire_lire,memoire_oublier,memoire_faits,memoire_apprendre,memoire_apprentissages"),
+            i("Mémoire : consignes, faits (lieux, surnoms), préférences apprises", "souviens-toi que ma femme c'est Angeline|qu'as-tu retenu ?", "memoire_ajouter,memoire_lire,memoire_oublier,memoire_faits,memoire_apprendre,memoire_apprentissages,apprentissage_durable"),
             i("Conversations : retrouver et reprendre une ancienne conversation", "reprends la conversation sur le devis Martin", "conversations"),
         )),
         Categorie("creation", "🎨", "Images, vidéos, messages vocaux et réseaux sociaux", r("images?|dessins?|coloriages?|photos?|videos?|montages?|tiktok|discord|reels?|messages? vocaux?|vocal|vocaux|pere noel|lutins?"), listOf(
