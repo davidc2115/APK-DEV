@@ -9,7 +9,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Outils « serveur » : Home Assistant (appareils, configuration YAML) et SSH (commandes, fichiers). Proposés seulement si la conversation les concerne. */
-class ServeurTools(private val app: JarvisApp, private val confirm: suspend (String, Boolean) -> Boolean) {
+class ServeurTools(
+    private val app: JarvisApp,
+    private val confirm: suspend (String, Boolean) -> Boolean,
+    private val confirmPonctuelle: suspend (String, Boolean) -> Boolean = confirm
+) {
 
     companion object {
         val KEYWORDS = Regex("message|notification|google home|google nest|chromecast|cast|enceinte|haut-parleur|affiche(r)?|ecran|home ?assistant|domotique|\\bha\\b|hacs|int[ée]gration|entit[ée]s?\\b|helper|\\baides?\\b|ssh|serveur|server|yaml|docker|lumi[èe]re|volet|thermostat|automatisation|automation|sc[èe]ne\\b|configuration\\.yaml|debian|raspberry|esphome|zigbee|mqtt|capteur|\\bprise\\b|interrupteur|box|livebox|freebox|bbox|vpn|wireguard|openvpn|redirection|\\bnat\\b|dmz|dhcp|disque|nas|\\bftp\\b|\\bsmb\\b|plex|bagbot|diagnostic (du )?(bot )?discord|diagnostic bagbot|pm2.{0,24}(discord|bot)|bot discord.{0,32}(serveur|debian|ssh|pm2)|discord.{0,32}(pm2|serveur debian|journaux|processus)|media server|transcodage|transcoder|biblioth[èe]que multim[ée]dia|r[ée]seau|wifi|wi-fi|imprim|scann|indisponible|injoignable|hors ligne|offline|unavailable|inaccessible|déconnecté|deconnecte|\\bip\\b|adresse ip|github|\\bgit\\b|canon|epson|brother|\\bhp\\b|appareils?\\b|script|\\bcode\\b|ping|port|volume|\\bson\\b|t[ée]l[ée](?!\\p{L})|t[ée]l[ée]vision|\\btv\\b|chauffage|climatisation|temp[ée]rature|consigne|po[êe]le|poil|degr[ée]s|granul[ée]s|pellet|chaudi[èe]re|radiateur|thermique|climate|media_player|lecteur multim[ée]dia|localis|o[uù] (est|se trouve)|position d|luminosit[ée]|store\\b|persienne|\\ballume\\b|allumer|[ée]teins?\\b|[ée]teindre", RegexOption.IGNORE_CASE)
@@ -454,8 +458,8 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
             "appareils_liste" -> ToolResult(Registre.liste(app), direct = true)
             "appareil_acces_distant" -> when (a.optString("action").lowercase()) {
                 "inventaire", "analyser", "scanner" -> ToolResult(AccesDistant.inventorier(app) + "\n\n" + Registre.liste(app), direct = true)
-                "fermer", "supprimer" -> ToolResult(AccesDistant.fermer(app, a.optString("appareil"), a.optString("port").toIntOrNull(), confirm))
-                else -> ToolResult(AccesDistant.configurer(app, a.optString("appareil"), a.optString("port").filter { it.isDigit() }.toIntOrNull(), confirm))
+                "fermer", "supprimer" -> ToolResult(AccesDistant.fermer(app, a.optString("appareil"), a.optString("port").toIntOrNull(), confirmPonctuelle))
+                else -> ToolResult(AccesDistant.configurer(app, a.optString("appareil"), a.optString("port").filter { it.isDigit() }.toIntOrNull(), confirmPonctuelle))
             }
             "appareil_nommer" -> {
                 val ip = a.optString("ip").trim()
@@ -481,7 +485,11 @@ class ServeurTools(private val app: JarvisApp, private val confirm: suspend (Str
                 if (der.isNotBlank()) sb.append("\n✅ Enregistrée : $der. Avant tout accès distant, compare cette IP à l'IPv4 WAN affichée dans l'interface de la box : une WAN en 100.64.0.0/10, 10.0.0.0/8, 172.16.0.0/12 ou 192.168.0.0/16, ou une IP WAN différente, signale du CGNAT ou un double NAT (la redirection IPv4 directe ne fonctionnera pas sans correction opérateur/routeur). Privilégie un VPN privé (WireGuard/Tailscale ou VPN intégré à la Freebox) pour SSH, imprimantes, interfaces d'administration et passerelles MCP. N'expose jamais directement sur Internet l'interface d'une box, une imprimante ou un MCP. Si une redirection ciblée est réellement nécessaire : bail DHCP fixe, seul port/protocole indispensable, pare-feu actif et authentification forte ; pour SSH, clés uniquement, mot de passe désactivé et protection anti-bruteforce. Le DDNS ne remplace ni un VPN ni une IP WAN joignable.")
                 ToolResult(sb.toString(), direct = true)
             }
-            "freebox" -> ToolResult(FreeboxOs.gerer(app, a.optString("action"), a, confirm))
+            "freebox" -> {
+                val action = a.optString("action").trim().lowercase()
+                val confirmation = if (action in setOf("ajouter_redirection", "activer_redirection", "dmz")) confirmPonctuelle else confirm
+                ToolResult(FreeboxOs.gerer(app, action, a, confirmation))
+            }
             "box_disque" -> {
                 val act = a.optString("action").lowercase()
                 // Freebox associée : tout passe par Freebox OS (droit « gestionnaire de fichiers »), sans partage SMB/FTP à configurer.
