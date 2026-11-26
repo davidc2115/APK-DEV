@@ -29,6 +29,12 @@ object Serveur {
         .callTimeout(45, TimeUnit.SECONDS)
         .build()
 
+    /** Client HTTP dont sockets ET résolution DNS restent liés au même Wi-Fi/VPN que la route vérifiée. */
+    private fun httpSurReseau(reseau: android.net.Network): OkHttpClient = http.newBuilder()
+        .socketFactory(reseau.socketFactory)
+        .dns { hote -> reseau.getAllByName(hote).toList() }
+        .build()
+
     // ------------------------------------------------------------------ SSH
 
     fun sshConfigure(app: JarvisApp) = app.store.sshHost.value.isNotBlank() && app.store.sshUser.value.isNotBlank() &&
@@ -737,8 +743,11 @@ object Serveur {
         val b = base(app)
         val u = runCatching { java.net.URI(b) }.getOrNull() ?: return b to http
         val hote = u.host.orEmpty()
-        if (!ipPrivee(hote) || telephoneSurReseau(app, hote, if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80)) return b to http
         val portLocal = if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80
+        if (!ipPrivee(hote)) return b to http
+        reseauPourCible(app, hote, portLocal)?.let { reseau ->
+            return b to httpSurReseau(reseau)
+        }
         haDistant(app, hote, portLocal)?.let { return it to http }
         val estServeur = hote == app.store.sshHost.value.trim() || hote == app.store.serveurIpLocale.value.trim()
         if (!estServeur || !sshConfigure(app)) return b to http
