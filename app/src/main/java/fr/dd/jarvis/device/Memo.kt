@@ -39,24 +39,17 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     private fun loadCandidates() {
         candidates.clear()
-        // Obsidian et la copie locale peuvent être momentanément désynchronisés :
-        // fusionner les preuves évite de perdre un apprentissage récent au redémarrage.
-        // Comme pour la mémoire principale, une erreur SAF ne signifie pas « journal absent ».
-        // Si le coffre est configuré mais inaccessible, load() doit échouer et rester réessayable :
-        // ne jamais valider un apprentissage incomplet à partir de la seule copie locale.
-        val note = obsidian.lireAvecDateStrict(FOLDER, "Apprentissage en cours.md")?.first
-        val copieLocale = habitsFile.takeIf { it.isFile }?.readText()
-        val sources = listOfNotNull(note, copieLocale).distinct()
-        sources.forEach { raw ->
-            runCatching {
-                val json = JSONObject(raw)
-                val keys = json.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    val arr = json.optJSONArray(key) ?: JSONArray()
-                    val set = candidates.getOrPut(key) { linkedSetOf() }
-                    for (i in 0 until arr.length()) arr.optString(i).takeIf { it.isNotBlank() }?.let(set::add)
-                }
+        // Le coffre configuré est la source unique ; la copie privée ne sert qu'à une migration initiale.
+        val source = obsidian.lireOuMigrer(FOLDER, "Apprentissage en cours.md", habitsFile.takeIf { it.isFile }?.readText())
+        if (source.isNullOrBlank()) return
+        runCatching {
+            val json = JSONObject(source)
+            val keys = json.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val arr = json.optJSONArray(key) ?: JSONArray()
+                val set = candidates.getOrPut(key) { linkedSetOf() }
+                for (i in 0 until arr.length()) arr.optString(i).takeIf { it.isNotBlank() }?.let(set::add)
             }
         }
     }
@@ -65,13 +58,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val json = JSONObject()
         candidates.forEach { (key, values) -> json.put(key, JSONArray(values.toList())) }
         val raw = json.toString(2)
-        // Une preuve n'est confirmée qu'après écriture durable locale ET miroir Obsidian.
-        // Si Obsidian est temporairement indisponible, l'exception remonte : le prochain essai
-        // de la même preuve retentera la synchronisation au lieu de l'annoncer comme déjà sauvée.
-        persisterCopieHermes(habitsFile, raw)
         obsidian.saveIn(FOLDER, "Apprentissage en cours", raw)
+        runCatching { persisterCopieHermes(habitsFile, raw) }
     }
-
     /** Enregistre une préférence candidate après une correction ou observation pertinente. */
     /** Enregistre une preuve dans l'unique registre durable partagé Jarvis/Hermès. */
     @Synchronized
