@@ -129,16 +129,24 @@ object GuidageVoiture {
         if (NavigationVoiture.contexte != null) {
             val t0 = System.currentTimeMillis()
             val accepte = NavigationVoiture.lancer(destination, point)
-            journal.noter("voiture", "Android Auto ${if (accepte) "a accepté" else "a refusé"} ${geo(destination, point)}")
-            if (accepte) {
-                when (attendre(t0, ctx = app)) {
-                    true -> { journal.noter("voiture", "guidage démarré par Android Auto vers $nom"); return "🧭 Guidage lancé dans Android Auto vers $nom." }
-                    // Pas de lecture des notifications : impossible de vérifier, on ne relance pas une 2e fois par le téléphone.
-                    null -> return "🧭 Guidage demandé à Android Auto vers $nom. Je ne peux pas vérifier qu'il a démarré : autorise l'accès aux notifications à JARVIS pour que je le confirme."
-                    false -> echecs += "Android Auto n'a pas démarré le guidage"
+            journal.noter("voiture", "Android Auto ${if (accepte) "a accepté la demande (pas une preuve de guidage)" else "a refusé"} ${geo(destination, point)}")
+            if (!accepte) {
+                // Le contexte Android Auto existe : ne pas lancer une seconde navigation sur le téléphone en arrière-plan.
+                journal.noter("voiture", "Android Auto a refusé la demande ; aucun lancement de secours sur le téléphone")
+                return "⚠️ Android Auto a refusé la demande d'itinéraire vers $nom. Le guidage n'a pas été confirmé et je n'ai pas lancé une deuxième application sur le téléphone."
+            }
+            when (attendre(t0, 12_000, app)) {
+                true -> { journal.noter("voiture", "guidage confirmé par Android Auto vers $nom"); return "🧭 Guidage confirmé dans Android Auto vers $nom." }
+                false -> {
+                    journal.noter("voiture", "Android Auto a accepté l'intent, mais aucun indice de démarrage du guidage n'est apparu")
+                    return "⚠️ La demande d'itinéraire vers $nom a été transmise à Android Auto, mais je ne détecte pas le démarrage du guidage. Je ne vais pas prétendre qu'il est lancé. Vérifie que Waze ou Google Maps est sélectionné et que l'itinéraire est bien affiché sur l'écran de la voiture."
                 }
-            } else echecs += "Android Auto a refusé la demande"
-        } else echecs += "JARVIS n'est pas ouvert dans Android Auto"
+                null -> {
+                    journal.noter("voiture", "Android Auto a accepté l'intent, mais Jarvis ne peut pas vérifier le guidage (accès notifications indisponible)")
+                    return "⚠️ La demande d'itinéraire vers $nom a été transmise à Android Auto, mais le démarrage n'est pas vérifiable car l'accès aux notifications n'est pas disponible."
+                }
+            }
+        } else echecs += "JARVIS n'a pas de contexte écran Android Auto ; tentative via le téléphone"
 
         // 2. L'appli de navigation du téléphone (Waze de préférence) : son guidage s'affiche dans la voiture.
         val dispo = app.phone.navApps()
