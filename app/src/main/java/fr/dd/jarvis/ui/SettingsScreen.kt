@@ -2155,7 +2155,7 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
                 }
             }
         }
-        if (store.sshFp.value.isNotBlank()) Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (store.sshHostKey.value.isNotBlank()) Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("🔒 Clé SSH principale approuvée", color = HudDim, fontSize = 11.sp, modifier = Modifier.weight(1f))
             Text("Effacer", color = HudText, fontSize = 12.sp, modifier = Modifier.clickable {
                 store.sshFp.set("")
