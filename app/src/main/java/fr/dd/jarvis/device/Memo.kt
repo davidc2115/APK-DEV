@@ -290,6 +290,37 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         if (!loaded) runCatching { load() }.onFailure { loadError = it.message ?: it.javaClass.simpleName }
         if (!loaded) throw IOException("Mémoire Obsidian indisponible : ${loadError ?: "lecture non confirmée"}. Aucune ancienne copie locale n'a été utilisée.")
     }
+    // Relecture périodique du coffre : les modifications faites directement dans Obsidian deviennent visibles
+    // sans redémarrer Jarvis. Le délai et le contrôle du thread évitent les accès SAF à chaque prompt.
+    @Synchronized
+    private fun rafraichirDepuisCoffreSiNecessaire() {
+        if (!obsidian.coffreConfigure() || android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return
+        val maintenant = android.os.SystemClock.elapsedRealtime()
+        if (maintenant - derniereRelectureCoffre < 30_000L) return
+        derniereRelectureCoffre = maintenant
+        if (!obsidian.coffreDisponible()) return
+        val distant = runCatching { obsidian.readNoteStrict("$FOLDER/$FILE") }.getOrElse { return }
+        val empreinteDistante = distant?.let(obsidian::empreinteContenu)
+        if (empreinteDistante != empreinteCoffreMemoire) {
+            if (obsidian.empreinteContenu(render()) != empreinteEtatCharge) {
+                conflitMemoireExterne = true
+                return
+            }
+            if (distant == null) {
+                conflitMemoireExterne = true
+                return
+            }
+            parse(distant)
+            empreinteCoffreMemoire = empreinteDistante
+            empreinteEtatCharge = obsidian.empreinteContenu(render())
+            conflitMemoireExterne = false
+        }
+        runCatching { loadCandidates() }
+        runCatching { obsidian.lireAvecDateStrict(FOLDER, "Mémoire Hermès source.md")?.first }
+            .getOrNull()?.let { if (it != hermesCache) hermesCache = it }
+        runCatching { obsidian.lireAvecDateStrict(FOLDER, "Capacités Hermès.json")?.first }
+            .getOrNull()?.let { raw -> runCatching { JSONObject(raw) }.getOrNull()?.let { capacitesCache = it } }
+    }
 
     /** Une panne d'écriture locale annule la mutation en mémoire ; une panne du miroir Obsidian
      * après écriture locale conserve au contraire l'état durable local pour permettre sa resynchronisation. */
@@ -298,7 +329,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     private fun <T> avecRollbackSiEcritureLocaleEchoue(action: () -> T): T {
         val avant = LinkedHashMap(items)
-        return try { action() } catch (e: EcritureLocaleMemoireException) {
+        return try { action() } catch (e: Exception) {
             items.clear()
             items.putAll(avant)
             throw e
@@ -479,6 +510,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     /** Section « mémoire d'Hermès » pour le cerveau de Jarvis : en entier si elle est courte, sinon le profil seul. */
     fun hermesPourPrompt(): String {
+        rafraichirDepuisCoffreSiNecessaire()
         val (notes, profil) = entreesHermes(hermes())
         if (notes.isEmpty() && profil.isEmpty()) return ""
         val tout = (notes + profil).joinToString("\n") { "- " + it.replace("\n", " ").take(500) }
@@ -561,6 +593,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     /** Mémoire de Jarvis telle qu'Hermès la recopie dans son SOUL.md (bloc géré, chargé à chaque session). */
     fun pourHermes(): String {
         ensure()
+        rafraichirDepuisCoffreSiNecessaire()
         val identite = "## Identité\nDans cette installation, tu es Hermès, le cerveau principal de JARVIS, l'assistant personnel de l'utilisateur sur son téléphone : " +
             "tu réponds à toutes ses demandes, avec les outils du téléphone (Jarvis) et une seule mémoire partagée.\n\n"
         val habitudesActives = registreApprentissage.habitudesActives()
@@ -585,6 +618,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     fun pourPrompt(): String = try {
         ensure()
+        rafraichirDepuisCoffreSiNecessaire()
         val memoireAvecHabitudesActives = LinkedHashMap(items)
         val actives = registreApprentissage.habitudesActives()
         if (actives.isNotEmpty()) {
