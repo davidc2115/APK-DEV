@@ -189,7 +189,7 @@ object GmailApi {
                             unread = m.optJSONArray("labelIds")?.toString()?.contains("UNREAD") == true,
                             account = account,
                             id = id,
-                            body = if (full) texteMail(m.optJSONObject("payload")).take(1500) else "",
+                            body = if (full) texteMail(m.optJSONObject("payload")).take(5000) else "",
                             fromAddr = Regex("<([^>]+)>").find(h("From"))?.groupValues?.get(1)?.lowercase() ?: h("From").trim().lowercase(),
                             labels = m.optJSONArray("labelIds")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
                         )
