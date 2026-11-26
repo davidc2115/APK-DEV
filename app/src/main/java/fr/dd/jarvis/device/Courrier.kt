@@ -209,6 +209,23 @@ object Courrier {
         return vraimentNouveaux
     }
 
+    /**
+     * Réévalue les anciens éléments déjà enregistrés avec les critères actuels.
+     * Cela retire les anciennes publicités qui avaient été classées à tort, sans effacer les éléments valides.
+     */
+    @Synchronized
+    fun revaliderHistorique(c: Context): Int {
+        val anciens = liste(c)
+        val valides = anciens.mapNotNull { ancien ->
+            analyser(ancien.emetteur, ancien.resume, ancien.source, ancien.ts)
+                .firstOrNull { it.type == ancien.type }
+                ?.copy(id = ancien.id, traite = ancien.traite, domaine = ancien.domaine, auto = ancien.auto)
+        }
+        val retires = anciens.size - valides.size
+        if (retires > 0 || valides.size != anciens.size) sauver(c, valides)
+        return retires
+    }
+
     @Synchronized
     fun marquer(c: Context, id: String, traite: Boolean = true): Boolean {
         val l = liste(c)
