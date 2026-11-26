@@ -21,7 +21,7 @@ class SocieteTools(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan", "societe_resultat", "societe_baremes",
             "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "intervention_modifier", "intervention_supprimer", "interventions_liste", "interventions_synthese",
-            "installation_supprimer", "facture_electronique", "societe_sauvegarde",
+            "installation_supprimer", "facture_electronique", "societe_sauvegarde", "rapport_brouillons_liste", "rapport_brouillon_creer", "rapport_brouillon_modifier", "rapport_brouillon_valider", "rapport_brouillon_supprimer",
             // Déclarés dans le schéma mais absents d'ici : le modèle les appelait, JARVIS répondait « outil inconnu ».
             "documents_supprimer", "bulletins"
         )
@@ -263,6 +263,32 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "site_gps" to prop("Coordonnées GPS exactes de l'installation telles que copiées dans Google Maps (« 47.541558, 4.459845 »), en degrés-minutes-secondes (47°32'29.6\"N 4°27'35.4\"E) ou lien Google Maps. Prioritaires sur l'adresse. « ma position » = position GPS actuelle du téléphone (quand l'utilisateur est sur place).")
         ), listOf("nom")),
         tool("client_fiche", "Affiche et réexporte la fiche Markdown d'un client DÉJÀ présent dans la base interne Société. Ne crée jamais un client et ne remplace jamais client_ecrire.", mapOf("nom" to prop("Nom du client.")), listOf("nom")),
+
+        tool("rapport_brouillons_liste", "Liste les rapports d'intervention non validés, sans les mélanger à l'historique final. Renvoie les IDs, clients, installations, dates et résumés.", mapOf()),
+        tool("rapport_brouillon_creer", "Crée un brouillon de rapport durable pour un client et une installation. Aucune entrée d'historique, note Obsidian ou PDF final n'est créée avant validation explicite.", mapOf(
+            "client" to prop("Nom exact ou partiel du client."),
+            "installation" to prop("Nom exact de l'installation si le client en possède plusieurs.")
+        ), listOf("client")),
+        tool("rapport_brouillon_modifier", "Met à jour et sauvegarde immédiatement un brouillon existant. Les champs omis restent inchangés. Ne valide jamais le rapport.", mapOf(
+            "brouillon_id" to prop("ID exact obtenu avec rapport_brouillons_liste ou rapport_brouillon_creer."),
+            "date" to prop("Date yyyy-MM-dd."),
+            "categorie" to prop("maintenance | panne | diagnostic | nettoyage | remplacement | contrôle | autre."),
+            "description" to prop("Résumé factuel dit par l'utilisateur."),
+            "diagnostic" to prop("Diagnostic constaté, uniquement si communiqué."),
+            "actions" to prop("Actions réalisées, une par ligne."),
+            "pieces" to prop("Pièces remplacées, références et quantités si connues."),
+            "mesures" to prop("Mesures relevées avec unités, sans inventer de valeurs."),
+            "onduleurs" to prop("Onduleurs concernés, marque/modèle/numéro de série cités."),
+            "statut" to prop("terminee | a_suivre | en_attente."),
+            "prochaine_maintenance" to prop("Date yyyy-MM-dd si elle a été demandée."),
+            "notes" to prop("Notes factuelles.")
+        ), listOf("brouillon_id")),
+        tool("rapport_brouillon_valider", "Valide un brouillon UNIQUEMENT lorsque l'utilisateur demande explicitement de finaliser le rapport. Le transforme en intervention d'historique, génère la note Obsidian et le PDF, puis retire le brouillon après vérification.", mapOf(
+            "brouillon_id" to prop("ID exact du brouillon.")
+        ), listOf("brouillon_id")),
+        tool("rapport_brouillon_supprimer", "Abandonne un brouillon non validé. Ne supprime jamais une intervention de l'historique.", mapOf(
+            "brouillon_id" to prop("ID exact du brouillon.")
+        ), listOf("brouillon_id")),
         tool("intervention_enregistrer", "Enregistre une intervention photovoltaïque réellement effectuée dans l'historique du site et dans Obsidian (note + rapport PDF). RÈGLE ABSOLUE : le rapport ne contient QUE ce que l'utilisateur a dit, avec ses mots (reformulés proprement au besoin). N'ajoute JAMAIS d'action, de mesure, de valeur (température, tension, courant…), de constat, d'état (« parfait état », « conforme »), de recommandation ni de date qu'il n'a pas donnés ; un champ non dicté reste vide. Pas de commentaire sur le rapport lui-même. Les éléments non dits sont retirés automatiquement et signalés.", mapOf(
             "client" to prop("Nom exact du client."), "installation" to prop("Nom exact de l'installation si plusieurs."),
             "date" to prop("Date de l'intervention au format yyyy-MM-dd (défaut : aujourd'hui)."),
@@ -397,6 +423,12 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "regles_set" -> reglesSet(a)
         "client_ecrire" -> clientEcrire(a)
         "client_fiche" -> clientFiche(a)
+
+        "rapport_brouillons_liste" -> rapportBrouillonsListe()
+        "rapport_brouillon_creer" -> rapportBrouillonCreer(a)
+        "rapport_brouillon_modifier" -> rapportBrouillonModifier(a)
+        "rapport_brouillon_valider" -> ok(svc.validerBrouillon(a.s("brouillon_id")))
+        "rapport_brouillon_supprimer" -> ok(if (svc.supprimerBrouillon(a.s("brouillon_id"))) "Brouillon supprimé." else "Brouillon introuvable ou déjà supprimé.")
         "intervention_enregistrer" -> interventionEnregistrer(a)
         "intervention_modifier" -> interventionModifier(a)
         "intervention_supprimer" -> interventionSupprimer(a)
@@ -914,6 +946,50 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val fresh = d.client(c.id) ?: c
         val (md, loc) = svc.exporterClient(fresh)
         return ok("✅ Fiche enregistrée : $loc\n\n---\n\n$md")
+    }
+
+
+    private fun rapportBrouillonsListe(): ToolResult {
+        val brouillons = svc.data.brouillonsRapport
+        if (brouillons.isEmpty()) return ok("Aucun brouillon de rapport en cours.")
+        return ok(brouillons.sortedByDescending { it.modifieLe }.joinToString("\\n\\n") { b ->
+            val client = svc.data.client(b.clientId)
+            val site = client?.sites?.firstOrNull { it.id == b.siteId }
+            "Brouillon #" + b.id + " — " + (client?.nom ?: "client supprimé") + " / " + (site?.nom ?: "installation supprimée") +
+                "\\nDate : " + b.date + " · " + b.categorie + "\\nRésumé : " + b.description.ifBlank { "(vide)" } +
+                "\\nDernière sauvegarde : " + b.modifieLe
+        })
+    }
+
+    private fun rapportBrouillonCreer(a: JSONObject): ToolResult {
+        val (client, erreur) = clientParNom(a.s("client"))
+        if (client == null) return err(erreur ?: "Client introuvable.")
+        val site = siteDe(client, a.s("installation"))
+            ?: return err("Installation introuvable ou ambiguë pour " + client.nom + ". Précise son nom.")
+        val brouillon = svc.creerBrouillon(client.id, site.id)
+            ?: return err("Impossible de créer le brouillon.")
+        return ok("Brouillon créé et sauvegardé : #" + brouillon.id + " — " + client.nom + " / " + site.nom + ". Il restera modifiable jusqu'à validation explicite.")
+    }
+
+    private fun rapportBrouillonModifier(a: JSONObject): ToolResult {
+        val id = a.s("brouillon_id")
+        val actuel = svc.data.brouillonsRapport.firstOrNull { it.id == id }
+            ?: return err("Brouillon #$id introuvable. Consulte rapport_brouillons_liste.")
+        val maj = actuel.copy(
+            date = if (a.hv("date")) a.s("date") else actuel.date,
+            categorie = if (a.hv("categorie")) a.s("categorie") else actuel.categorie,
+            description = if (a.hv("description")) a.s("description") else actuel.description,
+            diagnostic = if (a.hv("diagnostic")) a.s("diagnostic") else actuel.diagnostic,
+            actions = if (a.hv("actions")) a.s("actions") else actuel.actions,
+            pieces = if (a.hv("pieces")) a.s("pieces") else actuel.pieces,
+            mesures = if (a.hv("mesures")) a.s("mesures") else actuel.mesures,
+            onduleurs = if (a.hv("onduleurs")) a.s("onduleurs") else actuel.onduleurs,
+            statut = if (a.hv("statut")) a.s("statut") else actuel.statut,
+            prochaineMaintenance = if (a.hv("prochaine_maintenance")) a.s("prochaine_maintenance") else actuel.prochaineMaintenance,
+            notes = if (a.hv("notes")) a.s("notes") else actuel.notes
+        )
+        return if (svc.enregistrerBrouillon(maj)) ok("Brouillon #$id sauvegardé durablement. Il n'a pas été validé.")
+        else err("Échec de sauvegarde du brouillon #$id.")
     }
 
     private fun interventionEnregistrer(a: JSONObject): ToolResult {
