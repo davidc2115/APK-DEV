@@ -340,6 +340,53 @@ class RegistreApprentissage(
         persisterMutation(avant)
     }
 
+    /**
+     * Déclare le manifeste d'un skill/outil proposé : version, origine, dépendances, risque et plan de test.
+     * Ce manifeste est descriptif uniquement ; il ne télécharge, n'installe ni n'exécute rien.
+     */
+    @Synchronized
+    fun declarerManifest(
+        id: String,
+        version: String,
+        source: String,
+        dependances: List<String>,
+        risque: String,
+        planTest: String,
+        acteur: String = "jarvis"
+    ) {
+        synchroniserAvantLecture()
+        val item = entree(id) ?: throw IllegalArgumentException("Entrée inconnue : $id.")
+        if (item.optString("type") !in setOf("skill", "tool"))
+            throw IllegalArgumentException("Un manifeste ne concerne que les skills et outils.")
+        if (item.optString("state") in setOf(ETAT_REJECTED, ETAT_FAILED, ETAT_SUPERSEDED))
+            throw IllegalStateException("Impossible de documenter un skill refusé, échoué ou remplacé.")
+        val versionNet = version.trim().take(40)
+        if (!versionNet.matches(Regex("[0-9A-Za-z][0-9A-Za-z.+_-]{0,39}")))
+            throw IllegalArgumentException("Version invalide.")
+        val origine = source.trim().take(500)
+        if (origine.length < 3) throw IllegalArgumentException("Origine du skill obligatoire.")
+        val deps = dependances.map { it.trim().take(100) }.filter { it.isNotBlank() }.distinct()
+        if (deps.size > 20 || deps.any { it.length < 2 })
+            throw IllegalArgumentException("Indique au maximum 20 dépendances nommées.")
+        val niveauRisque = risque.trim().lowercase()
+        if (niveauRisque !in setOf("low", "medium", "high"))
+            throw IllegalArgumentException("Risque attendu : low, medium ou high.")
+        val plan = planTest.trim().take(1500)
+        if (plan.length < 10) throw IllegalArgumentException("Plan de test trop court.")
+        verifierConfidentialite(versionNet, origine, deps.joinToString(" "), plan)
+        val avant = avantMutation()
+        item.put("manifest", JSONObject()
+            .put("version", versionNet)
+            .put("source", origine)
+            .put("dependencies", JSONArray(deps))
+            .put("risk", niveauRisque)
+            .put("testPlan", plan)
+            .put("updatedAt", System.currentTimeMillis()))
+        item.put("updatedAt", System.currentTimeMillis())
+        journal(id, "manifest_declared", "Manifeste descriptif mis à jour (risque $niveauRisque)", acteur)
+        persisterMutation(avant)
+    }
+
     /** Toute activation exige une validation explicite ; les transitions impossibles sont refusées. */
     @Synchronized
     fun changerEtat(id: String, nouvelEtat: String, confirmationExplicite: Boolean, acteur: String = "jarvis") {
@@ -408,7 +455,16 @@ class RegistreApprentissage(
                 demanderPermissions(id, (0 until scopes.length()).mapNotNull { scopes.optString(it).takeIf(String::isNotBlank) }, acteur)
                 """{"ok":true,"granted":false}"""
             }
-            else -> throw IllegalArgumentException("Action attendue : list, create, evidence, counterexample ou state.")
+            "manifest" -> {
+                val deps = args.optJSONArray("dependances") ?: JSONArray()
+                declarerManifest(
+                    id, args.optString("version"), args.optString("source"),
+                    (0 until deps.length()).mapNotNull { deps.optString(it).takeIf(String::isNotBlank) },
+                    args.optString("risque"), args.optString("plan_test"), acteur
+                )
+                """{"ok":true,"installed":false,"executed":false}"""
+            }
+            else -> throw IllegalArgumentException("Action attendue : list, read, create, evidence, counterexample, manifest, permission_request ou state.")
         }
     }
 }
