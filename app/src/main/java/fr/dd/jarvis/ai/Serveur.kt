@@ -974,7 +974,7 @@ object Serveur {
         else -> false
     }
     internal fun compteRenduSansEntite(domaine: String, service: String): String =
-        "✅ Appel $domaine.$service accepté par Home Assistant (aucun état cible à relire : l’affichage ou la lecture sur l’appareil n’est pas confirmé)."
+        "✅ Appel $domaine.$service accepté par Home Assistant (aucun état cible à relire : l'affichage ou la lecture sur l'appareil n'est pas confirmé)."
 
     fun haService(app: JarvisApp, domaine: String, service: String, entite: String, donnees: JSONObject?): String {
         val corps = donnees ?: JSONObject()
