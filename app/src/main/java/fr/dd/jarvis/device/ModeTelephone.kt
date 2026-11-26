@@ -43,7 +43,9 @@ object ModeTelephone {
     private fun shellPossible(ctx: Context) = PhoneShell.ready(ctx) || AdbShell.hasKey(ctx)
 
     private fun erreurShell(r: String) = r.startsWith("Erreur") || r.startsWith("ADB non connecté") || r.startsWith("Aucun accès") ||
-        r.contains("Unknown command", true) || r.contains("Exception", true) || r.contains("not allowed", true) || r.contains("permission", true)
+        r.startsWith("Shizuku n'est pas") || r.startsWith("⏱️") || r.startsWith("Commande Shizuku interrompue") ||
+        r.startsWith("Commande ADB interrompue") || r.contains("Unknown command", true) ||
+        r.contains("Exception", true) || r.contains("not allowed", true) || r.contains("permission", true)
 
     private const val SANS_SHELL = "Pour changer le mode du téléphone sans passer par l'écran, Jarvis a besoin de l'ADB intégré ou de Shizuku " +
         "(Réglages › Téléphone › Contrôle du téléphone). Une fois l'un des deux actif, redemande-moi simplement."
@@ -59,7 +61,7 @@ object ModeTelephone {
         val perf = if (m == "performance") 1 else 0
         val avantPerf = sh(ctx, "settings get system $CLE_PERF")
         val avantEcoXiaomi = sh(ctx, "settings get system $CLE_ECO_XIAOMI")
-        if (avantPerf.startsWith("ADB non connecté") || avantPerf.startsWith("Aucun accès")) return@withContext "⛔ $avantPerf\n$SANS_SHELL"
+        if (erreurShell(avantPerf) || erreurShell(avantEcoXiaomi)) return@withContext "⛔ Lecture des réglages système impossible : ${listOf(avantPerf, avantEcoXiaomi).filter(::erreurShell).joinToString(" ; ")}\n$SANS_SHELL"
         val problemes = mutableListOf<String>()
         // Économiseur de batterie Android (repli : réglage global surveillé par le système).
         val r = sh(ctx, "cmd power set-mode $eco")
