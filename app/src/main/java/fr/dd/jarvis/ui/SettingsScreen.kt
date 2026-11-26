@@ -2150,7 +2150,7 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
                         empreinteEnAttente = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                             fr.dd.jarvis.ai.Serveur.empreinteServeurPrincipal(app)
                         }
-                    } catch (e: Exception) { msg = "❌ \${e.message}" }
+                    } catch (e: Exception) { msg = "❌ ${e.message}" }
                     busy = false
                 }
             }
@@ -2183,11 +2183,11 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
                 title = { Text("Vérifier la clé du serveur SSH") },
                 text = {
                     Column {
-                        Text("Empreinte \${cle.type} :")
+                        Text("Empreinte ${cle.type} :")
                         Text(cle.empreinte, color = HudText)
                         Spacer(Modifier.height(8.dp))
                         Text("Compare cette empreinte à celle affichée directement sur Debian avec :")
-                        Text(if (nomCle.isNotBlank()) "ssh-keygen -lf /etc/ssh/ssh_host_\${nomCle}_key.pub" else "Type de clé inconnu : vérifie son empreinte avec ssh-keygen -lf sur la clé publique d'hôte correspondante.", color = HudText)
+                        Text(if (nomCle.isNotBlank()) "ssh-keygen -E md5 -lf /etc/ssh/ssh_host_${nomCle}_key.pub" else "Type de clé inconnu : vérifie son empreinte avec ssh-keygen -lf sur la clé publique d'hôte correspondante.", color = HudText)
                         Spacer(Modifier.height(8.dp))
                         Text("Si les valeurs ne correspondent pas exactement, refuse. Aucune commande SSH ne sera exécutée avant cette approbation.")
                     }
@@ -2201,7 +2201,7 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
                                     fr.dd.jarvis.ai.Serveur.memoriserEmpreinteServeurPrincipal(app, cle)
                                 }
                                 "✅ Clé SSH principale approuvée. Les connexions suivantes la vérifieront avant authentification."
-                            } catch (e: Exception) { "❌ \${e.message}" }
+                            } catch (e: Exception) { "❌ ${e.message}" }
                             empreinteEnAttente = null
                             busy = false
                         }
