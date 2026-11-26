@@ -295,11 +295,28 @@ class AdbPairReceiver : android.content.BroadcastReceiver() {
     }
 }
 
-/** Shell du téléphone : Shizuku s'il est prêt, sinon ADB intégré. */
+/** Shell du téléphone : Shizuku en priorité, repli ADB uniquement sur une panne de transport Shizuku. */
 object PhoneShell {
     fun ready(ctx: Context): Boolean = ShizukuShell.ready() || AdbShell.connected()
 
-    fun exec(ctx: Context, command: String): String =
-        if (ShizukuShell.ready()) ShizukuShell.exec(command)
-        else kotlinx.coroutines.runBlocking(Dispatchers.IO) { AdbShell.exec(ctx, command) }
+    private fun panneTransportShizuku(resultat: String): Boolean =
+        resultat.startsWith("Erreur shell :") ||
+            resultat.startsWith("Shizuku n'est pas démarré") ||
+            resultat.startsWith("Shizuku n'est pas autorisé")
+
+    fun exec(ctx: Context, command: String): String {
+        if (!ShizukuShell.ready()) {
+            return kotlinx.coroutines.runBlocking(Dispatchers.IO) { AdbShell.exec(ctx, command) }
+        }
+        val resultatShizuku = ShizukuShell.exec(command)
+        // Ne jamais rejouer une commande qui a réellement été exécutée et a renvoyé un code non nul.
+        // Le repli n'est autorisé que si Shizuku n'a pas réussi à lancer le shell.
+        if (!panneTransportShizuku(resultatShizuku) || !AdbShell.hasKey(ctx)) return resultatShizuku
+        val resultatAdb = kotlinx.coroutines.runBlocking(Dispatchers.IO) { AdbShell.exec(ctx, command) }
+        return if (resultatAdb.startsWith("Erreur ADB") || resultatAdb.startsWith("ADB non connecté")) {
+            "$resultatShizuku\nRepli ADB impossible : $resultatAdb"
+        } else {
+            resultatAdb
+        }
+    }
 }
