@@ -101,4 +101,22 @@ class RegistreApprentissageTest {
             assertEquals(1, JSONObject(r2.snapshot()).getJSONArray("entries").length())
         } finally { dir.deleteRecursively() }
     }
+    @Test
+    fun lectureDuCoffreEnEchecNeRemplacePasLeRegistreParLeCacheLocal() {
+        val dir = Files.createTempDirectory("registre-lecture-indisponible").toFile()
+        try {
+            val local = File(dir, "index.json")
+            val ancien = """{"schemaVersion":1,"updatedAt":1,"entries":[],"history":[]}"""
+            local.writeText(ancien)
+            val r = RegistreApprentissage(
+                local,
+                { true },
+                { throw java.io.IOException("coffre temporairement inaccessible") },
+                { throw AssertionError("aucune écriture ne doit être tentée après un échec de lecture") }
+            )
+            assertThrows(java.io.IOException::class.java) { r.snapshot() }
+            assertEquals(ancien, local.readText())
+        } finally { dir.deleteRecursively() }
+    }
+
 }
