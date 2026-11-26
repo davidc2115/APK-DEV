@@ -231,6 +231,9 @@ object Courrier {
                     dateRdv = actuel.dateRdv ?: ancien.dateRdv, lieu = actuel.lieu.ifBlank { ancien.lieu },
                     statut = if (actuel.dateRdv == null && ancien.dateRdv != null) ancien.statut else actuel.statut)
                 PROMOTION_RE.containsMatchIn(normaliser(ancien.emetteur + " " + ancien.resume)) -> null
+                ancien.type == FACTURE && RELEVE_COMPTEUR_RE.containsMatchIn(normaliser(ancien.emetteur + " " + ancien.resume)) -> null
+                (ancien.type == FACTURE || ancien.type == DEVIS) && FINANCE_HORS_FACTURE_RE.containsMatchIn(normaliser(ancien.emetteur + " " + ancien.resume)) -> null
+                ancien.type == RDV && PUB_RDV_RE.containsMatchIn(normaliser(ancien.emetteur + " " + ancien.resume)) -> null
                 // Le résumé stocké est tronqué à 220 caractères : on conserve donc tout élément qu'on ne peut pas
                 // revalider avec certitude, plutôt que de supprimer un vrai rendez-vous dont le détail est plus loin.
                 else -> ancien
