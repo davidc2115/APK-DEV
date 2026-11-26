@@ -118,7 +118,7 @@ object Serveur {
             e is java.net.ConnectException || m.contains("connection refused") -> "Connexion refusée par $hote:$port — rien n'écoute sur ce port, ou un pare-feu bloque SSH."
             e is java.net.NoRouteToHostException -> "$hote est injoignable depuis ce réseau (hors ligne, mauvaise IP, ou réseau différent)."
             e is java.net.SocketTimeoutException || m.contains("timeout") -> "Pas de réponse de $hote:$port dans le délai imparti (pare-feu, port fermé, ou mauvaise adresse distante/redirection de port)."
-            m.contains("host key") -> "L'empreinte du serveur a changé (réinstallation ?) — efface « Empreinte mémorisée » dans Réglages › Maison › Serveur et réessaie."
+            m.contains("host key") -> "La clé SSH du serveur est inconnue ou a changé : authentification bloquée. Ne réinitialise pas la confiance avant d'avoir comparé l'empreinte avec celle affichée directement sur Debian dans Réglages › Maison › Serveur."
             m.contains("key") && m.contains("invalid") -> "Clé privée invalide ou mal collée (format PEM/OpenSSH attendu)."
             else -> e.message ?: e.javaClass.simpleName
         }
