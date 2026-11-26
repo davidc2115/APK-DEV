@@ -462,7 +462,7 @@ class ToolBox(
             "contexte" to prop("Contexte précis dans lequel la preuve a été observée."),
             "source" to prop("Source de la preuve : conversation, tâche, appareil, journal, etc."),
             "etat" to prop("observed | candidate | needs_review | approved | testing | active | paused | rejected | failed | superseded."),
-            "confirmation_explicite" to prop("true uniquement après accord explicite de l'utilisateur pour l'approbation, le test ou l'activation.")
+            // La confirmation est demandée par l'application, jamais fournie par le modèle.
         ), listOf("action")))
         put(tool("agents_centre", "Centre de contrôle des agents IA : consulte leur état, active/désactive un agent, lance un cycle immédiat ou règle la fréquence. Respecte l'interrupteur général des agents autonomes.", mapOf(
             "action" to prop("etat | historique | activer | desactiver | lancer | intervalle"),
