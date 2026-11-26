@@ -459,4 +459,25 @@ class RegistreApprentissageTest {
             assertFalse(entries.getJSONObject(1).has("manifest"))
         } finally { dir.deleteRecursively() }
     }
+    @Test
+    fun manifesteRefuseSecretsDansLaSourceEtLePlanDeTest() {
+        val dir = Files.createTempDirectory("registre-manifeste-confidentialite").toFile()
+        try {
+            val r = registre(dir)
+            val source = r.creer("skill", "Skill source privée", "Proposition de test", "revue")
+            assertThrows(SecurityException::class.java) {
+                r.declarerManifest(source, "1.0.0", "catalogue api_key=supersecret", emptyList(), "low",
+                    "Vérifier les résultats simulés sans aucune action externe.")
+            }
+
+            val plan = r.creer("tool", "Outil plan privé", "Proposition de test", "revue")
+            assertThrows(SecurityException::class.java) {
+                r.declarerManifest(plan, "1.0.0", "catalogue interne", emptyList(), "low",
+                    "Tester avec password=supersecret puis vérifier le résultat.")
+            }
+            val entries = JSONObject(r.snapshot()).getJSONArray("entries")
+            assertFalse(entries.getJSONObject(0).has("manifest"))
+            assertFalse(entries.getJSONObject(1).has("manifest"))
+        } finally { dir.deleteRecursively() }
+    }
 }
