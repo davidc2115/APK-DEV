@@ -266,49 +266,36 @@ object MusiqueBibliotheque {
     // ------------------------------------------------------------------ modes du lecteur (session média de l'appli)
 
     /**
-     * Envoie les modes au lecteur. Sur Android 10+, privilégie les commandes natives MediaController quand la session
-     * annonce explicitement leur prise en charge ; garde MediaControllerCompat en repli pour les sessions anciennes.
-     * Les deux paramètres sont nullable pour modifier un seul réglage sans écraser l'autre.
+     * Envoie les modes via MediaControllerCompat, seule API réellement exposée par les sessions Android tierces.
+     * Vérifie ensuite la valeur relue dans la session : l'absence d'exception ne suffit pas à annoncer un succès.
+     * Les paramètres nullable permettent de modifier un mode sans écraser l'autre.
      */
     private fun appliquerModes(ctx: Context, c: MediaController, aleatoire: Boolean?, repetition: String?): Boolean {
         if (aleatoire == null && repetition == null) return false
-        val actions = c.playbackState?.actions ?: 0L
-        var shuffleEnvoye = aleatoire == null
-        var repeatEnvoye = repetition == null
-        if (android.os.Build.VERSION.SDK_INT >= 29) {
-            if (aleatoire != null && (actions and PlaybackState.ACTION_SET_SHUFFLE_MODE) != 0L) {
-                shuffleEnvoye = runCatching {
-                    c.transportControls.setShuffleMode(if (aleatoire) PlaybackState.SHUFFLE_MODE_ALL else PlaybackState.SHUFFLE_MODE_NONE)
-                }.isSuccess
-            }
-            if (repetition != null && (actions and PlaybackState.ACTION_SET_REPEAT_MODE) != 0L) {
-                val mode = when (fr.dd.jarvis.societe.core.normaliser(repetition)) {
-                    "titre", "repeter titre", "repeter_titre", "one" -> PlaybackState.REPEAT_MODE_ONE
-                    "playlist", "repeter playlist", "repeter_playlist", "all" -> PlaybackState.REPEAT_MODE_ALL
-                    else -> PlaybackState.REPEAT_MODE_NONE
-                }
-                repeatEnvoye = runCatching { c.transportControls.setRepeatMode(mode) }.isSuccess
-            }
-        }
-        if (shuffleEnvoye && repeatEnvoye) return true
-
-        // Repli compat : certaines sessions (notamment les lecteurs basés sur MediaSessionCompat) n'exposent
-        // pas les actions natives, mais acceptent les commandes standard AndroidX.
         val token = runCatching { MediaSessionCompat.Token.fromToken(c.sessionToken) }.getOrNull() ?: return false
         val compat = runCatching { MediaControllerCompat(ctx, token) }.getOrNull() ?: return false
-        return runCatching {
-            if (!shuffleEnvoye && aleatoire != null) {
-                compat.transportControls.setShuffleMode(if (aleatoire) PlaybackStateCompat.SHUFFLE_MODE_ALL else PlaybackStateCompat.SHUFFLE_MODE_NONE)
-            }
-            if (!repeatEnvoye && repetition != null) {
-                val mode = when (fr.dd.jarvis.societe.core.normaliser(repetition)) {
-                    "titre", "repeter titre", "repeter_titre", "one" -> PlaybackStateCompat.REPEAT_MODE_ONE
-                    "playlist", "repeter playlist", "repeter_playlist", "all" -> PlaybackStateCompat.REPEAT_MODE_ALL
-                    else -> PlaybackStateCompat.REPEAT_MODE_NONE
-                }
-                compat.transportControls.setRepeatMode(mode)
-            }
+        val modeShuffle = if (aleatoire == true) PlaybackStateCompat.SHUFFLE_MODE_ALL else PlaybackStateCompat.SHUFFLE_MODE_NONE
+        val modeRepeat = when (fr.dd.jarvis.societe.core.normaliser(repetition.orEmpty())) {
+            "titre", "repeter titre", "repeter_titre", "one" -> PlaybackStateCompat.REPEAT_MODE_ONE
+            "playlist", "repeter playlist", "repeter_playlist", "all" -> PlaybackStateCompat.REPEAT_MODE_ALL
+            else -> PlaybackStateCompat.REPEAT_MODE_NONE
+        }
+        val envoye = runCatching {
+            if (aleatoire != null) compat.transportControls.setShuffleMode(modeShuffle)
+            if (repetition != null) compat.transportControls.setRepeatMode(modeRepeat)
         }.isSuccess
+        if (!envoye) return false
+
+        // Les sessions peuvent publier leur nouvel état quelques instants après la commande.
+        repeat(8) {
+            if (runCatching { compat.isSessionReady() }.getOrDefault(false)) {
+                val shuffleOk = aleatoire == null || runCatching { compat.shuffleMode == modeShuffle }.getOrDefault(false)
+                val repeatOk = repetition == null || runCatching { compat.repeatMode == modeRepeat }.getOrDefault(false)
+                if (shuffleOk && repeatOk) return true
+            }
+            android.os.SystemClock.sleep(100)
+        }
+        return false
     }
 
     private fun appliquerMode(ctx: Context, c: MediaController, aleatoire: Boolean, repetition: String): Boolean =
