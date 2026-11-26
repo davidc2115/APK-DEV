@@ -67,7 +67,7 @@ object ModeTelephone {
         val r = sh(ctx, "cmd power set-mode $eco")
         if (erreurShell(r)) {
             val r2 = sh(ctx, "settings put global low_power $eco")
-            if (erreurShell(r2)) problemes += "économiseur Android : ${r.take(120)}"
+            if (erreurShell(r2)) problemes += "économiseur Android : ${r.take(100)} ; repli : ${r2.take(120)}"
         }
         // Réglages Xiaomi / HyperOS : n'écrire une clé que si elle existe déjà ou si c'est un téléphone Xiaomi.
         val perfConnue = avantPerf == "0" || avantPerf == "1"
@@ -75,7 +75,10 @@ object ModeTelephone {
             val w = sh(ctx, "settings put system $CLE_PERF $perf")
             if (erreurShell(w)) problemes += "mode performance Xiaomi : ${w.take(120)}"
         }
-        if (avantEcoXiaomi == "0" || avantEcoXiaomi == "1") sh(ctx, "settings put system $CLE_ECO_XIAOMI $eco")
+        if (avantEcoXiaomi == "0" || avantEcoXiaomi == "1") {
+            val x = sh(ctx, "settings put system $CLE_ECO_XIAOMI $eco")
+            if (erreurShell(x)) problemes += "mode économie Xiaomi : ${x.take(120)}"
+        }
         delay(1200)
         // Vérification réelle après coup.
         val ecoApres = ecoActif(ctx)
