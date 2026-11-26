@@ -193,7 +193,7 @@ class JarvisNotificationListener : NotificationListenerService() {
             runCatching {
                 val st = (applicationContext as fr.dd.jarvis.JarvisApp).store
                 when {
-                    mail && st.agentsOn.value && st.agentMails.value -> fr.dd.jarvis.work.AgentsScheduler.declencher(applicationContext, "mails")
+                    mail && st.agentsOn.value && (st.agentMails.value || st.agentRanger.value) -> fr.dd.jarvis.work.AgentsScheduler.declencher(applicationContext, "mails")
                     message && st.agentsOn.value && st.agentNotifs.value -> fr.dd.jarvis.work.AgentsScheduler.declencher(applicationContext, "notifs")
                 }
             }
