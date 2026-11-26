@@ -131,8 +131,6 @@ private fun InterventionsTab(app: JarvisApp) {
     var photoInfo by remember { mutableStateOf("") }
     var photoTarget by remember { mutableStateOf<InterventionPhotoTarget?>(null) }
     var editTarget by remember { mutableStateOf<Triple<Client, Site, Intervention>?>(null) }
-    var draftTarget by remember { mutableStateOf<Triple<Client, Site, BrouillonIntervention>?>(null) }
-    var draftConfirm by remember { mutableStateOf<BrouillonIntervention?>(null) }
     var brouillonEdit by remember { mutableStateOf<BrouillonRapportIntervention?>(null) }
     var date by remember { mutableStateOf("") }; var categorie by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }; var diagnostic by remember { mutableStateOf("") }
@@ -147,23 +145,6 @@ private fun InterventionsTab(app: JarvisApp) {
             photoInfo = withContext(Dispatchers.IO) { app.societe.ajouterPhotosIntervention(target.clientId, target.siteId, target.interventionId, target.avant, uris) }
         }
         photoTarget = null
-    }
-
-    // Sauvegarde automatique après chaque modification du formulaire de reprise.
-    // Le délai court évite une écriture disque à chaque caractère, sans dépendre de la fermeture de l'écran.
-    LaunchedEffect(draftTarget, date, categorie, description, diagnostic, actions, pieces, mesures, statut, prochaine, notes) {
-        val target = draftTarget ?: return@LaunchedEffect
-        delay(650)
-        withContext(Dispatchers.IO) {
-            runCatching {
-                app.societe.enregistrerBrouillonIntervention(target.third.copy(
-                    date = date.trim(), categorie = categorie.trim(), description = description.trim(),
-                    diagnostic = diagnostic.trim(), actions = actions.trim(), pieces = pieces.trim(),
-                    mesures = mesures.trim(), statut = statut.trim().lowercase(),
-                    prochaineMaintenance = prochaine.trim(), notes = notes.trim()
-                ))
-            }
-        }
     }
 
     val sites = app.societe.data.clients.flatMap { client -> client.sites.map { site -> client to site } }.sortedBy { it.first.nom.lowercase() + " " + it.second.nom.lowercase() }
@@ -194,32 +175,6 @@ private fun InterventionsTab(app: JarvisApp) {
             if (photoInfo.isNotBlank()) Text(photoInfo, color = LocalAccent.current, fontSize = 12.sp)
         } }
 
-        val brouillons = app.societe.data.brouillonsInterventions
-        if (brouillons.isNotEmpty()) item {
-            HudPanel(Modifier.fillMaxWidth(), title = "📝 BROUILLONS À REPRENDRE · ${brouillons.size}") {
-                Text("Ces rapports sont enregistrés sur le téléphone et restent séparés de l'historique tant que tu ne les valides pas.", color = HudDim, fontSize = 12.sp)
-                brouillons.forEach { b ->
-                    val clientB = app.societe.data.client(b.clientId)
-                    val siteB = clientB?.sites?.firstOrNull { it.id == b.siteId }
-                    HudPanel(Modifier.fillMaxWidth(), title = "${clientB?.nom ?: "Client inconnu"} · ${siteB?.nom ?: "Installation inconnue"}") {
-                        Text("${dateFr(b.date)} · ${b.categorie}", color = HudDim, fontSize = 10.sp)
-                        Text(b.description, color = HudText, fontSize = 13.sp)
-                        Text("Dernière sauvegarde : " + java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRANCE).format(java.util.Date(b.modifieLe)), color = HudDim, fontSize = 10.sp)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Action("↻ Reprendre") {
-                                if (clientB != null && siteB != null) {
-                                    draftTarget = Triple(clientB, siteB, b)
-                                    date = b.date; categorie = b.categorie; description = b.description
-                                    diagnostic = b.diagnostic; actions = b.actions; pieces = b.pieces
-                                    mesures = b.mesures; statut = b.statut; prochaine = b.prochaineMaintenance; notes = b.notes
-                                }
-                            }
-                            Action("✓ Valider") { draftConfirm = b }
-                        }
-                    }
-                }
-            }
-        }
         if (sites.isEmpty()) item { Text("Aucune installation enregistrée. Ajoute d'abord un client et son installation.", color = HudDim, fontSize = 13.sp) }
         items(sites, key = { it.first.id + "_" + it.second.id }) { pair ->
             val client = pair.first; val site = pair.second
@@ -311,57 +266,6 @@ private fun InterventionsTab(app: JarvisApp) {
             HudTextField(draft.notes, { v -> maj { copy(notes = v) } }, label = "Notes", singleLine = false, maxLines = 3)
             Text("Brouillon #" + draft.id + " · dernière sauvegarde : " + draft.modifieLe.take(16).replace('T', ' '), color = HudDim, fontSize = 10.sp)
         }
-    }
-
-    draftTarget?.let { target ->
-        Dialogue("Reprendre le brouillon · " + target.first.nom, { draftTarget = null }, actions = {
-            TextButton(onClick = {
-                val updated = target.third.copy(
-                    date = date.trim(), categorie = categorie.trim(), description = description.trim(),
-                    diagnostic = diagnostic.trim(), actions = actions.trim(), pieces = pieces.trim(),
-                    mesures = mesures.trim(), statut = statut.trim().lowercase(),
-                    prochaineMaintenance = prochaine.trim(), notes = notes.trim()
-                )
-                scope.launch {
-                    photoInfo = withContext(Dispatchers.IO) {
-                        runCatching { app.societe.enregistrerBrouillonIntervention(updated); "💾 Brouillon sauvegardé sur le téléphone." }
-                            .getOrElse { "❌ Échec de sauvegarde : ${it.message}" }
-                    }
-                }
-                draftTarget = null
-            }) { Text("Enregistrer le brouillon", color = LocalAccent.current) }
-        }) {
-            Text(target.second.nom + " · ID " + target.third.id, color = HudDim, fontSize = 10.sp)
-            HudTextField(date, { date = it }, label = "Date (yyyy-MM-dd)")
-            HudTextField(categorie, { categorie = it }, label = "Catégorie")
-            HudTextField(statut, { statut = it }, label = "Statut")
-            HudTextField(description, { description = it }, label = "Résumé", singleLine = false, maxLines = 4)
-            HudTextField(diagnostic, { diagnostic = it }, label = "Diagnostic / constat", singleLine = false, maxLines = 4)
-            HudTextField(actions, { actions = it }, label = "Travaux réalisés", singleLine = false, maxLines = 4)
-            HudTextField(pieces, { pieces = it }, label = "Pièces / références", singleLine = false, maxLines = 3)
-            HudTextField(mesures, { mesures = it }, label = "Mesures et unités", singleLine = false, maxLines = 3)
-            HudTextField(prochaine, { prochaine = it }, label = "Prochaine maintenance (yyyy-MM-dd)")
-            HudTextField(notes, { notes = it }, label = "Notes complémentaires", singleLine = false, maxLines = 3)
-        }
-    }
-    draftConfirm?.let { b ->
-        AlertDialog(
-            onDismissRequest = { draftConfirm = null },
-            title = { Text("Valider définitivement ce rapport ?") },
-            text = { Text("Le rapport sera ajouté à l'historique de l'installation et sa note Obsidian ainsi que son PDF seront générés. Cette action termine le brouillon.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    draftConfirm = null
-                    scope.launch {
-                        photoInfo = withContext(Dispatchers.IO) {
-                            runCatching { app.societe.validerBrouillonIntervention(b.id); "✅ Rapport validé et ajouté à l'historique." }
-                                .getOrElse { "❌ Validation impossible : ${it.message}" }
-                        }
-                    }
-                }) { Text("Valider le rapport", color = LocalAccent.current) }
-            },
-            dismissButton = { TextButton(onClick = { draftConfirm = null }) { Text("Continuer plus tard") } }
-        )
     }
 
     editTarget?.let { target ->
