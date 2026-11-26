@@ -173,7 +173,7 @@ class MusicTools(private val app: JarvisApp) {
                 }
             }, direct = true)
             "musique_action" -> ToolResult(if (fr.dd.jarvis.societe.core.normaliser(a.optString("action")).replace(' ', '_') in setOf("normal", "aleatoire", "aleatoire_off", "repeter_titre", "repeter_playlist", "repeter_aucune", "shuffle", "shuffle_off", "repeat_one", "repeat_all", "repeat_off")) {
-                fr.dd.jarvis.device.MusiqueBibliotheque.configurerMode(app, a.optString("action"))
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.device.MusiqueBibliotheque.configurerMode(app, a.optString("action")) }
             } else if (fr.dd.jarvis.societe.core.normaliser(a.optString("action")).contains("radio")) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val e = fr.dd.jarvis.device.MusiqueBibliotheque.enCours(app)
                 val p = paquet()
