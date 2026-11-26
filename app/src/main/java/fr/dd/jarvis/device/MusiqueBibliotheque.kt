@@ -282,8 +282,8 @@ object MusiqueBibliotheque {
         }
         // Ne pas envoyer les commandes avant que le contrôleur distant ait terminé sa négociation.
         var pret = false
-        repeat(10) {
-            if (runCatching { compat.isSessionReady() }.getOrDefault(false)) { pret = true; return@repeat }
+        for (tentative in 0 until 10) {
+            if (runCatching { compat.isSessionReady() }.getOrDefault(false)) { pret = true; break }
             android.os.SystemClock.sleep(100)
         }
         if (!pret) return false
