@@ -53,6 +53,19 @@ class RegistreApprentissage(
             ETAT_SUPERSEDED to emptySet()
         )
 
+        // Le registre est partagé avec Hermès : appliquer ici aussi le filtre de confidentialité,
+        // sans dépendre du chemin historique Memo.apprendre().
+        private val DONNEES_SENSIBLES = Regex(
+            "\\b(mot de passe|password|passphrase|api[ _-]?key|cl[eé][ _-]?api|access[ _-]?token|refresh[ _-]?token|bearer|secret|carte bancaire|num[eé]ro de carte|cvv|cryptogramme|iban|rib|num[eé]ro de s[eé]curit[eé] sociale|s[eé]curit[eé] sociale|maladie|diagnostic m[eé]dical|m[eé]dicament|traitement m[eé]dical|orientation sexuelle|vie sexuelle|religion|appartenance politique|syndicat)\\b",
+            RegexOption.IGNORE_CASE
+        )
+
+        private fun verifierConfidentialite(vararg champs: String) {
+            if (champs.any { DONNEES_SENSIBLES.containsMatchIn(it) }) {
+                throw SecurityException("Apprentissage refusé : le contenu semble contenir une information sensible ou un secret.")
+            }
+        }
+
         private fun empreinte(texte: String): String = MessageDigest.getInstance("SHA-256")
             .digest(texte.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it.toInt() and 0xff) }
@@ -182,6 +195,7 @@ class RegistreApprentissage(
         if (nom.length < 3) throw IllegalArgumentException("Titre trop court.")
         val details = description.trim().take(2000)
         val source = provenance.trim().take(500)
+        verifierConfidentialite(nom, details, source)
         val entries = donnees.getJSONArray("entries")
         // Une même proposition ouverte ne doit pas se multiplier si Jarvis et Hermès la détectent ensemble.
         for (i in 0 until entries.length()) {
@@ -222,6 +236,7 @@ class RegistreApprentissage(
         if (texte.length < 8) throw IllegalArgumentException("Preuve trop courte.")
         val contexteNet = contexte.trim().take(500)
         val origine = source.trim().take(200)
+        verifierConfidentialite(texte, contexteNet, origine)
         // La preuve est identique seulement si son contenu, son contexte et sa source le sont.
         val hash = empreinte(listOf(texte, contexteNet, origine)
             .joinToString("|") { it.lowercase().replace(Regex("\\s+"), " ").trim() })
@@ -240,12 +255,69 @@ class RegistreApprentissage(
         return true
     }
 
+    /**
+     * Importe les habitudes candidates de l'ancien Memo. Les hash historiques sont opaques :
+     * ils sont conservés tels quels, sans inventer le texte ni le contexte de leurs preuves.
+     * L'identifiant déterministe rend une reprise après interruption strictement idempotente.
+     */
+    @Synchronized
+    fun importerAnciennesHabitudes(candidates: Map<String, Set<String>>, acteur: String = "migration_memo"): Int {
+        synchroniserAvantLecture()
+        val avant = avantMutation()
+        var imported = 0
+        val entries = donnees.getJSONArray("entries")
+        for ((legacyKey, rawHashes) in candidates.toSortedMap()) {
+            val separator = legacyKey.indexOf('|')
+            if (separator <= 0 || separator == legacyKey.lastIndex) continue
+            val category = legacyKey.substring(0, separator).trim().take(40)
+            val title = legacyKey.substring(separator + 1).trim().replace(Regex("\\s+"), " ").take(240)
+            if (title.length < 3) continue
+            val hashes = rawHashes.map { it.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+            if (hashes.isEmpty()) continue
+            verifierConfidentialite(category, title)
+            val stableKey = "$category|${title.lowercase()}"
+            val id = "legacy-habit-" + empreinte(stableKey).take(32)
+            if ((0 until entries.length()).any { entries.optJSONObject(it)?.optString("id") == id }) continue
+            val now = System.currentTimeMillis()
+            val evidence = JSONArray()
+            hashes.forEach { legacyHash ->
+                evidence.put(JSONObject()
+                    .put("hash", "legacy:$legacyHash")
+                    .put("legacyHash", legacyHash)
+                    .put("content", "Empreinte héritée : $legacyHash")
+                    .put("context", "Contexte non conservé par l'ancien format")
+                    .put("source", "Memo.habits-learning.json (format historique)")
+                    .put("legacyOpaque", true)
+                    .put("at", now))
+            }
+            entries.put(JSONObject()
+                .put("id", id)
+                .put("type", "habit")
+                .put("title", title)
+                .put("description", "Habitude candidate importée depuis l'ancien système (catégorie : $category). Les preuves sont des empreintes opaques.")
+                .put("state", ETAT_CANDIDATE)
+                .put("provenance", "Migration du journal historique Memo")
+                .put("createdAt", now)
+                .put("updatedAt", now)
+                .put("evidence", evidence)
+                .put("counterexamples", JSONArray())
+                .put("permissions", JSONArray())
+                .put("version", 1)
+                .put("legacyOpaque", true))
+            journal(id, "legacy_imported", "${hashes.size} empreinte(s) historique(s) importée(s), contexte non conservé", acteur)
+            imported++
+        }
+        if (imported > 0) persisterMutation(avant)
+        return imported
+    }
+
     @Synchronized
     fun ajouterContreExemple(id: String, contenu: String, contexte: String, acteur: String = "jarvis") {
         synchroniserAvantLecture()
         val item = entree(id) ?: throw IllegalArgumentException("Entrée inconnue : $id.")
         val texte = contenu.trim().take(1000)
         if (texte.length < 8) throw IllegalArgumentException("Contre-exemple trop court.")
+        verifierConfidentialite(texte, contexte)
         val exemples = item.optJSONArray("counterexamples") ?: JSONArray().also { item.put("counterexamples", it) }
         val hash = empreinte(texte.lowercase().replace(Regex("\\s+"), " "))
         if ((0 until exemples.length()).any { exemples.optJSONObject(it)?.optString("hash") == hash }) return
