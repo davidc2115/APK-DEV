@@ -1,0 +1,35 @@
+package fr.dd.jarvis.ai
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class HomeAssistantDashboardTest {
+    @Test fun ignoreLesEvenementsSansIdentifiant() {
+        assertFalse(HomeAssistantDashboard.correspondCommande("""{"type":"event","event":{"data":{}}}""", 7))
+    }
+
+    @Test fun ignoreLaReponseDuneAutreCommande() {
+        assertFalse(HomeAssistantDashboard.correspondCommande("""{"id":6,"type":"result","success":true}""", 7))
+    }
+
+    @Test fun reconnaitUniquementLidentifiantAttendu() {
+        assertTrue(HomeAssistantDashboard.correspondCommande("""{"id":7,"type":"result","success":true}""", 7))
+    }
+
+    @Test fun ignoreUnMessageJsonInvalideSansFaireEchouerLaCorrelation() {
+        assertFalse(HomeAssistantDashboard.correspondCommande("message incomplet", 7))
+    }
+
+    @Test fun lesEvenementsNeSontPasAjoutesALaFileDeReponses() {
+        assertFalse(HomeAssistantDashboard.estMessageUtile("""{"type":"event","event":{"data":{}}}"""))
+        // L'API HA donne aussi un id aux événements issus d'un abonnement.
+        assertFalse(HomeAssistantDashboard.estMessageUtile("""{"id":3,"type":"event","event":{"data":{}}}"""))
+    }
+
+    @Test fun lesReponsesEtMessagesAuthSontConserves() {
+        assertTrue(HomeAssistantDashboard.estMessageUtile("""{"id":7,"type":"result","success":true}"""))
+        assertTrue(HomeAssistantDashboard.estMessageUtile("""{"type":"auth_ok"}"""))
+        assertTrue(HomeAssistantDashboard.estMessageUtile("""{"_failure":"Connexion fermée"}"""))
+    }
+}
