@@ -265,38 +265,84 @@ object MusiqueBibliotheque {
 
     // ------------------------------------------------------------------ modes du lecteur (session média de l'appli)
 
-    private fun appliquerMode(ctx: Context, c: MediaController, aleatoire: Boolean, repetition: String): Boolean {
+    /**
+     * Envoie les modes au lecteur. Sur Android 10+, privilégie les commandes natives MediaController quand la session
+     * annonce explicitement leur prise en charge ; garde MediaControllerCompat en repli pour les sessions anciennes.
+     * Les deux paramètres sont nullable pour modifier un seul réglage sans écraser l'autre.
+     */
+    private fun appliquerModes(ctx: Context, c: MediaController, aleatoire: Boolean?, repetition: String?): Boolean {
+        if (aleatoire == null && repetition == null) return false
+        val actions = c.playbackState?.actions ?: 0L
+        var shuffleEnvoye = aleatoire == null
+        var repeatEnvoye = repetition == null
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            if (aleatoire != null && (actions and PlaybackState.ACTION_SET_SHUFFLE_MODE) != 0L) {
+                shuffleEnvoye = runCatching {
+                    c.transportControls.setShuffleMode(if (aleatoire) PlaybackState.SHUFFLE_MODE_ALL else PlaybackState.SHUFFLE_MODE_NONE)
+                }.isSuccess
+            }
+            if (repetition != null && (actions and PlaybackState.ACTION_SET_REPEAT_MODE) != 0L) {
+                val mode = when (fr.dd.jarvis.societe.core.normaliser(repetition)) {
+                    "titre", "repeter titre", "repeter_titre", "one" -> PlaybackState.REPEAT_MODE_ONE
+                    "playlist", "repeter playlist", "repeter_playlist", "all" -> PlaybackState.REPEAT_MODE_ALL
+                    else -> PlaybackState.REPEAT_MODE_NONE
+                }
+                repeatEnvoye = runCatching { c.transportControls.setRepeatMode(mode) }.isSuccess
+            }
+        }
+        if (shuffleEnvoye && repeatEnvoye) return true
+
+        // Repli compat : certaines sessions (notamment les lecteurs basés sur MediaSessionCompat) n'exposent
+        // pas les actions natives, mais acceptent les commandes standard AndroidX.
         val token = runCatching { MediaSessionCompat.Token.fromToken(c.sessionToken) }.getOrNull() ?: return false
         val compat = runCatching { MediaControllerCompat(ctx, token) }.getOrNull() ?: return false
-        val modeRepete = when (fr.dd.jarvis.societe.core.normaliser(repetition)) {
-            "titre", "repeter titre", "repeter_titre", "one" -> PlaybackStateCompat.REPEAT_MODE_ONE
-            "playlist", "repeter playlist", "repeter_playlist", "all" -> PlaybackStateCompat.REPEAT_MODE_ALL
-            else -> PlaybackStateCompat.REPEAT_MODE_NONE
-        }
         return runCatching {
-            compat.transportControls.setShuffleMode(if (aleatoire) PlaybackStateCompat.SHUFFLE_MODE_ALL else PlaybackStateCompat.SHUFFLE_MODE_NONE)
-            compat.transportControls.setRepeatMode(modeRepete)
+            if (!shuffleEnvoye && aleatoire != null) {
+                compat.transportControls.setShuffleMode(if (aleatoire) PlaybackStateCompat.SHUFFLE_MODE_ALL else PlaybackStateCompat.SHUFFLE_MODE_NONE)
+            }
+            if (!repeatEnvoye && repetition != null) {
+                val mode = when (fr.dd.jarvis.societe.core.normaliser(repetition)) {
+                    "titre", "repeter titre", "repeter_titre", "one" -> PlaybackStateCompat.REPEAT_MODE_ONE
+                    "playlist", "repeter playlist", "repeter_playlist", "all" -> PlaybackStateCompat.REPEAT_MODE_ALL
+                    else -> PlaybackStateCompat.REPEAT_MODE_NONE
+                }
+                compat.transportControls.setRepeatMode(mode)
+            }
         }.isSuccess
     }
 
-    /** Configure explicitement les modes du lecteur actif : normal, aléatoire, répétition d'un titre ou de la liste. */
+    private fun appliquerMode(ctx: Context, c: MediaController, aleatoire: Boolean, repetition: String): Boolean =
+        appliquerModes(ctx, c, aleatoire, repetition)
+
+    /** Modifie indépendamment lecture aléatoire et répétition ; « normal » désactive les deux. */
     fun configurerMode(ctx: Context, mode: String, paquet: String? = null): String {
         val c = controleur(ctx, paquet) ?: return "Aucune session musicale active : mode non modifié."
         val m = fr.dd.jarvis.societe.core.normaliser(mode).replace(' ', '_')
-        val aleatoire = m in setOf("aleatoire", "shuffle")
-        val repetition = when (m) {
+        val aleatoire: Boolean? = when (m) {
+            "aleatoire", "shuffle" -> true
+            "aleatoire_off", "shuffle_off", "sans_aleatoire", "ordre_sequentiel" -> false
+            "normal" -> false
+            else -> null
+        }
+        val repetition: String? = when (m) {
             "repeter_titre", "repeat_one", "titre" -> "titre"
             "repeter_playlist", "repeat_all", "playlist" -> "playlist"
-            else -> "aucune"
+            "repeter_aucune", "repeat_off", "sans_repetition", "aucune_repetition" -> "aucune"
+            "normal" -> "aucune"
+            else -> null
         }
-        if (!appliquerMode(ctx, c, aleatoire, repetition)) {
-            return "Le lecteur n'a pas confirmé la configuration des modes (API Android indisponible ou commande refusée)."
+        if (aleatoire == null && repetition == null) return "Mode musical inconnu : $mode."
+        if (!appliquerModes(ctx, c, aleatoire, repetition)) {
+            val disponibles = c.playbackState?.customActions.orEmpty().joinToString { it.name.toString() }
+            return "Le lecteur n'a pas accepté la commande de mode. Actions exposées : ${disponibles.ifBlank { "aucune" }}."
         }
         return when (m) {
-            "aleatoire", "shuffle" -> "🔀 Commande de lecture aléatoire envoyée au lecteur."
-            "repeter_titre", "repeat_one", "titre" -> "🔂 Commande de répétition du titre envoyée au lecteur."
-            "repeter_playlist", "repeat_all", "playlist" -> "🔁 Commande de répétition de toute la playlist envoyée au lecteur."
-            else -> "▶️ Commande de lecture normale envoyée au lecteur : ordre conservé, aléatoire et répétition désactivés."
+            "aleatoire", "shuffle" -> "🔀 Lecture aléatoire activée (la répétition actuelle est conservée)."
+            "aleatoire_off", "shuffle_off", "sans_aleatoire", "ordre_sequentiel" -> "🔀 Lecture aléatoire désactivée (la répétition actuelle est conservée)."
+            "repeter_titre", "repeat_one", "titre" -> "🔂 Répétition du morceau activée (l'aléatoire actuel est conservé)."
+            "repeter_playlist", "repeat_all", "playlist" -> "🔁 Répétition de toute la playlist activée (l'aléatoire actuel est conservé)."
+            "repeter_aucune", "repeat_off", "sans_repetition", "aucune_repetition" -> "↪️ Répétition désactivée (l'aléatoire actuel est conservé)."
+            else -> "▶️ Mode normal activé : ordre d'origine, aléatoire et répétition désactivés."
         }
     }
 
