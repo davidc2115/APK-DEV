@@ -71,6 +71,11 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
     var onglet by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(vue.substringBefore('/').takeIf { id -> ONGLETS_REGLAGES.any { it.id == id } } ?: "general") }
     var sous by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(vue.substringAfter('/', "")) }
     var recherche by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    val listeReglages = androidx.compose.foundation.lazy.rememberLazyListState()
+    androidx.compose.runtime.LaunchedEffect(onglet, sous, recherche) {
+        // Chaque rubrique s'ouvre toujours au début : ne jamais conserver un ancien défilement.
+        listeReglages.scrollToItem(0)
+    }
     val ong = ONGLETS_REGLAGES.firstOrNull { it.id == onglet } ?: ONGLETS_REGLAGES.first()
     val sousCourant = ong.sous.firstOrNull { it.first == sous }?.first ?: ong.sous.firstOrNull()?.first.orEmpty()
 
@@ -1826,8 +1831,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         } else {
             val visibles = if (r != null) volets.filter { it.correspond(r) } else volets.filter { it.onglet == onglet && it.sous == sousCourant }
             LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 32.dp),
+                state = listeReglages,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 40.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 if (r != null && r.isNotBlank() && visibles.isEmpty()) item {
