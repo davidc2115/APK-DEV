@@ -68,7 +68,9 @@ object Tele {
     private fun adb(app: JarvisApp, args: String, delai: Int = 40): Pair<Int, String> {
         if (!Serveur.sshConfigure(app)) throw IllegalStateException("Le pilotage direct de la télé passe par le serveur de la maison : configure l'accès SSH (Réglages › Maison › Serveur).")
         val cible = q(ip(app).let { if (it.contains(':')) it else "$it:5555" })
-        val prep = "command -v adb >/dev/null 2>&1 || { sudo apt-get update -qq >/dev/null 2>&1; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq adb >/dev/null 2>&1; }; " +
+        // Ne jamais installer de paquet ni lancer apt/sudo implicitement lors d'une commande TV.
+        // L'administrateur installe adb explicitement sur Debian ; Jarvis ne fait que le vérifier.
+        val prep = "command -v adb >/dev/null 2>&1 || { echo 'JARVIS_ADB_ABSENT'; exit 127; }; " +
             "adb connect $cible >/dev/null 2>&1; "
         return Serveur.exec(app, prep + "adb -s $cible $args 2>&1", delai)
     }
@@ -80,7 +82,7 @@ object Tele {
             t.contains("unauthorized", true) -> throw IllegalStateException("La télé n'a pas encore autorisé le serveur : accepte « Autoriser le débogage ? » sur l'écran de la télé (coche « Toujours autoriser »), puis réessaie.")
             t.contains("failed to connect", true) || t.contains("cannot connect", true) || t.contains("device offline", true) || t.contains("not found", true) && t.contains("device", true) ->
                 throw IllegalStateException("Connexion à la télé (${ip(app)}) impossible : vérifie qu'elle est allumée et que le débogage réseau est activé (Options pour les développeurs).")
-            r.first == 127 -> throw IllegalStateException("adb n'a pas pu être installé sur le serveur (sudo requis).")
+            r.first == 127 -> throw IllegalStateException("ADB n'est pas installé sur le serveur Debian. Installe-le explicitement avec « sudo apt-get update && sudo apt-get install adb », puis réessaie. Jarvis n'installe aucun paquet automatiquement.")
         }
         return t
     }
