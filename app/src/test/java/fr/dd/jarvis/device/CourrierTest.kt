@@ -25,6 +25,33 @@ class CourrierTest {
         assertEquals("UPS", a("UPS", "Votre envoi 1Z999AA10123456784 est en transit").single().transporteur)
     }
 
+    @Test fun commandeAmazonSansPreuveDeLivraisonNestPasUnColis() {
+        assertTrue(a("Amazon", "Votre commande 405-1234567-1234567 a bien été confirmée. Merci pour votre achat.").isEmpty())
+        assertTrue(a("Amazon", "Profitez de la livraison gratuite sur votre prochaine commande.").isEmpty())
+    }
+
+    @Test fun expeditionAmazonEstReconnuSansConfondreNumeroDeCommandeEtSuivi() {
+        val colis = a("Amazon", "Votre colis a été expédié. Numéro de suivi TBA123456789.").single()
+        assertEquals(Courrier.COLIS, colis.type)
+        assertEquals("Amazon", colis.transporteur)
+        assertEquals("TBA123456789", colis.numero)
+        assertEquals("expédié", colis.statut)
+    }
+
+    @Test fun dernierMessageSmsEstAnalyseMemeSiLeResumeNotificationEstTronque() {
+        val texte = Courrier.contenuNotification("1 nouveau message", "Rappel : votre rendez-vous est confirmé le 27/11/2026 à 10h30.")
+        val rdv = a("Cabinet Martin", texte).single()
+        assertEquals(Courrier.RDV, rdv.type)
+        val date = java.time.Instant.ofEpochMilli(rdv.dateRdv!!).atZone(java.time.ZoneId.systemDefault())
+        assertEquals(LocalDate.of(2026, 11, 27), date.toLocalDate())
+        assertEquals(10, date.hour)
+        assertEquals(30, date.minute)
+    }
+
+    @Test fun texteNotificationResteUnSecoursSiAucunDernierSmsNestExpose() {
+        assertEquals("Rendez-vous demain à 9h", Courrier.contenuNotification("Rendez-vous demain à 9h", " "))
+    }
+
     @Test fun factureDevisRdv() {
         val f = a("EDF", "Votre facture de 128,45 € est disponible. Elle sera prélevée le 5 décembre.").single()
         assertEquals(Courrier.FACTURE, f.type)
