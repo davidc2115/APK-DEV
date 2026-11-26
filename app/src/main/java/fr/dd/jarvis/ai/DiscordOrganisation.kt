@@ -109,7 +109,12 @@ object DiscordOrganisation {
                 val e = JSONObject().put("id", id).put("position", pos)
                 if (id in demandes && parId[id]?.let { parent(it) } != p) {
                     e.put("parent_id", p ?: JSONObject.NULL)
-                    if (synchroniser && p != null) e.put("lock_permissions", true)
+                }
+                // Discord ne synchronise les overrides qu'avec lock_permissions=true.
+                // Le salon doit aussi être verrouillé lorsqu'il reste dans sa catégorie :
+                // l'utilisateur peut demander une réorganisation ET une resynchronisation.
+                if (id in demandes && synchroniser && p != null) {
+                    e.put("lock_permissions", true)
                 }
                 out.put(e)
             }

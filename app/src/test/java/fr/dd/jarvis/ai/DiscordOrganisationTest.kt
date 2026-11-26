@@ -67,4 +67,33 @@ class DiscordOrganisationTest {
         val r = (actuel or Discord.Perm.parse("gérer les messages")) and Discord.Perm.parse("envoyer des messages").inv()
         assertEquals(Discord.Perm.VIEW_CHANNEL or Discord.Perm.MANAGE_MESSAGES, r)
     }
+
+
+    @Test fun permissionsDeRoleInconnuesSontRefusees() {
+        assertEquals(Discord.Perm.VIEW_CHANNEL or Discord.Perm.SEND_MESSAGES,
+            Discord.Perm.parseStrict("voir le salon, envoyer des messages"))
+        assertEquals(Discord.Perm.TOUT_SAUF_ADMINISTRATEUR,
+            Discord.Perm.parseStrict("toutes_sauf_administrateur"))
+        assertEquals(Discord.Perm.VIEW_CHANNEL or Discord.Perm.SEND_MESSAGES,
+            Discord.Perm.parseStrict("voir le salon\nenvoyer_messages"))
+        assertTrue(runCatching { Discord.Perm.parseStrict("permission_inconnue") }.isFailure)
+    }
+
+    @Test fun masqueNumeriqueRefuseBitsInconnusEtValeursNegatives() {
+        assertEquals(Discord.Perm.VIEW_CHANNEL, Discord.Perm.parseStrict(Discord.Perm.VIEW_CHANNEL.toString()))
+        assertTrue(runCatching { Discord.Perm.parseStrict((1L shl 60).toString()) }.isFailure)
+        assertTrue(runCatching { Discord.Perm.parseStrict("-1") }.isFailure)
+    }
+    @Test fun reorganisationResynchroniseAussiLesSalonsDejaDansLeurCategorie() {
+        val positions = DiscordOrganisation.reorganisation(
+            tous,
+            listOf("200" to listOf("3"), "100" to listOf("1")),
+            synchroniser = true
+        )
+        val parId = pos(positions)
+        assertTrue(parId.getValue("3").getBoolean("lock_permissions"))
+        assertTrue(parId.getValue("1").getBoolean("lock_permissions"))
+        assertFalse(parId.getValue("4").has("lock_permissions"))
+    }
+
 }
