@@ -74,8 +74,8 @@ class VoletReglages(val onglet: String, val sous: String, val titre: String, val
 }
 
 /**
- * En-tête compact des réglages : recherche, catégories et sous-catégories restent indépendantes
- * de la zone défilante qui contient les panneaux.
+ * Navigation des réglages compacte : la place est réservée aux options elles-mêmes.
+ * Le titre de l'écran est déjà affiché par l'en-tête général de JARVIS.
  */
 @Composable
 fun ReglagesNavigation(
@@ -83,15 +83,7 @@ fun ReglagesNavigation(
     onOnglet: (String) -> Unit, onSous: (String) -> Unit, onRecherche: (String?) -> Unit,
 ) {
     val accent = LocalAccent.current
-    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Réglages", color = HudText, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                Text("Organisés par thème", color = HudDim, fontSize = 11.sp)
-            }
-            Text("JARVIS · CONFIGURATION", color = accent, fontSize = 9.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Bold)
-        }
-        Spacer(Modifier.height(9.dp))
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         HudTextField(
             value = recherche.orEmpty(),
             onValueChange = { onRecherche(it.takeIf(String::isNotBlank)) },
@@ -100,56 +92,64 @@ fun ReglagesNavigation(
             singleLine = true
         )
         if (recherche.isNullOrBlank()) {
-            Spacer(Modifier.height(10.dp))
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 ONGLETS_REGLAGES.forEach { o ->
                     val choisi = o.id == onglet
                     Row(
                         Modifier.clip(HudShapeSmall)
-                            .background(accent.copy(alpha = if (choisi) 0.20f else 0.055f))
-                            .border(1.dp, accent.copy(alpha = if (choisi) 0.82f else 0.18f), HudShapeSmall)
+                            .background(accent.copy(alpha = if (choisi) 0.20f else 0.045f))
+                            .border(1.dp, accent.copy(alpha = if (choisi) 0.78f else 0.15f), HudShapeSmall)
                             .clickable { onOnglet(o.id) }
-                            .padding(horizontal = 11.dp, vertical = 9.dp),
+                            .padding(horizontal = 9.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        Text(o.icone, fontSize = 14.sp)
-                        Text(o.nom, color = if (choisi) Color.White else HudText, fontSize = 11.sp,
+                        Text(o.icone, fontSize = 13.sp)
+                        Text(o.nom, color = if (choisi) Color.White else HudText, fontSize = 10.sp,
                             fontWeight = if (choisi) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
                     }
                 }
             }
             val o = ONGLETS_REGLAGES.firstOrNull { it.id == onglet } ?: ONGLETS_REGLAGES.first()
-            Column(Modifier.fillMaxWidth().padding(top = 9.dp, bottom = 7.dp)) {
-                Text(o.nom, color = HudText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                Text(o.aide, color = HudDim, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
             if (o.sous.isNotEmpty()) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    o.sous.forEach { (id, nom) -> SousOnglet(nom, id == sous) { onSous(id) } }
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    o.sous.forEach { (id, nom) ->
+                        SousOnglet(nom, id == sous) { onSous(id) }
+                    }
                 }
             }
         } else {
-            Text("RÉSULTATS DE RECHERCHE", color = accent, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                letterSpacing = 1.2.sp, modifier = Modifier.padding(top = 9.dp))
+            Text("RÉSULTATS DE RECHERCHE", color = accent, fontSize = 9.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+                modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(5.dp))
         HudDivider()
     }
 }
 
-/** Sous-rubrique compacte, avec une zone tactile confortable. */
+/** Sous-rubrique compacte mais suffisamment grande pour être touchée facilement. */
 @Composable
 private fun SousOnglet(nom: String, choisi: Boolean, onClick: () -> Unit) {
     val accent = LocalAccent.current
     Box(
         Modifier.clip(HudShapeSmall)
-            .background(accent.copy(alpha = if (choisi) 0.23f else 0.055f))
-            .border(1.dp, accent.copy(alpha = if (choisi) 0.82f else 0.20f), HudShapeSmall)
+            .background(accent.copy(alpha = if (choisi) 0.22f else 0.045f))
+            .border(1.dp, accent.copy(alpha = if (choisi) 0.78f else 0.17f), HudShapeSmall)
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 9.dp)
+            .padding(horizontal = 10.dp, vertical = 7.dp)
     ) {
-        Text(nom, color = if (choisi) Color.White else HudText, fontSize = 11.sp,
+        Text(nom, color = if (choisi) Color.White else HudText, fontSize = 10.sp,
             fontWeight = if (choisi) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
     }
 }
