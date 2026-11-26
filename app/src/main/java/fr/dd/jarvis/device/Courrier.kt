@@ -127,7 +127,7 @@ object Courrier {
             return out
         }
         // Rendez-vous : conserver aussi les messages incomplets (date/heure absente ou formulation libre).
-        if (RDV_RE.containsMatchIn(n)) {
+        if (RDV_RE.containsMatchIn(n) && !FACTURE_RE.containsMatchIn(n) && !DEVIS_RE.containsMatchIn(n)) {
             val nd = DatesFr.normaliser(brut)
             val jourTrouve = DatesFr.jour(nd, aujourdhui)?.date
             val jour = jourTrouve?.takeIf { !it.isBefore(aujourdhui) }
