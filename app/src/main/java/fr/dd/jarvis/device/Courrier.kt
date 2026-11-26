@@ -68,9 +68,12 @@ object Courrier {
     private val CODE_RETRAIT = Regex("(?i)code (?:de retrait|de collecte|d'ouverture|d’ouverture|de deverrouillage|de déverrouillage|pin|de livraison|de recuperation|de récupération|a presenter|à présenter)\\s*[:=]?\\s*([A-Z0-9]{4,10})")
 
     private val MONTANT = Regex("(\\d{1,3}(?:[ .\\u202F\\u00A0]\\d{3})*(?:[,.]\\d{1,2})?)\\s?(?:€|eur\\b|euros?\\b)", RegexOption.IGNORE_CASE)
-    private val FACTURE_RE = Regex("\\b(facture|factures|facturation|facture jointe|facture disponible|avis d echeance|echeancier|invoice|a regler|a payer|montant (a payer|du|preleve|de votre facture)|prelevement|votre releve|mise en demeure|relance de paiement|impaye|paiement en attente|appel de paiement|recu de paiement|justificatif de paiement)\\b")
-    private val DEVIS_RE = Regex("\\b(devis|proposition commerciale|offre de prix|offre commerciale|estimation|chiffrage|bon pour accord)\\b")
-    private val RDV_RE = Regex("\\b(rendez vous|rdv|convocation|votre visite|visite prevue|visite technique|intervention|passage (de notre |du |d un )?technicien|technicien passera|creneau|reservation|consultation|vidange|controle technique|ct|revision|entretien du vehicule|garage|atelier automobile|pneumatiques?|votre venue|vous etes attendu|je passerai|nous passerons|je viendrai|nous viendrons|confirmation de visite|confirmation de rendez vous)\\b")
+    // Les mots génériques (« garage », « réservation », « intervention », « prélèvement ») seuls génèrent trop de faux positifs.
+    private val FACTURE_RE = Regex("\\b(facture|factures|invoice|avis d echeance|echeancier|facture jointe|facture disponible|facture a payer|facture a regler|relance de paiement|impaye|paiement en attente|justificatif de paiement|recu de paiement|montant de votre facture|prelevement de votre facture)\\b")
+    private val DEVIS_RE = Regex("\\b(devis|proposition de devis|offre de prix|estimation de travaux|chiffrage|bon pour accord)\\b")
+    private val RDV_RE = Regex("\\b(rendez vous|rdv|convocation|rappel de votre rendez vous|confirmation de rendez vous|confirmation du rendez vous|votre rendez vous|visite prevue|visite technique|votre consultation|consultation prevue|creneau confirme|creneau reserve|votre venue|vous etes attendu|nous vous attendons|passage de notre technicien|passage du technicien|technicien passera|confirmation de visite)\\b")
+    private val RDV_AUTO_RE = Regex("\\b(vidange|controle technique|ct|revision|entretien du vehicule|pneumatiques?|changement de pneus)\\b")
+    private val PROMOTION_RE = Regex("\\b(option budget|code promo|promotion|promotions|offre speciale|offre exclusive|profitez de|decouvrez notre offre|remise exceptionnelle|vente privee|abonnez vous|souscrivez|jusqu a -?\\d{1,2} ?%)\\b")
     private val HEURE = Regex("\\b(\\d{1,2}) ?(?:h|:) ?(\\d{2})?\\b")
     private val ADRESSE = Regex("(\\d{1,4}(?: ?bis| ?ter)?,? (?:rue|avenue|av\\.?|bd|boulevard|chemin|place|allee|allée|impasse|route|quai|cours|faubourg|zone|za|zi|lieu[- ]dit)[^,\\n.]{2,60}(?:,? ?\\d{5} [A-Za-zÀ-ÿ' -]{2,40})?)", RegexOption.IGNORE_CASE)
     private val GARAGE_RDV = Regex("\\bgarage\\s+([A-ZÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\\s+[A-ZÀ-ÿ][A-Za-zÀ-ÿ'’-]*){0,2})", RegexOption.IGNORE_CASE)
@@ -107,10 +110,10 @@ object Courrier {
         // Colis
         val t = TRANSPORTEURS.firstOrNull { it.mots.containsMatchIn(n) }
         val indicateurColis = MOTS_COLIS.containsMatchIn(n)
-        val numero = (t?.numero?.find(brut) ?: if (indicateurColis) NUMERO_GENERIQUE.find(brut) else null)?.groupValues?.get(1)
+        val numero = (t?.numero?.find(brut) ?: if (indicateurColis && INDICES_EXPEDITION.containsMatchIn(n)) NUMERO_GENERIQUE.find(brut) else null)?.groupValues?.get(1)
         // Un expéditeur marchand (notamment Amazon) ou le mot « commande » ne suffisent pas :
         // il faut un numéro de suivi réel ou une formulation explicite d'expédition/livraison.
-        val preuveExpedition = numero != null || INDICES_EXPEDITION.containsMatchIn(n)
+        val preuveExpedition = (numero != null && (t != null || INDICES_EXPEDITION.containsMatchIn(n))) || INDICES_EXPEDITION.containsMatchIn(n)
         if (indicateurColis && preuveExpedition && !FACTURE_RE.containsMatchIn(n.replace(Regex("\\bfacture (jointe|disponible)\\b"), ""))) {
             val statut = when {
                 Regex("\\b(a ete livre|a ete livree|est livre|est livree|livre aujourd hui a|depose dans (votre|la) boite|remis en main propre|livraison effectuee)\\b").containsMatchIn(n) -> "livré"
@@ -126,9 +129,13 @@ object Courrier {
                 if (numero != null && t != null) t.lien(numero) else "", statut, code)
             return out
         }
-        // Rendez-vous : conserver aussi les messages incomplets (date/heure absente ou formulation libre).
-        if (RDV_RE.containsMatchIn(n) && !FACTURE_RE.containsMatchIn(n) && !DEVIS_RE.containsMatchIn(n)) {
-            val nd = DatesFr.normaliser(brut)
+        // Un rendez-vous est reconnu par une formulation explicite, ou par un motif automobile + date + heure.
+        val nd = DatesFr.normaliser(brut)
+        val jourTrouve = DatesFr.jour(nd, aujourdhui)?.date
+        val heurePresente = HEURE.containsMatchIn(nd)
+        val rdvExplicite = RDV_RE.containsMatchIn(n)
+        val rdvAutomobile = RDV_AUTO_RE.containsMatchIn(n) && jourTrouve != null && heurePresente
+        if ((rdvExplicite || rdvAutomobile) && !FACTURE_RE.containsMatchIn(n) && !DEVIS_RE.containsMatchIn(n)) {
             val jourTrouve = DatesFr.jour(nd, aujourdhui)?.date
             val jour = jourTrouve?.takeIf { !it.isBefore(aujourdhui) }
             val h = if (jour != null) HEURE.findAll(nd).firstOrNull { (it.groupValues[1].toIntOrNull() ?: 99) in 6..21 } else null
@@ -142,7 +149,9 @@ object Courrier {
         }
         // Facture / devis : le montant est facultatif, car souvent absent de l'aperçu d'un SMS ou d'un mail.
         val m = montant(brut)
-        if (FACTURE_RE.containsMatchIn(n) || DEVIS_RE.containsMatchIn(n)) {
+        val documentFinancier = FACTURE_RE.containsMatchIn(n) || DEVIS_RE.containsMatchIn(n)
+        val contenuPromotionnel = PROMOTION_RE.containsMatchIn(n)
+        if (documentFinancier && (!contenuPromotionnel || FACTURE_RE.containsMatchIn(n))) {
             val devis = DEVIS_RE.containsMatchIn(n) && !FACTURE_RE.containsMatchIn(n)
             val ech = Regex("\\b(?:avant le|au plus tard le|date limite(?: de paiement)?|echeance(?: le| du)?|preleve le|sera preleve le|a payer (?:avant )?le|valable jusqu au|le) ?:? ?(.{4,30})").find(DatesFr.normaliser(brut))
                 ?.groupValues?.get(1)?.let { DatesFr.jour(DatesFr.normaliser(it), aujourdhui)?.date?.toString() }.orEmpty()
@@ -302,19 +311,19 @@ object Courrier {
      */
     suspend fun importerMailsRecents(app: JarvisApp, nombre: Int = 200): Int {
         if (!app.store.courrierAnalyse.value) return 0
-        return runCatching {
+        return run {
             val mails = app.mail.fetchRecent(nombre, unreadOnly = false, full = true, everywhere = true)
             val data = runCatching { app.societe.data }.getOrNull()
             val regles = regles(app)
             val trouves = mails.flatMap { mail ->
                 val emetteur = mail.from.ifBlank { mail.fromAddr }.ifBlank { "Expéditeur inconnu" }
-                val contenu = listOf(mail.subject, mail.body.ifBlank { mail.snippet }).filter { it.isNotBlank() }.joinToString("\\n")
+                val contenu = listOf(mail.subject, mail.body.ifBlank { mail.snippet }).filter { it.isNotBlank() }.joinToString("\n")
                 analyser(emetteur, contenu, "Mail", mail.date?.time ?: 0L).map { e ->
                     domaine(e, mail.account, data, regles).let { (d, auto) -> e.copy(domaine = d, auto = auto) }
                 }
             }
             enregistrer(app, trouves).size
-        }.getOrDefault(0)
+        }
     }
 
     /** SMS / notification de mail reçus : analysés en arrière-plan, sans jamais bloquer. */
