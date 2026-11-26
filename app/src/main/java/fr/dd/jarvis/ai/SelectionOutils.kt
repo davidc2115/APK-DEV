@@ -36,8 +36,68 @@ internal object SelectionOutils {
         "peux", "veux", "voudrais", "jarvis", "merci", "alors", "aussi", "encore", "est-ce", "quoi", "quel", "quelle", "comment",
         "cette", "celui", "celle", "leur", "leurs", "mais", "donc", "bien", "tres", "vous", "nous", "elle", "elles", "ils")
 
-    internal fun mots(texte: String): Set<String> =
-        normaliser(texte).split(' ').filter { it.length >= 4 && it !in VIDES }.map { it.take(6) }.toSet()
+    /**
+     * Synonymes de requêtes courantes : les utilisateurs décrivent souvent un symptôme (« ça rame »,
+     * « le coffre ne retrouve pas le dossier ») plutôt que le nom technique de l'outil.
+     * Ces termes servent uniquement au classement/recherche du catalogue ; ils n'ajoutent aucun outil
+     * au schéma envoyé au modèle et n'entraînent donc aucun coût de tokens supplémentaire.
+     */
+    private val ALIASES = mapOf(
+        "panne" to setOf("diagnostic", "depannage", "erreur", "journaux", "logs"),
+        "bug" to setOf("diagnostic", "depannage", "erreur", "journaux", "logs"),
+        "bugue" to setOf("diagnostic", "depannage", "erreur", "journaux", "logs"),
+        "deconne" to setOf("diagnostic", "depannage", "erreur", "journaux", "logs"),
+        "deconner" to setOf("diagnostic", "depannage", "erreur", "journaux", "logs"),
+        "freeze" to setOf("bloque", "indisponible", "diagnostic", "performance"),
+        "fige" to setOf("bloque", "indisponible", "diagnostic", "performance"),
+        "saccade" to setOf("performance", "latence", "cpu", "memoire"),
+        "coupure" to setOf("connexion", "reseau", "diagnostic", "journaux"),
+        "coupe" to setOf("audio", "voix", "lecture", "connexion", "diagnostic"),
+        "deconnecte" to setOf("connexion", "reseau", "indisponible", "diagnostic"),
+        "perd" to setOf("connexion", "reseau", "diagnostic"),
+        "oublie" to setOf("memoire", "consigne", "preference", "restitution"),
+        "oublier" to setOf("memoire", "consigne", "preference", "restitution"),
+        "souviens" to setOf("memoire", "consigne", "preference", "restitution"),
+        "retient" to setOf("memoire", "consigne", "preference", "restitution"),
+        "bloque" to setOf("indisponible", "diagnostic", "etat", "journaux", "logs"),
+        "bloquee" to setOf("indisponible", "diagnostic", "etat", "journaux", "logs"),
+        "plante" to setOf("erreur", "exception", "diagnostic", "journaux", "logs"),
+        "crashe" to setOf("erreur", "exception", "diagnostic", "journaux", "logs"),
+        "repond" to setOf("indisponible", "etat", "diagnostic", "journaux", "logs"),
+        "marche" to setOf("fonctionne", "etat", "diagnostic"),
+        "rame" to setOf("performance", "latence", "cpu", "memoire", "diagnostic"),
+        "lent" to setOf("performance", "latence", "cpu", "memoire"),
+        "lenteur" to setOf("performance", "latence", "cpu", "memoire"),
+        "coffre" to setOf("obsidian", "notes", "dossiers", "fichiers", "recherche"),
+        "vault" to setOf("obsidian", "notes", "dossiers", "fichiers", "recherche"),
+        "dossier" to setOf("obsidian", "stockage", "fichiers", "recherche"),
+        "introuvable" to setOf("recherche", "chercher", "lire", "fichiers", "dossiers"),
+        "box" to setOf("freebox", "reseau", "appareils", "wifi"),
+        "wifi" to setOf("reseau", "appareils", "freebox", "connexion"),
+        "domotique" to setOf("home", "assistant", "chauffage", "climate", "switch"),
+        "poele" to setOf("home", "assistant", "chauffage", "climate"),
+        "chauffage" to setOf("home", "assistant", "climate", "thermostat"),
+        "film" to setOf("plex", "medias", "bibliotheque", "lecture"),
+        "serie" to setOf("plex", "medias", "bibliotheque", "lecture"),
+        "bot" to setOf("discord", "serveur", "processus", "journaux"),
+        "gps" to setOf("position", "localisation", "navigation", "itineraire"),
+        "localisation" to setOf("position", "gps", "device", "personne"),
+        "consigne" to setOf("memoire", "preference", "restitution"),
+        "preference" to setOf("memoire", "consigne", "restitution"),
+        "rdv" to setOf("agenda", "planning", "evenement", "rendezvous"),
+        "ecran" to setOf("telephone", "accessibilite", "piloter", "capture")
+    )
+
+    internal fun mots(texte: String): Set<String> {
+        val bruts = normaliser(texte).split(' ').filter { it.isNotBlank() }
+        val directs = bruts.filter { it.length >= 4 && it !in VIDES }.map { it.take(6) }
+        // Le français ajoute souvent un « s » au pluriel : « dossiers », « poêles », « préférences ».
+        // On ne retire ce suffixe que pour consulter le lexique (jamais dans le texte transmis au modèle).
+        val derives = bruts.flatMap { mot ->
+            ALIASES[mot] ?: ALIASES[mot.removeSuffix("s")].orEmpty()
+        }.map { it.take(6) }
+        return (directs + derives).toSet()
+    }
 
     /** Pertinence d'un outil pour des mots (racines de 6 lettres) : nom compté triple. */
     internal fun score(fn: JSONObject, mots: Set<String>): Int {
