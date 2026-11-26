@@ -1072,43 +1072,31 @@ class ToolBox(
         "controle_media" -> ToolResult(fr.dd.jarvis.device.CommandeMedia.depuisOutil(a.optString("action"))?.let { fr.dd.jarvis.device.CommandeMedia.executer(app, it, app.enVoiture) }
             ?: app.phone.mediaKey(a.optString("action")))
         "naviguer" -> {
-            // En voiture : Android Auto lance son propre GPS (Waze / Maps de la voiture), sans question ni écran du téléphone.
-            // Vérifié : « guidage lancé » seulement si Waze / Maps l'a vraiment démarré (sinon réponse honnête + notification).
-            // La présence du CarContext est la preuve la plus fiable qu'Android Auto est réellement connecté.
-            // app.enVoiture peut être momentanément faux (Bluetooth/état de trajet), ne pas contourner Android Auto.
-            if ((app.enVoiture || fr.dd.jarvis.car.NavigationVoiture.contexte != null) && a.optString("destination").isNotBlank()) {
-                val destination = a.optString("destination").trim()
-                val pt = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    val loc = fr.dd.jarvis.societe.Geo.localiser(destination)
-                    val numeroDemande = Regex("""(?:^|[\s,])\d{1,4}(?:\s*(?:bis|ter|quater|[a-d])\b)?(?=[\s,]+[^\d\s,])""", RegexOption.IGNORE_CASE).containsMatchIn(destination)
-                    loc?.takeIf { it.precision == fr.dd.jarvis.societe.Geo.Precision.NUMERO ||
-                        (!numeroDemande && it.precision == fr.dd.jarvis.societe.Geo.Precision.RUE) }?.point
-                } }.getOrNull()
-                // Réponse directe : le modèle ne « termine » pas le guidage en pilotant l'écran de Waze (appuis à confirmer).
-                return ToolResult(fr.dd.jarvis.car.GuidageVoiture.lancer(app, a.optString("destination"), pt?.let { it.lat to it.lon }, a.optString("appli").trim()), direct = true)
-            }
+            // Même sur le téléphone, utiliser le lanceur vérifié : l'ancien chemin direct ne contrôlait jamais
+            // l'ouverture de Waze/Maps et pouvait répondre « transmis » alors que rien n'apparaissait.
             var appli = a.optString("appli").trim()
             val toujours = a.optString("toujours").trim().lowercase() in setOf("true", "oui", "1", "vrai")
             if (appli.isBlank()) appli = app.store.appPrefs["navigation"].orEmpty()
             val dispo = app.phone.navApps().keys
-            // En voiture, pas de question : Waze s'il est installé (c'est le GPS d'Android Auto le plus courant).
-            if (appli.isBlank() && app.enVoiture) appli = dispo.firstOrNull { it.contains("Waze") } ?: dispo.firstOrNull().orEmpty()
-            if (appli.isBlank() && dispo.size > 1)
+            val enVoiture = app.enVoiture || fr.dd.jarvis.car.NavigationVoiture.contexte != null
+            if (appli.isBlank() && dispo.size > 1 && !enVoiture) {
                 ToolResult("CHOIX_REQUIS : demande à l'utilisateur avec quelle application lancer l'itinéraire (${dispo.joinToString(" ou ")}) et s'il veut la garder toujours ou une seule fois, puis rappelle naviguer avec appli et toujours.")
-            else {
-                if (appli.isBlank()) appli = dispo.firstOrNull().orEmpty()
+            } else {
+                // En voiture, privilégier Waze s'il est disponible ; sur le téléphone, prendre l'unique GPS installé.
+                if (appli.isBlank()) appli = if (enVoiture) dispo.firstOrNull { it.contains("Waze") } ?: dispo.firstOrNull().orEmpty()
+                    else dispo.firstOrNull().orEmpty()
                 if (toujours && a.optString("appli").isNotBlank()) app.store.setAppPref("navigation", a.optString("appli").trim())
                 val destination = a.optString("destination").trim()
-                val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) runCatching {
-                    val loc = fr.dd.jarvis.societe.Geo.localiser(destination)
-                    val numeroDemande = Regex("""(?:^|[\s,])\d{1,4}(?:\s*(?:bis|ter|quater|[a-d])\b)?(?=[\s,]+[^\d\s,])""", RegexOption.IGNORE_CASE).containsMatchIn(destination)
-                    loc?.takeIf { it.precision == fr.dd.jarvis.societe.Geo.Precision.NUMERO ||
-                        (!numeroDemande && it.precision == fr.dd.jarvis.societe.Geo.Precision.RUE) }?.point
-                }.getOrNull() else null
-                ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    app.phone.navigate(a.optString("destination"), a.optString("mode"), appli, pt?.let { it.lat to it.lon }) +
-                        (if (toujours && a.optString("appli").isNotBlank()) " (${a.optString("appli")} mémorisé pour les itinéraires)" else "")
-                }, direct = true)
+                if (dispo.isEmpty()) ToolResult("❌ Aucune application de navigation compatible (Waze ou Google Maps) n'est installée.")
+                else {
+                    val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) runCatching {
+                        val loc = fr.dd.jarvis.societe.Geo.localiser(destination)
+                        val numeroDemande = Regex("""(?:^|[\s,])\d{1,4}(?:\s*(?:bis|ter|quater|[a-d])\b)?(?=[\s,]+[^\d\s,])""", RegexOption.IGNORE_CASE).containsMatchIn(destination)
+                        loc?.takeIf { it.precision == fr.dd.jarvis.societe.Geo.Precision.NUMERO ||
+                            (!numeroDemande && it.precision == fr.dd.jarvis.societe.Geo.Precision.RUE) }?.point
+                    }.getOrNull() else null
+                    ToolResult(fr.dd.jarvis.car.GuidageVoiture.lancer(app, destination, pt?.let { it.lat to it.lon }, appli), direct = true)
+                }
             }
         }
         "appli_par_defaut" -> {

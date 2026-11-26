@@ -94,6 +94,7 @@ private fun versDome(p: Pt, avance: Float = 0f): FloatArray {
 private class Camera3D {
     @Volatile var lacet = 0f      // rotation autour de Y (degrés)
     @Volatile var tangage = -10f  // rotation autour de X (degrés)
+    @Volatile var roulis = 0f     // rotation autour de Z (degrés)
     @Volatile var zoom = 1f
     @Volatile var distance = 9f
     @Volatile var tempsCoeur = 0f
@@ -115,6 +116,7 @@ private class Camera3D {
         Matrix.setIdentityM(modele, 0)
         Matrix.rotateM(modele, 0, tangage, 1f, 0f, 0f)
         Matrix.rotateM(modele, 0, lacet, 0f, 1f, 0f)
+        Matrix.rotateM(modele, 0, roulis, 0f, 0f, 1f)
         Matrix.scaleM(modele, 0, zoom, zoom, zoom)
         Matrix.multiplyMM(mv, 0, vue, 0, modele, 0)
         Matrix.multiplyMM(mvp, 0, proj, 0, mv, 0)
@@ -163,6 +165,7 @@ private fun Orbe3DContenu(
     var temps by remember { mutableFloatStateOf(0f) }
     var lacetUser by remember { mutableFloatStateOf(0f) }
     var tangageUser by remember { mutableFloatStateOf(0f) }
+    var roulisUser by remember { mutableFloatStateOf(0f) }
     var zoomUser by remember { mutableFloatStateOf(1f) }
     var dernierGeste by remember { mutableFloatStateOf(-100f) }
     val surface = remember { arrayOfNulls<OrbeSurface>(1) }
@@ -234,11 +237,13 @@ private fun Orbe3DContenu(
         Canvas(
             Modifier.fillMaxSize()
                 .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
+                    detectTransformGestures { _, pan, zoom, rotation ->
                         dernierGeste = temps
                         zoomUser = (zoomUser * zoom).coerceIn(0.6f, 3.2f)
-                        lacetUser = (lacetUser + pan.x * 0.25f).coerceIn(-75f, 75f)
-                        tangageUser = (tangageUser + pan.y * 0.2f).coerceIn(-60f, 60f)
+                        // Les trois axes sont cycliques : aucune butée artificielle, même après plusieurs tours.
+                        lacetUser = ((lacetUser + pan.x * 0.25f) % 360f + 360f) % 360f
+                        tangageUser = ((tangageUser + pan.y * 0.25f) % 360f + 360f) % 360f
+                        roulisUser = ((roulisUser + rotation) % 360f + 360f) % 360f
                     }
                 }
                 .pointerInput(c) {
@@ -271,7 +276,8 @@ private fun Orbe3DContenu(
             // chaque image, l'écran n'est pas recomposé 60 fois par seconde.
             val calme = (temps - dernierGeste).coerceIn(0f, 4f) / 4f
             camera.lacet = lacetUser + calme * 18f * sin(temps * 0.22f)
-            camera.tangage = (-8f + tangageUser + calme * 5f * sin(temps * 0.15f)).coerceIn(-75f, 75f)
+            camera.tangage = -8f + tangageUser + calme * 5f * sin(temps * 0.15f)
+            camera.roulis = roulisUser
             camera.zoom = zoomUser
             camera.distance = distanceAuto
             camera.decalageNdcY = decalageAuto

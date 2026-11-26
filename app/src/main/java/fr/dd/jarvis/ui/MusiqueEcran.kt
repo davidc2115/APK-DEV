@@ -146,10 +146,12 @@ fun MusiqueEcran(app: JarvisApp, onFermer: () -> Unit) {
             androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 HudChip("👍 J'aime") { message = MusiqueBibliotheque.action(app, "jaime") }
                 HudChip("👎") { message = MusiqueBibliotheque.action(app, "jaimepas") }
-                HudChip("▶️ Normal") { message = MusiqueBibliotheque.configurerMode(app, "normal") }
-                HudChip("🔀 Aléatoire") { message = MusiqueBibliotheque.configurerMode(app, "aleatoire") }
-                HudChip("🔂 Répéter titre") { message = MusiqueBibliotheque.configurerMode(app, "repeter_titre") }
-                HudChip("🔁 Répéter playlist") { message = MusiqueBibliotheque.configurerMode(app, "repeter_playlist") }
+                HudChip("▶️ Normal") { scope.launch { message = withContext(Dispatchers.IO) { MusiqueBibliotheque.configurerMode(app, "normal") } } }
+                HudChip("🔀 Aléatoire") { scope.launch { message = withContext(Dispatchers.IO) { MusiqueBibliotheque.configurerMode(app, "aleatoire") } } }
+                HudChip("↪️ Sans aléatoire") { scope.launch { message = withContext(Dispatchers.IO) { MusiqueBibliotheque.configurerMode(app, "aleatoire_off") } } }
+                HudChip("🔂 Répéter titre") { scope.launch { message = withContext(Dispatchers.IO) { MusiqueBibliotheque.configurerMode(app, "repeter_titre") } } }
+                HudChip("🔁 Répéter playlist") { scope.launch { message = withContext(Dispatchers.IO) { MusiqueBibliotheque.configurerMode(app, "repeter_playlist") } } }
+                HudChip("↪️ Sans répétition") { scope.launch { message = withContext(Dispatchers.IO) { MusiqueBibliotheque.configurerMode(app, "repeter_aucune") } } }
                 HudChip("📻 Radio") {
                     val x = enCours ?: return@HudChip
                     scope.launch {

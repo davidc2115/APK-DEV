@@ -382,7 +382,7 @@ fun ConstellationVue(
                 .pointerInput(c) {
                     detectTransformGestures { _, pan, zoom, _ ->
                         // Zoom autour du centre de l'écran : le déplacement suit le même facteur.
-                        val z = (zoomUser * zoom).coerceIn(0.6f, 5f) / zoomUser
+                        val z = (zoomUser * zoom).coerceIn(0.015f, 5f) / zoomUser
                         zoomUser *= z
                         panUser = panUser * z + pan
                     }
@@ -511,12 +511,46 @@ fun ConstellationVue(
                 }
             }
             // 5. Noyau, puis hubs, puis étiquettes (le texte toujours au-dessus des traits).
+            val vueConstellation = zoomUser <= 0.22f
+            if (vueConstellation) {
+                // À cette échelle les traits normaux deviennent subpixel : redessiner le réseau en fils fins visibles.
+                for (h in c.hubs) {
+                    val parent = h.parent?.let { c.hub(it) } ?: continue
+                    if (hubVisible(parent) && hubVisible(h)) {
+                        drawLine(Neon.violet.copy(alpha = 0.42f), ecran(parent.pos), ecran(h.pos), 0.75f * dens)
+                    }
+                }
+                for (e in c.etiquettes) {
+                    if (e.type == TypeEtiquette.TAG) continue
+                    val h = c.hub(e.hub) ?: continue
+                    if (!hubVisible(h)) continue
+                    val parent = e.parent?.let { parId[it]?.pos } ?: h.pos
+                    drawLine(Neon.violet.copy(alpha = 0.28f * alphaEtiquette(e)), ecran(parent), ecran(e.pos), 0.65f * dens)
+                }
+                if (voirDossiers && (voirEntrants || voirSortants)) {
+                    val parNote = c.etiquettes.filter { it.noteId != null }.associateBy { it.noteId!! }
+                    for (l in c.liens) {
+                        val a = parNote[l.de] ?: continue
+                        val b = parNote[l.vers] ?: continue
+                        if (noteActive == null || (l.vers == noteActive && voirEntrants) || (l.de == noteActive && voirSortants)) {
+                            drawLine(Neon.lavande.copy(alpha = 0.36f), ecran(a.pos), ecran(b.pos), 0.55f * dens)
+                        }
+                    }
+                }
+            }
             dessinerNoyau(centre, rCentre, pulse, mesureur, fontScale, cerveau = dragon?.cerveau)
+            // À très faible zoom, les libellés disparaissent progressivement : le coffre devient une constellation
+            // de points reliés, comme dans la vue d'ensemble 3D. Le zoom avant restaure les éléments détaillés.
             for (h in c.hubs) {
                 if (!hubVisible(h)) continue
-                if (h.type == TypeHub.TAGS) dessinerHubTags(h, ecran(h.pos), k, mesureur, fontScale)
+                val centreHub = ecran(h.pos)
+                if (vueConstellation) {
+                    val rayon = if (h.niveau == 0) 3.2f * dens else 2.2f * dens
+                    drawCircle(Neon.violetVif.copy(alpha = alphaHub(h) * 0.42f), rayon * 2.2f, centreHub)
+                    drawCircle(Neon.blancViolet.copy(alpha = alphaHub(h)), rayon, centreHub)
+                } else if (h.type == TypeHub.TAGS) dessinerHubTags(h, centreHub, k, mesureur, fontScale)
                 else {
-                    dessinerHub(h, ecran(h.pos), h.rayon * k, mesureur, fontScale, alphaHub(h), actif = h.cle == hubActif, pulse = pulse)
+                    dessinerHub(h, centreHub, h.rayon * k, mesureur, fontScale, alphaHub(h), actif = h.cle == hubActif, pulse = pulse)
                     if (h.depliable) dessinerBadgeDepli(ecran(Pt(h.pos.x, h.pos.y + h.rayon * 1.02f)), max(h.rayon * 0.22f, 7f) * k, h.deplie, alphaHub(h))
                 }
             }
@@ -526,8 +560,17 @@ fun ConstellationVue(
                 if (h != null && !hubVisible(h)) continue
                 if (e.type == TypeEtiquette.TAG && !voirTags) continue
                 val a = alphaEtiquette(e)
-                val sur = (e.noteId != null && (e.noteId == noteActive || (requete.isNotBlank() && e.noteId in idsCorrespondants))) || (e.tag != null && e.tag == tagActif)
-                zonesEtiquettes[e.id] = dessinerEtiquette(e, ecran(e.pos), k, mesureur, fontScale, a, sur, taillePxMin = 8.5f * dens)
+                val centreEtiquette = ecran(e.pos)
+                if (vueConstellation) {
+                    val rayon = if (e.type == TypeEtiquette.DOSSIER) 2.5f * dens else 1.65f * dens
+                    drawCircle(Neon.violet.copy(alpha = 0.32f * a), rayon * 2.1f, centreEtiquette)
+                    drawCircle((if (e.type == TypeEtiquette.DOSSIER) Neon.violetVif else Neon.blancViolet).copy(alpha = a), rayon, centreEtiquette)
+                    val touche = 11f * dens
+                    zonesEtiquettes[e.id] = Rect(centreEtiquette - Offset(touche, touche), Size(touche * 2f, touche * 2f))
+                } else {
+                    val sur = (e.noteId != null && (e.noteId == noteActive || (requete.isNotBlank() && e.noteId in idsCorrespondants))) || (e.tag != null && e.tag == tagActif)
+                    zonesEtiquettes[e.id] = dessinerEtiquette(e, centreEtiquette, k, mesureur, fontScale, a, sur, taillePxMin = 8.5f * dens)
+                }
             }
         }
 

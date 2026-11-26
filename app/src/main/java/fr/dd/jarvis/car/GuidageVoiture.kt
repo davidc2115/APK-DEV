@@ -150,15 +150,23 @@ object GuidageVoiture {
                 journal.noter("voiture", "Android Auto a refusé la demande ; aucun lancement de secours sur le téléphone")
                 return "⚠️ Android Auto a refusé la demande d'itinéraire vers $nom. Le guidage n'a pas été confirmé et je n'ai pas lancé une deuxième application sur le téléphone."
             }
-            when (attendre(t0, 12_000, app)) {
-                true -> { journal.noter("voiture", "guidage confirmé par Android Auto vers $nom"); return "🧭 Guidage confirmé dans Android Auto vers $nom." }
+            // Android Auto pilote le GPS de l'écran de voiture. Ses API ne renvoient pas l'état du calcul
+            // d'itinéraire à l'application téléphone : les notifications et l'audio du téléphone ne sont que
+            // des indices facultatifs et peuvent être absents même quand l'écran voiture a bien démarré.
+            // On conserve une courte fenêtre pour une confirmation positive, mais son absence ne doit plus
+            // être présentée comme un échec du lancement ni déclencher un second lancement sur le téléphone.
+            when (attendre(t0, 5_000, app)) {
+                true -> {
+                    journal.noter("voiture", "guidage confirmé par un signal disponible après transmission Android Auto vers $nom")
+                    return "🧭 Android Auto a reçu l'itinéraire vers $nom et le guidage est confirmé."
+                }
                 false -> {
-                    journal.noter("voiture", "Android Auto a accepté l'intent, mais aucun indice de démarrage du guidage n'est apparu")
-                    return "⚠️ La demande d'itinéraire vers $nom a été transmise à Android Auto, mais je ne détecte pas le démarrage du guidage. Je ne vais pas prétendre qu'il est lancé. Vérifie que Waze ou Google Maps est sélectionné et que l'itinéraire est bien affiché sur l'écran de la voiture."
+                    journal.noter("voiture", "itinéraire transmis à Android Auto vers $nom ; aucun signal de confirmation remonté au téléphone (état écran voiture non exposé)")
+                    return "🧭 Itinéraire transmis à Android Auto vers $nom. L'état du guidage sur l'écran de la voiture ne remonte pas à JARVIS sur cet appareil ; vérifie que Waze ou Google Maps affiche bien la destination. Je ne relance pas une deuxième navigation sur le téléphone."
                 }
                 null -> {
-                    journal.noter("voiture", "Android Auto a accepté l'intent, mais Jarvis ne peut pas vérifier le guidage (accès notifications indisponible)")
-                    return "⚠️ La demande d'itinéraire vers $nom a été transmise à Android Auto, mais le démarrage n'est pas vérifiable car l'accès aux notifications n'est pas disponible."
+                    journal.noter("voiture", "itinéraire transmis à Android Auto vers $nom ; confirmation non exposée par le système")
+                    return "🧭 Itinéraire transmis à Android Auto vers $nom. Android Auto ne communique pas à JARVIS l'état du guidage sur l'écran de la voiture ; vérifie simplement que la destination s'affiche. Je ne lance pas de deuxième navigation sur le téléphone."
                 }
             }
         } else echecs += "JARVIS n'a pas de contexte écran Android Auto ; tentative via le téléphone"

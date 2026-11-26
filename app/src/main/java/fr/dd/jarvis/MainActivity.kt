@@ -339,6 +339,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
         }
     }
     var tab by rememberSaveable { mutableStateOf(0) }
+    var outilsMenu by rememberSaveable { mutableStateOf(false) }
     // Écrans de terrain ouverts par-dessus l'onglet en cours (caméra, compte-rendu d'intervention).
     var terrain by rememberSaveable { mutableStateOf(if (app.store.presenceModeActif.value) "presence" else "") }
     LaunchedEffect(terrain) { app.store.presenceModeActif.set(terrain == "presence") }
@@ -427,24 +428,66 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
             }
         }
 
-        // Barre de navigation HUD
+        // Navigation principale : cinq destinations fixes, les écrans secondaires sont regroupés dans Outils.
         if (!imeOpen) Row(
-            Modifier.fillMaxWidth().height(64.dp)
-                .background(accent.copy(alpha = 0.08f))
-                .border(1.dp, accent.copy(alpha = 0.35f))
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.Start,
+            Modifier.fillMaxWidth().height(70.dp)
+                .background(accent.copy(alpha = 0.075f))
+                .border(1.dp, accent.copy(alpha = 0.24f)),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            tabs.forEachIndexed { i, t ->
-                val sel = i == tab
+            listOf(0, 1, 2).forEach { i ->
+                val t = tabs[i]
+                val sel = tab == i
                 Column(
-                    Modifier.width(58.dp).height(56.dp).clickable { tab = i; terrain = "" },
+                    Modifier.weight(1f).height(62.dp).clickable { tab = i; terrain = ""; outilsMenu = false }.padding(vertical = 5.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
                     Icon(t.icon, null, tint = if (sel) accent else HudDim, modifier = Modifier.size(22.dp))
-                    Text(t.label.uppercase(), color = if (sel) accent else HudDim, fontSize = 8.sp, letterSpacing = 0.7.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+                    Text(t.label, color = if (sel) accent else HudDim, fontSize = 10.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+                }
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                val sel = tab in 3..8
+                Column(
+                    Modifier.fillMaxWidth().height(62.dp).clickable { outilsMenu = !outilsMenu }.padding(vertical = 5.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(Icons.Filled.Hub, null, tint = if (sel || outilsMenu) accent else HudDim, modifier = Modifier.size(22.dp))
+                    Text("Outils", color = if (sel || outilsMenu) accent else HudDim, fontSize = 10.sp, fontWeight = if (sel || outilsMenu) FontWeight.SemiBold else FontWeight.Normal)
+                }
+                androidx.compose.material3.DropdownMenu(
+                    expanded = outilsMenu,
+                    onDismissRequest = { outilsMenu = false }
+                ) {
+                    tabs.forEachIndexed { i, t ->
+                        if (i in 3..8) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Icon(t.icon, contentDescription = null, tint = if (tab == i) accent else HudDim, modifier = Modifier.size(20.dp))
+                                        Text(t.label, color = HudText)
+                                    }
+                                },
+                                onClick = { tab = i; terrain = ""; outilsMenu = false }
+                            )
+                        }
+                    }
+                }
+            }
+            run {
+                val i = 9
+                val t = tabs[i]
+                val sel = tab == i
+                Column(
+                    Modifier.weight(1f).height(62.dp).clickable { tab = i; terrain = ""; outilsMenu = false }.padding(vertical = 5.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(t.icon, null, tint = if (sel) accent else HudDim, modifier = Modifier.size(22.dp))
+                    Text(t.label, color = if (sel) accent else HudDim, fontSize = 10.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
                 }
             }
         }

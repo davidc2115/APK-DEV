@@ -12,6 +12,7 @@ import android.view.View
 import android.view.WindowManager
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Ouverture d'une appli quand JARVIS est en arrière-plan (Android Auto, écran éteint, autre appli devant).
@@ -23,17 +24,38 @@ import java.util.concurrent.TimeUnit
 object LancementFond {
     private val main = Handler(Looper.getMainLooper())
 
-    fun demarrer(ctx: Context, i: Intent) {
+    /**
+     * Lance réellement l’activité sur le thread UI. Les outils JARVIS sont souvent exécutés sur Dispatchers.IO :
+     * appeler startActivity depuis ce thread de travail rendait certains lancements GPS silencieux ou aléatoires.
+     * Le résultat indique si Android a accepté startActivity, pas si le guidage a commencé.
+     */
+    fun demarrer(ctx: Context, i: Intent): Boolean {
         val app = ctx.applicationContext
+        val intent = i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val point = if (Build.VERSION.SDK_INT >= 26 && runCatching { Settings.canDrawOverlays(app) }.getOrDefault(false)) afficherPoint(app) else null
-        fr.dd.jarvis.voice.JournalVoix.noter("lancement", "${i.`package` ?: i.data?.scheme ?: "appli"} : superposition ${if (point != null) "affichée" else "non autorisée"}, " +
+        fr.dd.jarvis.voice.JournalVoix.noter("lancement", "${intent.`package` ?: intent.data?.scheme ?: "appli"} : superposition ${if (point != null) "affichée" else "non autorisée"}, " +
             "accessibilité ${if (fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) "active" else "inactive"}")
-        try {
-            val acc = fr.dd.jarvis.service.JarvisAccessibilityService.instance
-            if (acc != null) runCatching { acc.startActivity(i) }.getOrElse { app.startActivity(i) } else app.startActivity(i)
-        } finally {
-            point?.let { v -> main.postDelayed({ retirer(app, v) }, 2500) }
+        val erreur = AtomicReference<Throwable?>(null)
+        val fini = CountDownLatch(1)
+        val lancer = Runnable {
+            try {
+                // Un seul chemin explicite et observable ; ne pas compter un appel d’accessibilité silencieux comme un succès.
+                app.startActivity(intent)
+            } catch (t: Throwable) {
+                erreur.set(t)
+            } finally {
+                fini.countDown()
+            }
         }
+        val execute = if (Looper.myLooper() == Looper.getMainLooper()) {
+            lancer.run(); true
+        } else {
+            main.post(lancer) && fini.await(3, TimeUnit.SECONDS)
+        }
+        point?.let { v -> main.postDelayed({ retirer(app, v) }, 2500) }
+        val ok = execute && erreur.get() == null
+        fr.dd.jarvis.voice.JournalVoix.noter("lancement", "${intent.`package` ?: intent.data?.scheme ?: "appli"} : startActivity ${if (ok) "accepté" else "échoué"}${erreur.get()?.let { " (${it.javaClass.simpleName}: ${it.message})" }.orEmpty()}")
+        return ok
     }
 
     private fun afficherPoint(ctx: Context): View? {
