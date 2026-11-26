@@ -38,6 +38,10 @@ class MusicTools(private val app: JarvisApp) {
             }
         }
 
+        /** Corrige les appels d'agent qui placent « J'aime » dans nom au lieu de section. */
+        internal fun sectionEffective(section: String, nom: String): String =
+            if (nom.isNotBlank() && sectionBibliotheque(nom) == "jaime") "jaime" else sectionBibliotheque(section)
+
         internal fun sectionBibliotheque(section: String): String {
             // Normalisation locale et prévisible : ne dépend pas du normaliseur métier (qui peut conserver
             // les préfixes possessifs ou traiter différemment les apostrophes et accents).
@@ -146,8 +150,10 @@ class MusicTools(private val app: JarvisApp) {
             }, direct = true)
             "musique_bibliotheque" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val p = paquet() ?: return@withContext "YT Music Morphe n'est pas installée."
-                val section = sectionBibliotheque(a.optString("section"))
                 val nom = a.optString("nom").trim()
+                // Certains modèles envoient « J'aime » comme nom avec section=playlists.
+                // La section J'aime est une entrée dédiée, jamais une playlist à ouvrir par accessibilité.
+                val section = sectionEffective(a.optString("section"), nom)
                 val mode = modeLecture(a.optString("mode"), a.optString("aleatoire"))
                 val aleatoire = mode == "aleatoire"
                 val repetition = when (mode) { "repeter_titre" -> "titre"; "repeter_playlist" -> "playlist"; else -> "aucune" }
