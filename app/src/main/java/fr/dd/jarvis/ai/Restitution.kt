@@ -190,7 +190,7 @@ object ConsignesExplicites {
 
     private val MARQUEUR = Regex("\\b(a l avenir|desormais|dorenavant|a partir de maintenant|a partir d aujourd hui|(a )?chaque fois( que| qu)?|la prochaine fois|les prochaines fois|" +
         "par defaut|tu dois|il faut que tu|" +
-        "(quand|lorsque|des que|si) (je (te )?(demande|dis|parle|cherche|veux|lance)|tu (me )?(mets|lances|joues|donnes|reponds|cherches|indiques|localises|trouves|affiches|presentes|lis|envoies))|" +
+        "(quand|lorsque|des que|si) (je (te |lui )?(demande|dis|parle|cherche|veux|lance)|tu (me )?(mets|lances|joues|donnes|reponds|cherches|indiques|localises|trouves|affiches|presentes|lis|envoies))|" +
         "je (veux|voudrais|prefere|aimerais|souhaite) (que (tu|quand|lorsque|pour|les|le|la)|toujours|systematiquement)|j aimerais (que|toujours)|plus jamais|" +
         "(donne|dis|mets|affiche|presente|reponds|indique|precise|ajoute|envoie|lance|joue|passe|utilise|montre|fais|lis)\\w*( moi| me| nous| les| la| le)? (toujours|systematiquement)|" +
         "(toujours|systematiquement) (me |m |les |la |le )?(donner|dire|mettre|afficher|presenter|repondre|indiquer|preciser|ajouter|utiliser|montrer|passer|faire|lire|en|sous|avec|par)|" +

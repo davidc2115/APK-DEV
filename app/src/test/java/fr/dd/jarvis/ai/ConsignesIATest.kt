@@ -11,6 +11,8 @@ class ConsignesIATest {
         assertTrue(ConsignesIA.candidat("non je t'avais demandé un tableau"))
         assertTrue(ConsignesIA.candidat("pourquoi tu ne mets pas la consigne comme je t'ai demandé ?"))
         assertTrue(ConsignesIA.candidat("je préfère que les films soient classés par année"))
+        assertTrue(ConsignesIA.candidat("quand je lui demande de lancer une musique, donne-moi seulement le titre et l'artiste"))
+        assertTrue(ConsignesIA.candidat("lorsque je lui demande une localisation, donne-moi uniquement l'adresse"))
         assertTrue(ConsignesIA.candidat("Pour le serveur, utilise toujours l'utilisateur dd"))
         assertFalse(ConsignesIA.candidat("allume la lumière du salon"))
         assertFalse(ConsignesIA.candidat("quelle est la température de mes poêles"))
