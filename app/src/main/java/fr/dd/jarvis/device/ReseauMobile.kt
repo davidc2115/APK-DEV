@@ -427,8 +427,13 @@ object ReseauMobile {
     /** Commande shell (Shizuku / ADB intégré) avec délai maximal ; texte de sortie. */
     private fun executer(app: JarvisApp, cmd: String, delaiMs: Long = 15_000): String {
         var out = ""
-        val t = Thread { out = runCatching { PhoneShell.exec(app, cmd) }.getOrElse { "Erreur : ${it.message}" } }
-        t.isDaemon = true; t.start(); t.join(delaiMs)
+        val t = Thread { out = runCatching { PhoneShell.exec(app, cmd) }.getOrElse { "Erreur : ${it.message}" } }.apply { isDaemon = true }
+        t.start()
+        t.join(delaiMs)
+        if (t.isAlive) {
+            t.interrupt()
+            return "⏱️ Commande réseau interrompue après $delaiMs ms : résultat non vérifiable."
+        }
         return out
     }
 
