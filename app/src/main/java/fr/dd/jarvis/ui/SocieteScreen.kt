@@ -131,6 +131,7 @@ private fun InterventionsTab(app: JarvisApp) {
     var photoInfo by remember { mutableStateOf("") }
     var photoTarget by remember { mutableStateOf<InterventionPhotoTarget?>(null) }
     var editTarget by remember { mutableStateOf<Triple<Client, Site, Intervention>?>(null) }
+    var brouillonEdit by remember { mutableStateOf<BrouillonRapportIntervention?>(null) }
     var date by remember { mutableStateOf("") }; var categorie by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }; var diagnostic by remember { mutableStateOf("") }
     var actions by remember { mutableStateOf("") }; var pieces by remember { mutableStateOf("") }
@@ -145,6 +146,7 @@ private fun InterventionsTab(app: JarvisApp) {
         }
         photoTarget = null
     }
+
     val sites = app.societe.data.clients.flatMap { client -> client.sites.map { site -> client to site } }.sortedBy { it.first.nom.lowercase() + " " + it.second.nom.lowercase() }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { HudPanel(Modifier.fillMaxWidth(), title = "🛠️ Carnet technique photovoltaïque") {
@@ -172,6 +174,7 @@ private fun InterventionsTab(app: JarvisApp) {
             Text("Les modifications effectuées par Hermès actualisent cette liste et les rapports associés.", color = HudDim, fontSize = 11.sp)
             if (photoInfo.isNotBlank()) Text(photoInfo, color = LocalAccent.current, fontSize = 12.sp)
         } }
+
         if (sites.isEmpty()) item { Text("Aucune installation enregistrée. Ajoute d'abord un client et son installation.", color = HudDim, fontSize = 13.sp) }
         items(sites, key = { it.first.id + "_" + it.second.id }) { pair ->
             val client = pair.first; val site = pair.second
@@ -179,6 +182,27 @@ private fun InterventionsTab(app: JarvisApp) {
                 Text(site.adresse.ifBlank { "Adresse non renseignée" }, color = HudDim, fontSize = 11.sp)
                 Text(site.kwc.toString() + " kWc · " + site.onduleur.ifBlank { "Onduleur non renseigné" }, color = HudText, fontSize = 12.sp)
                 HudDivider()
+
+                val brouillonsSite = app.societe.data.brouillonsRapport.filter { it.clientId == client.id && it.siteId == site.id }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("RAPPORTS EN COURS · " + brouillonsSite.size, color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    HudButton("＋ Nouveau rapport") {
+                        brouillonEdit = app.societe.creerBrouillon(client.id, site.id)
+                        if (brouillonEdit == null) photoInfo = "❌ Impossible de créer le brouillon."
+                    }
+                }
+                brouillonsSite.sortedByDescending { it.modifieLe }.forEach { brouillon ->
+                    HudPanel(Modifier.fillMaxWidth(), title = "✎ Brouillon · " + (brouillon.date.ifBlank { "Date à préciser" })) {
+                        Text(brouillon.description.ifBlank { "Rapport non renseigné — saisie à reprendre" }, color = HudText, fontSize = 12.sp)
+                        Text("Enregistré automatiquement · " + brouillon.modifieLe.take(16).replace('T', ' '), color = HudDim, fontSize = 10.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            HudButton("Reprendre") { brouillonEdit = brouillon }
+                            HudButton("Abandonner") {
+                                if (app.societe.supprimerBrouillon(brouillon.id)) photoInfo = "Brouillon abandonné."
+                            }
+                        }
+                    }
+                }
                 Text("HISTORIQUE · " + site.interventions.size + " fiche(s)", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 if (site.interventions.isEmpty()) Text("Aucune intervention enregistrée.", color = HudDim, fontSize = 12.sp)
                 site.interventions.sortedByDescending { it.date }.forEach { item ->
@@ -212,6 +236,38 @@ private fun InterventionsTab(app: JarvisApp) {
             }
         }
     }
+
+    brouillonEdit?.let { initial ->
+        var draft by remember(initial.id) { mutableStateOf(initial) }
+        fun maj(change: BrouillonRapportIntervention.() -> BrouillonRapportIntervention) {
+            val updated = draft.change()
+            draft = updated
+            val ok = runCatching { app.societe.enregistrerBrouillon(updated) }.getOrDefault(false)
+            if (!ok) photoInfo = "⚠️ Sauvegarde du brouillon non confirmée."
+        }
+        Dialogue("Rapport en cours", { brouillonEdit = null }, actions = {
+            TextButton(onClick = {
+                val result = app.societe.validerBrouillon(draft.id)
+                photoInfo = result
+                if (result.startsWith("✅")) brouillonEdit = null
+            }) { Text("✓ Valider le rapport", color = LocalAccent.current) }
+        }) {
+            Text("Chaque modification est enregistrée dans le stockage privé du téléphone. Le rapport ne rejoint l'historique et Obsidian qu'après validation.", color = HudDim, fontSize = 11.sp)
+            HudTextField(draft.date, { v -> maj { copy(date = v) } }, label = "Date (yyyy-MM-dd)")
+            HudTextField(draft.categorie, { v -> maj { copy(categorie = v) } }, label = "Catégorie")
+            HudTextField(draft.statut, { v -> maj { copy(statut = v) } }, label = "Statut : terminee, a_suivre, en_attente")
+            HudTextField(draft.description, { v -> maj { copy(description = v) } }, label = "Résumé de l'intervention", singleLine = false, maxLines = 4)
+            HudTextField(draft.diagnostic, { v -> maj { copy(diagnostic = v) } }, label = "Diagnostic / constat", singleLine = false, maxLines = 4)
+            HudTextField(draft.actions, { v -> maj { copy(actions = v) } }, label = "Travaux réalisés", singleLine = false, maxLines = 5)
+            HudTextField(draft.pieces, { v -> maj { copy(pieces = v) } }, label = "Pièces / références", singleLine = false, maxLines = 3)
+            HudTextField(draft.mesures, { v -> maj { copy(mesures = v) } }, label = "Mesures relevées", singleLine = false, maxLines = 4)
+            HudTextField(draft.onduleurs, { v -> maj { copy(onduleurs = v) } }, label = "Onduleurs concernés", singleLine = false, maxLines = 3)
+            HudTextField(draft.prochaineMaintenance, { v -> maj { copy(prochaineMaintenance = v) } }, label = "Prochaine maintenance (yyyy-MM-dd)")
+            HudTextField(draft.notes, { v -> maj { copy(notes = v) } }, label = "Notes", singleLine = false, maxLines = 3)
+            Text("Brouillon #" + draft.id + " · dernière sauvegarde : " + draft.modifieLe.take(16).replace('T', ' '), color = HudDim, fontSize = 10.sp)
+        }
+    }
+
     editTarget?.let { target ->
         Dialogue("Modifier l'intervention · " + target.first.nom, { editTarget = null }, actions = {
             TextButton(onClick = {

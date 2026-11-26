@@ -111,7 +111,7 @@ class SocieteRepo(ctx: Context) {
 
     /** [effacerIdentite] : écriture voulue par l'utilisateur (formulaire, demande à JARVIS) — un champ peut être vidé. */
     @Synchronized
-    fun update(effacerIdentite: Boolean = false, f: (SocieteData) -> SocieteData) {
+    fun update(effacerIdentite: Boolean = false, synchroniserCoffres: Boolean = true, f: (SocieteData) -> SocieteData) {
         // Plusieurs écritures peuvent venir de l'écran Société, d'Hermès ou des agents en parallèle.
         // Repartir du dernier fichier validé sous le même verrou évite qu'une mise à jour basée sur
         // un ancien instantané efface les créations ou modifications d'un autre thread.
@@ -138,9 +138,10 @@ class SocieteRepo(ctx: Context) {
             throw java.io.IOException("La base Société n'a pas été enregistrée intégralement.")
         data = relu
         garderIdentite(relu.societe)
-        // Coffre-fort : la modification part vers le serveur dans quelques secondes (si le coffre est configuré).
-        runCatching { fr.dd.jarvis.coffre.Coffre.signalerChangement(appCtx) }
-        // Copie lisible sur le disque de la Freebox (« JARVIS Société »), si la box est associée.
-        runCatching { MiroirFreebox.signalerChangement(appCtx) }
+        // Les brouillons sont conservés localement sans déclencher une synchronisation réseau à chaque frappe.
+        if (synchroniserCoffres) {
+            runCatching { fr.dd.jarvis.coffre.Coffre.signalerChangement(appCtx) }
+            runCatching { MiroirFreebox.signalerChangement(appCtx) }
+        }
     }
 }

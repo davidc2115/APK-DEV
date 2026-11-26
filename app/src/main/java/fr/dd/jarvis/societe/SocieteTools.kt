@@ -21,13 +21,13 @@ class SocieteTools(
             "societe_info_set", "societe_info_get", "tarif_set", "tarif_delete", "regles_set", "client_ecrire", "client_fiche", "client_supprimer",
             "document_creer", "document_action", "document_email", "societe_liste", "employe_ecrire", "paie", "reserve_bilan", "societe_resultat", "societe_baremes",
             "presentation_modifier", "distance_deplacement", "clients_exporter_kml", "kml_couleurs_set", "clients_gps", "intervention_enregistrer", "intervention_modifier", "intervention_supprimer", "interventions_liste", "interventions_synthese",
-            "installation_supprimer", "facture_electronique", "societe_sauvegarde",
+            "installation_supprimer", "facture_electronique", "societe_sauvegarde", "rapport_brouillons_liste", "rapport_brouillon_creer", "rapport_brouillon_modifier", "rapport_brouillon_valider", "rapport_brouillon_supprimer",
             // Déclarés dans le schéma mais absents d'ici : le modèle les appelait, JARVIS répondait « outil inconnu ».
             "documents_supprimer", "bulletins"
         )
         private val KEYWORDS = Regex(
             "devis|factur|client|soci[ée]t[ée]|sauvegard|restaur|e-reporting|dossier jarvis soci|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|r[ée]sultat|tr[ée]sorerie|charges fixes|imp[ôo]t sur les soci[ée]t[ée]s|capital social|bar[èe]mes?|urssaf|cotisations|s[ée]curit[ée] sociale|smic|plafond|" +
-                "installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
+                "rapport|brouillon|installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
                 "entretien|intervention|historique photovolta[ïi]que|bilan maintenance|panne|diagnostic|pi[èe]ce remplac[ée]e|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients|" +
                 "gps|coordonn[ée]es|g[ée]oloc|localis|latitude|longitude|google maps",
             RegexOption.IGNORE_CASE
@@ -154,7 +154,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 - Si l’utilisateur donne des coordonnées GPS pour une installation (copiées de Google Maps « 47.541558, 4.459845 », en degrés-minutes-secondes 47°32'29.6"N 4°27'35.4"E, ou un lien Google Maps), passe-les TELLES QUELLES dans site_gps de client_ecrire (avec site_nom si le client a plusieurs installations) ; pour le siège, dans gps de societe_info_set. Ces coordonnées priment sur l’adresse et ne sont jamais recalculées.
 - Si l’utilisateur est sur place et demande d’enregistrer « ma position », « ma localisation exacte », « ici »… sur une fiche client, appelle client_ecrire avec site_gps = « ma position » ET site_adresse = « ma position » (l’outil relève le GPS du téléphone et l’adresse précise correspondante) ; ne demande pas l’adresse. S’il parle de toutes ses installations (« ses deux installations »), mets site_nom = « toutes ».
 - Pour voir ou améliorer la précision des positions GPS des clients, utilise clients_gps (relocaliser=true pour recalculer avec la Base Adresse Nationale). N’invente jamais de coordonnées.
-- Pour chaque intervention photovoltaïque réellement réalisée ET lorsque l'utilisateur demande explicitement de l'enregistrer, utilise intervention_enregistrer. Ne l'utilise jamais pour répondre à une demande de suppression, correction ou consultation. N'invente jamais une intervention de test, un intitulé « test », ni une intervention de remplacement pour simuler une suppression.
+- CRÉATION D'UN RAPPORT : utilise TOUJOURS rapport_brouillon_creer pour démarrer un rapport, puis rapport_brouillon_modifier à chaque ajout ou correction. Les brouillons sont persistés localement et restent modifiables après fermeture ou mise en veille. Ne déclenche JAMAIS intervention_enregistrer pendant la rédaction : aucune entrée d'historique, note Obsidian ou PDF définitif ne doit être créée avant validation explicite. Présente le brouillon et demande « Valider le rapport ? » lorsque sa rédaction est terminée ; appelle rapport_brouillon_valider uniquement après un accord explicite. Pour reprendre, utilise rapport_brouillons_liste puis l'ID exact. Pour abandonner, utilise rapport_brouillon_supprimer après demande explicite. intervention_enregistrer reste réservé aux anciens flux/outils et ne doit pas contourner cette procédure. N'invente jamais une intervention de test, un intitulé « test », ni une intervention de remplacement pour simuler une suppression.
 - Pour supprimer une intervention : utilise impérativement l'outil MCP interventions_liste (nom exact, sans préfixe) pour lire les interventions depuis la base Société de Jarvis, et non Obsidian/Bibliothèque. Lis les ID, présente la date, la catégorie, le résumé et l'ID de la fiche ciblée, puis demande une confirmation explicite à l'utilisateur. Après son « oui » explicite, appelle intervention_supprimer avec client, installation, intervention_id exact et confirmation="oui". Si l'ID manque, si plusieurs fiches correspondent ou si l'utilisateur n'a pas confirmé, arrête-toi sans rien créer ni supprimer. N'appelle jamais intervention_enregistrer en secours d'une suppression.
 - Les photos avant/après sont ajoutées depuis l'onglet Société > Interventions, avec les boutons « Ajouter avant » et « Ajouter après ». Après avoir enregistré l'intervention, indique à l'utilisateur où joindre les photos si elles sont disponibles ; ne prétends jamais qu'une photo a été enregistrée si l'interface ne l'a pas confirmé. Les images sont conservées dans le stockage privé et comme pièces jointes Obsidian.
 - Pour consulter l'historique en vue d'une suppression, appelle interventions_liste sans installation : l'outil liste toutes les installations du client, chaque intervention et son ID exact. Présente ensuite les fiches avec leur installation et demande à l'utilisateur de choisir si sa demande est ambiguë. Pour enregistrer ou modifier une intervention, demande l'installation exacte si le client en possède plusieurs. N'utilise jamais une correspondance partielle ambiguë.
@@ -263,6 +263,33 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "site_gps" to prop("Coordonnées GPS exactes de l'installation telles que copiées dans Google Maps (« 47.541558, 4.459845 »), en degrés-minutes-secondes (47°32'29.6\"N 4°27'35.4\"E) ou lien Google Maps. Prioritaires sur l'adresse. « ma position » = position GPS actuelle du téléphone (quand l'utilisateur est sur place).")
         ), listOf("nom")),
         tool("client_fiche", "Affiche et réexporte la fiche Markdown d'un client DÉJÀ présent dans la base interne Société. Ne crée jamais un client et ne remplace jamais client_ecrire.", mapOf("nom" to prop("Nom du client.")), listOf("nom")),
+
+        tool("rapport_brouillons_liste", "Liste les rapports d'intervention non validés, sans les mélanger à l'historique final. Renvoie les IDs, clients, installations, dates et résumés.", mapOf()),
+        tool("rapport_brouillon_creer", "Crée un brouillon de rapport durable pour un client et une installation. Aucune entrée d'historique, note Obsidian ou PDF final n'est créée avant validation explicite.", mapOf(
+            "client" to prop("Nom exact ou partiel du client."),
+            "installation" to prop("Nom exact de l'installation si le client en possède plusieurs.")
+        ), listOf("client")),
+        tool("rapport_brouillon_modifier", "Met à jour et sauvegarde immédiatement un brouillon existant. Les champs omis restent inchangés. Ne valide jamais le rapport.", mapOf(
+            "brouillon_id" to prop("ID exact obtenu avec rapport_brouillons_liste ou rapport_brouillon_creer."),
+            "date" to prop("Date yyyy-MM-dd."),
+            "categorie" to prop("maintenance | panne | diagnostic | nettoyage | remplacement | contrôle | autre."),
+            "description" to prop("Résumé factuel dit par l'utilisateur."),
+            "diagnostic" to prop("Diagnostic constaté, uniquement si communiqué."),
+            "actions" to prop("Actions réalisées, une par ligne."),
+            "pieces" to prop("Pièces remplacées, références et quantités si connues."),
+            "mesures" to prop("Mesures relevées avec unités, sans inventer de valeurs."),
+            "onduleurs" to prop("Onduleurs concernés, marque/modèle/numéro de série cités."),
+            "statut" to prop("terminee | a_suivre | en_attente."),
+            "prochaine_maintenance" to prop("Date yyyy-MM-dd si elle a été demandée."),
+            "notes" to prop("Notes factuelles.")
+        ), listOf("brouillon_id")),
+        tool("rapport_brouillon_valider", "Valide un brouillon UNIQUEMENT lorsque l'utilisateur demande explicitement de finaliser le rapport. Le transforme en intervention d'historique, génère la note Obsidian et le PDF, puis retire le brouillon après vérification.", mapOf(
+            "brouillon_id" to prop("ID exact du brouillon.")
+        ), listOf("brouillon_id")),
+        tool("rapport_brouillon_supprimer", "Abandonne un brouillon non validé. Ne supprime jamais une intervention de l'historique.", mapOf(
+            "brouillon_id" to prop("ID exact du brouillon.")
+        ), listOf("brouillon_id")),
+
         tool("intervention_enregistrer", "Enregistre une intervention photovoltaïque réellement effectuée dans l'historique du site et dans Obsidian (note + rapport PDF). RÈGLE ABSOLUE : le rapport ne contient QUE ce que l'utilisateur a dit, avec ses mots (reformulés proprement au besoin). N'ajoute JAMAIS d'action, de mesure, de valeur (température, tension, courant…), de constat, d'état (« parfait état », « conforme »), de recommandation ni de date qu'il n'a pas donnés ; un champ non dicté reste vide. Pas de commentaire sur le rapport lui-même. Les éléments non dits sont retirés automatiquement et signalés.", mapOf(
             "client" to prop("Nom exact du client."), "installation" to prop("Nom exact de l'installation si plusieurs."),
             "date" to prop("Date de l'intervention au format yyyy-MM-dd (défaut : aujourd'hui)."),
@@ -397,6 +424,12 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         "regles_set" -> reglesSet(a)
         "client_ecrire" -> clientEcrire(a)
         "client_fiche" -> clientFiche(a)
+
+        "rapport_brouillons_liste" -> rapportBrouillonsListe()
+        "rapport_brouillon_creer" -> rapportBrouillonCreer(a)
+        "rapport_brouillon_modifier" -> rapportBrouillonModifier(a)
+        "rapport_brouillon_valider" -> ok(svc.validerBrouillon(a.s("brouillon_id")))
+        "rapport_brouillon_supprimer" -> ok(if (svc.supprimerBrouillon(a.s("brouillon_id"))) "Brouillon supprimé." else "Brouillon introuvable ou déjà supprimé.")
         "intervention_enregistrer" -> interventionEnregistrer(a)
         "intervention_modifier" -> interventionModifier(a)
         "intervention_supprimer" -> interventionSupprimer(a)
@@ -916,6 +949,50 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         return ok("✅ Fiche enregistrée : $loc\n\n---\n\n$md")
     }
 
+
+    private fun rapportBrouillonsListe(): ToolResult {
+        val brouillons = svc.data.brouillonsRapport
+        if (brouillons.isEmpty()) return ok("Aucun brouillon de rapport en cours.")
+        return ok(brouillons.sortedByDescending { it.modifieLe }.joinToString("\n\n") { b ->
+            val client = svc.data.client(b.clientId)
+            val site = client?.sites?.firstOrNull { it.id == b.siteId }
+            "Brouillon #" + b.id + " — " + (client?.nom ?: "client supprimé") + " / " + (site?.nom ?: "installation supprimée") +
+                "\nDate : " + b.date + " · " + b.categorie + "\nRésumé : " + b.description.ifBlank { "(vide)" } +
+                "\nDernière sauvegarde : " + b.modifieLe
+        })
+    }
+
+    private fun rapportBrouillonCreer(a: JSONObject): ToolResult {
+        val (client, erreur) = clientParNom(a.s("client"))
+        if (client == null) return err(erreur ?: "Client introuvable.")
+        val site = siteDe(client, a.s("installation"))
+            ?: return err("Installation introuvable ou ambiguë pour " + client.nom + ". Précise son nom.")
+        val brouillon = svc.creerBrouillon(client.id, site.id)
+            ?: return err("Impossible de créer le brouillon.")
+        return ok("Brouillon créé et sauvegardé : #" + brouillon.id + " — " + client.nom + " / " + site.nom + ". Il restera modifiable jusqu'à validation explicite.")
+    }
+
+    private fun rapportBrouillonModifier(a: JSONObject): ToolResult {
+        val id = a.s("brouillon_id")
+        val actuel = svc.data.brouillonsRapport.firstOrNull { it.id == id }
+            ?: return err("Brouillon #$id introuvable. Consulte rapport_brouillons_liste.")
+        val maj = actuel.copy(
+            date = if (a.hv("date")) a.s("date") else actuel.date,
+            categorie = if (a.hv("categorie")) a.s("categorie") else actuel.categorie,
+            description = if (a.hv("description")) a.s("description") else actuel.description,
+            diagnostic = if (a.hv("diagnostic")) a.s("diagnostic") else actuel.diagnostic,
+            actions = if (a.hv("actions")) a.s("actions") else actuel.actions,
+            pieces = if (a.hv("pieces")) a.s("pieces") else actuel.pieces,
+            mesures = if (a.hv("mesures")) a.s("mesures") else actuel.mesures,
+            onduleurs = if (a.hv("onduleurs")) a.s("onduleurs") else actuel.onduleurs,
+            statut = if (a.hv("statut")) a.s("statut") else actuel.statut,
+            prochaineMaintenance = if (a.hv("prochaine_maintenance")) a.s("prochaine_maintenance") else actuel.prochaineMaintenance,
+            notes = if (a.hv("notes")) a.s("notes") else actuel.notes
+        )
+        return if (svc.enregistrerBrouillon(maj)) ok("Brouillon #$id sauvegardé durablement. Il n'a pas été validé.")
+        else err("Échec de sauvegarde du brouillon #$id.")
+    }
+
     private fun interventionEnregistrer(a: JSONObject): ToolResult {
         val (client, erreur) = clientParNom(a.s("client"))
         if (client == null) return err(erreur!!)
@@ -962,6 +1039,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             (if (prochaine.isNotBlank()) "\n🔧 Prochaine maintenance : " + prochaine else "") +
             "\n\nLe suivi est conservé dans la fiche de l'installation et dans Obsidian." + garde.message())
     }
+
 
     /** Résultat du contrôle de fidélité d'un rapport. */
     private class Garde(val champs: Map<String, String>, val retires: List<String>, val verifie: Boolean) {
