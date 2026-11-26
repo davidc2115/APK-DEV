@@ -105,6 +105,31 @@ data class Site(
     val interventions: List<Intervention> = emptyList()
 )
 
+
+/**
+ * Rapport en cours : conservé dans data.json indépendamment de l'écran et du cycle de vie Android.
+ * Les brouillons restent séparés de l'historique jusqu'à la validation explicite.
+ */
+@Serializable
+data class BrouillonRapportIntervention(
+    val id: String,
+    val clientId: String,
+    val siteId: String,
+    val date: String = "",
+    val categorie: String = "maintenance",
+    val description: String = "",
+    val diagnostic: String = "",
+    val actions: String = "",
+    val pieces: String = "",
+    val mesures: String = "",
+    val statut: String = "terminee",
+    val prochaineMaintenance: String = "",
+    val notes: String = "",
+    val onduleurs: String = "",
+    val creeLe: String = "",
+    val modifieLe: String = ""
+)
+
 /** Historique daté des opérations réellement réalisées sur une installation. */
 @Serializable
 data class Intervention(
