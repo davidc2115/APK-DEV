@@ -46,6 +46,13 @@ class MusicToolsTest {
         assertEquals("aleatoire_off", MusicTools.modeLecture("ne mélange plus"))
     }
 
+    @Test fun corrigeJ aimePlaceParErreurDansLeNomDeLaBibliotheque() {
+        assertEquals("jaime", MusicTools.sectionEffective("playlists", "J'aime"))
+        assertEquals("jaime", MusicTools.sectionEffective("playlists", "mes titres aimés"))
+        assertEquals("playlists", MusicTools.sectionEffective("playlists", "Sport"))
+        assertEquals("jaime", MusicTools.sectionEffective("jaime", ""))
+    }
+
     @Test fun reconnaitLesAutresSectionsDeBibliotheque() {
         assertEquals("playlists", MusicTools.sectionBibliotheque("mes playlists"))
         assertEquals("titres", MusicTools.sectionBibliotheque("mes titres"))
