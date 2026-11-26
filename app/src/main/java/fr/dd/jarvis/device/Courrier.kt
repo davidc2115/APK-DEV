@@ -294,7 +294,7 @@ object Courrier {
                 }
             }
         }
-        return enregistrer(app, trouves.flatten()).size
+        return enregistrer(app, trouves).size
     }
     /** SMS / notification de mail reçus : analysés en arrière-plan, sans jamais bloquer. */
     fun recu(app: JarvisApp, source: String, titre: String, texte: String, ts: Long = System.currentTimeMillis(), compte: String = "") {
