@@ -146,7 +146,6 @@ class JarvisNotificationListener : NotificationListenerService() {
             val e = n.extras
             var titre = e.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
             val texteNotification = (e.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: e.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
-            if (titre.isBlank() && texteNotification.isBlank()) return
             // Commande anti-vol (« JARVIS <code> … ») : jamais gardée, résumée ni lue à voix haute (elle contient le code).
             // Dernier message d'une conversation (style « messagerie ») : c'est lui qui vient d'arriver.
             val dernierMessage = runCatching {
@@ -154,6 +153,7 @@ class JarvisNotificationListener : NotificationListenerService() {
             }.getOrNull().orEmpty()
             // Certaines applis SMS exposent le vrai corps uniquement dans EXTRA_MESSAGES, pas dans EXTRA_TEXT.
             val texte = fr.dd.jarvis.device.Courrier.contenuNotification(texteNotification, dernierMessage)
+            if (titre.isBlank() && texte.isBlank()) return
             val commande = listOf(texte, dernierMessage).firstOrNull { it.isNotBlank() && fr.dd.jarvis.securite.AntiVol.ressembleCommande(it) }
             // Diagnostic de l'anti-vol : un message qui commence par « JARVIS » a bien été vu dans une notification.
             if (listOf(texte, dernierMessage).any { it.trimStart().startsWith("jarvis", ignoreCase = true) } && (estMessage(sbn.packageName) || n.category == Notification.CATEGORY_MESSAGE))
