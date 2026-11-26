@@ -46,6 +46,17 @@ object Autorisations {
             "paiement|virement|payer|mot de passe|cl[ée] api|grand m[ée]nage|tous les contacts", RegexOption.IGNORE_CASE
     )
 
+    /** Opérations Discord dont la confirmation ne doit jamais devenir permanente, même pour une commande identique. */
+    private val DISCORD_CRITIQUE = Regex(
+        "discord_(membre_(timeout|expulser|bannir|pseudo)|role_(creer|modifier|supprimer|position|attribuer)|" +
+            "salon_(permission|creer|modifier|supprimer)|salons_reorganiser|serveur_modifier|" +
+            "messages_purger|message_(modifier|supprimer|epingler)|fil_(creer|gerer)|invitations)",
+        RegexOption.IGNORE_CASE
+    )
+
+    internal fun discordCritique(outil: String?, question: String): Boolean =
+        DISCORD_CRITIQUE.containsMatchIn(outil.orEmpty()) || DISCORD_CRITIQUE.containsMatchIn(question)
+
     /** Question affichée → clé d'autorisation (pour le bouton « Toujours autoriser » de l'écran de confirmation). */
     private val enAttente = ConcurrentHashMap<String, String>()
 
@@ -60,7 +71,7 @@ object Autorisations {
 
     /** Clé pour cet outil et cette question, ou null si l'action ne peut pas être autorisée une fois pour toutes. */
     fun cle(outil: String?, question: String): String? =
-        outil?.takeIf { it.isNotBlank() && !JAMAIS.containsMatchIn(question) && !JAMAIS.containsMatchIn(it) }
+        outil?.takeIf { it.isNotBlank() && !JAMAIS.containsMatchIn(question) && !JAMAIS.containsMatchIn(it) && !discordCritique(it, question) }
 
     fun permanentes(app: JarvisApp): List<String> = runCatching {
         JSONArray(app.store.autorisationsPermanentes.value).let { a -> (0 until a.length()).map { a.getString(it) } }
@@ -143,7 +154,7 @@ object Autorisations {
     suspend fun confirmer(app: JarvisApp, outil: OutilEnCours?, question: String, demander: suspend () -> Boolean): Boolean {
         val c = cle(outil?.nom, question)
         if (estPermanente(app, c)) { journaliser(app, outil?.nom ?: c.orEmpty(), question, "type d'action toujours autorisé"); return true }
-        val e = outil?.takeIf { it.nom.isNotBlank() && !CRITIQUE.containsMatchIn(question) && !CRITIQUE.containsMatchIn(it.nom) }?.let { empreinte(it.nom, it.args) }
+        val e = outil?.takeIf { it.nom.isNotBlank() && !CRITIQUE.containsMatchIn(question) && !CRITIQUE.containsMatchIn(it.nom) }?.takeIf { !discordCritique(it.nom, question) }?.let { empreinte(it.nom, it.args) }
         if (commandeAutorisee(app, e)) { journaliser(app, outil!!.nom, question, "commande toujours autorisée"); return true }
         if (c != null) enAttente[question] = c
         if (e != null) commandeEnAttente[question] = e to decrire(outil!!.nom, question)
