@@ -432,9 +432,9 @@ class JarvisMediaService : MediaBrowserService() {
             }
             ActiviteVoiture.Etape.PARTIEL -> if (enCours) afficher("🎙️ « ${e.texte.take(90)} »", "…", PlaybackState.STATE_PLAYING)
             ActiviteVoiture.Etape.REFLEXION -> if (pilote) {
-                // La demande a bien atteint le service ; il peut terminer une réponse précédente avant d'ouvrir le micro.
+                // La voix progressive peut commencer avant la fin du traitement : PLAYING évite qu'Android Auto coupe le premier segment TTS.
                 enCours = true; veille?.cancel()
-                afficher("« ${e.question.take(90)} »", e.question.ifBlank { "JARVIS prépare l'écoute…" }.take(120), PlaybackState.STATE_BUFFERING)
+                afficher("« ${e.question.take(90)} »", e.question.ifBlank { "JARVIS prépare sa réponse…" }.take(120), PlaybackState.STATE_PLAYING)
             }
             ActiviteVoiture.Etape.REPONSE -> {
                 derniere = propre(e.texte)
