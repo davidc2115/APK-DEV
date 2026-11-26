@@ -219,7 +219,9 @@ object Courrier {
         val valides = anciens.mapNotNull { ancien ->
             analyser(ancien.emetteur, ancien.resume, ancien.source, ancien.ts)
                 .firstOrNull { it.type == ancien.type }
-                ?.copy(id = ancien.id, traite = ancien.traite, domaine = ancien.domaine, auto = ancien.auto)
+                ?.copy(id = ancien.id, traite = ancien.traite, domaine = ancien.domaine, auto = ancien.auto,
+                    dateRdv = it.dateRdv ?: ancien.dateRdv, lieu = it.lieu.ifBlank { ancien.lieu },
+                    statut = if (it.dateRdv == null && ancien.dateRdv != null) ancien.statut else it.statut)
         }
         val retires = anciens.size - valides.size
         if (retires > 0 || valides.size != anciens.size) sauver(c, valides)
