@@ -689,8 +689,6 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     private suspend fun clientSupprimer(a: JSONObject): ToolResult {
         val nom = a.s("nom")
         if (nom.isBlank()) return err("Nom du client manquant.")
-        // Hermès peut appeler cet outil après une création faite en arrière-plan :
-        // ne jamais chercher dans l'instantané potentiellement périmé du service.
         val donnees = svc.repo.refresh()
         val trouves = donnees.chercherClients(nom)
         val exact = donnees.clients.filter { normaliser(it.nom) == normaliser(nom) }
@@ -708,23 +706,27 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         }
         if (!confirm("Supprimer définitivement la fiche client « ${cible.nom} » et ses ${cible.sites.size} installation(s) de la base Société ? Cette action est irréversible.", true))
             return err("Suppression refusée. La fiche « ${cible.nom} » est conservée.")
+        // Un coffre configuré mais inaccessible ne doit jamais être interprété comme une fiche absente.
+        val coffrePret = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            !app.obsidian.coffreConfigure() || app.obsidian.coffreDisponible()
+        }
+        if (!coffrePret)
+            return err("⛔ Suppression annulée : le coffre Obsidian sélectionné est inaccessible ou en lecture seule. La fiche Société est conservée.")
         svc.repo.update { data -> data.copy(clients = data.clients.filterNot { it.id == cible.id }) }
         val removed = svc.repo.refresh().clients.none { it.id == cible.id }
         if (!removed) return err("❌ La fiche « ${cible.nom} » est toujours présente après la tentative de suppression. Aucune confirmation de réussite.")
-        // La fiche Markdown exportée est une copie de présentation : la retirer aussi si elle existe.
-        val markdownPath = "Société/Clients/${cible.nom}.md"
-        val markdownExists = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            markdownPath in app.obsidian.listNotes("Société/Clients")
+        val markdownPath = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            app.obsidian.ficheExistante("Société/Clients", cible.nom)
         }
-        val markdownDeleted = if (markdownExists) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val markdownDeleted = if (markdownPath != null) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             app.obsidian.supprimerNote(markdownPath)
         } else true
         val markdownStillThere = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            markdownPath in app.obsidian.listNotes("Société/Clients")
+            app.obsidian.ficheExistante("Société/Clients", cible.nom) != null
         }
         return if (markdownDeleted && !markdownStillThere)
             ok("🗑️ Fiche client « ${cible.nom} », ses installations et sa fiche Markdown Obsidian supprimées.")
-        else err("⚠️ La fiche client « ${cible.nom} » a bien été retirée de la base Société, mais sa copie Markdown Obsidian est encore présente ou inaccessible : ${markdownPath}. Vérifie les droits d'écriture du coffre.")
+        else err("⚠️ La fiche client « ${cible.nom} » a bien été retirée de la base Société, mais sa copie Markdown Obsidian est encore présente ou inaccessible. Vérifie les droits du coffre.")
     }
     /** « ma position », « ma localisation exacte », « ici », « où je suis »… = position actuelle du téléphone. */
     private fun estMaPosition(t: String): Boolean {
