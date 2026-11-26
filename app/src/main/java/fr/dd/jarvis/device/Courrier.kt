@@ -296,6 +296,27 @@ object Courrier {
         }
         return enregistrer(app, trouves).size
     }
+    /**
+     * Rattrapage des courriels des comptes actifs (Gmail ou IMAP), même si Jarvis n'a pas vu leur notification.
+     * On analyse le sujet et le corps, pas seulement l'aperçu tronqué de la notification.
+     */
+    suspend fun importerMailsRecents(app: JarvisApp, nombre: Int = 200): Int {
+        if (!app.store.courrierAnalyse.value) return 0
+        return runCatching {
+            val mails = app.mail.fetchRecent(nombre, unreadOnly = false, full = true, everywhere = true)
+            val data = runCatching { app.societe.data }.getOrNull()
+            val regles = regles(app)
+            val trouves = mails.flatMap { mail ->
+                val emetteur = mail.from.ifBlank { mail.fromAddr }.ifBlank { "Expéditeur inconnu" }
+                val contenu = listOf(mail.subject, mail.body.ifBlank { mail.snippet }).filter { it.isNotBlank() }.joinToString("\\n")
+                analyser(emetteur, contenu, "Mail", mail.date?.time ?: 0L).map { e ->
+                    domaine(e, mail.account, data, regles).let { (d, auto) -> e.copy(domaine = d, auto = auto) }
+                }
+            }
+            enregistrer(app, trouves).size
+        }.getOrDefault(0)
+    }
+
     /** SMS / notification de mail reçus : analysés en arrière-plan, sans jamais bloquer. */
     fun recu(app: JarvisApp, source: String, titre: String, texte: String, ts: Long = System.currentTimeMillis(), compte: String = "") {
         if (!app.store.courrierAnalyse.value) return
