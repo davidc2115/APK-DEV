@@ -76,7 +76,7 @@ object Plex {
      * Plex vide…) : on garde celui dont le jeton voit le plus de bibliothèques, pas simplement le premier qui répond.
      */
     private fun locales(app: JarvisApp): List<Pair<String, Int>> =
-        ipsLocales(app).filter { Serveur.telephoneSurReseau(it) }.map { "http://$it:$PORT" }.asSequence().filter { repond(it) }.take(4)
+        ipsLocales(app).filter { Serveur.telephoneSurReseau(app, it, PORT) }.map { "http://$it:$PORT" }.asSequence().filter { repond(it) }.take(4)
             .map { it to nbBibliotheques(app, it) }.toList()
 
     /** Comment JARVIS joint le serveur Plex en ce moment (pour l'utilisateur). */
