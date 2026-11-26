@@ -334,6 +334,17 @@ class ServeurTools(
                 if (autre == null) ssh()
                 val cible = autre?.let { Serveur.Cible(it, a.optString("port").toIntOrNull() ?: 22, a.optString("utilisateur").ifBlank { app.store.sshUser.value }, a.optString("mot_de_passe"), a.optString("via_serveur").lowercase() in setOf("oui", "true", "1")) }
                 if (cible?.jump == true) ssh()
+                if (cible != null) {
+                    val presente = Serveur.empreinteCible(app, cible)
+                    val connue = Serveur.empreinteCibleConnue(app, cible)
+                    if (connue.isBlank()) {
+                        if (!confirm("Première connexion à " + cible.hote + ":" + cible.port + " (utilisateur " + cible.user + ").\nEmpreinte SSH : " + presente + "\n\nN'approuve cette empreinte que si tu reconnais ce serveur. Jarvis la vérifiera à chaque connexion suivante.", true))
+                            return ToolResult("Connexion SSH refusée : empreinte non approuvée.")
+                        Serveur.memoriserEmpreinteCible(app, cible, presente)
+                    } else if (connue != presente) {
+                        return ToolResult("⛔ Connexion SSH bloquée : l'empreinte de " + cible.hote + ":" + cible.port + " a changé. Empreinte enregistrée : " + connue + " ; empreinte reçue : " + presente + ". Vérifie le serveur avant de réinitialiser sa confiance.")
+                    }
+                }
                 val cmd = a.optString("commande").trim()
                 if (cmd.isBlank()) return ToolResult("Commande vide.")
                 // Redémarrage / mise à jour de Home Assistant « à la main » : remplacés par les versions sûres.
