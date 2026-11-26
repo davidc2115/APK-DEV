@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.ai.Vision
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -304,10 +305,26 @@ private fun signaturePng(traits: List<Trait>, largeur: Int, hauteur: Int): ByteA
 fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    // Le brouillon est restauré après rotation, retour de l'appareil photo et recréation de l'activité.
+    // La dictée est conservée dans le stockage privé de l'application, même après fermeture ou arrêt du téléphone.
+    val preferencesBrouillon = remember(ctx) { ctx.getSharedPreferences("jarvis_rapport_brouillon", Context.MODE_PRIVATE) }
+    var brouillonCharge by remember { mutableStateOf(false) }
     var installationCle by rememberSaveable { mutableStateOf("") }
     var categorie by rememberSaveable { mutableStateOf("maintenance") }
     var dictee by rememberSaveable { mutableStateOf("") }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val texteSauve = withContext(Dispatchers.IO) { preferencesBrouillon.getString("dictee", "").orEmpty() }
+        if (dictee.isBlank()) dictee = texteSauve
+        brouillonCharge = true
+    }
+    androidx.compose.runtime.LaunchedEffect(dictee, brouillonCharge) {
+        if (brouillonCharge) {
+            delay(250)
+            withContext(Dispatchers.IO) {
+                if (dictee.isBlank()) preferencesBrouillon.edit().remove("dictee").apply()
+                else preferencesBrouillon.edit().putString("dictee", dictee).apply()
+            }
+        }
+    }
     val avant = rememberSaveable(saver = UriListSaver) { mutableStateListOf<Uri>() }
     val apres = rememberSaveable(saver = UriListSaver) { mutableStateListOf<Uri>() }
     val traits = rememberSaveable(saver = TraitListSaver) { mutableStateListOf<Trait>() }
@@ -353,7 +370,11 @@ fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) 
                         .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Décris l'intervention"))
                 }
             }
-            if (dictee.isNotBlank()) HudButton("Effacer") { dictee = "" }
+            if (dictee.isNotBlank()) HudButton("↻ Réinitialiser le brouillon") {
+                dictee = ""
+                message = "Brouillon réinitialisé."
+                scope.launch(Dispatchers.IO) { preferencesBrouillon.edit().remove("dictee").apply() }
+            }
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -377,7 +398,12 @@ fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) 
                     fr.dd.jarvis.ai.CompteRendu.creer(app, s.client.id, s.site.id, categorie, dictee, avant.toList(), apres.toList(), signature)
                 }.getOrElse { fr.dd.jarvis.ai.CompteRendu.Resultat("❌ ${it.message}", null, null) }
                 message = r.texte
-                if (r.date != null && r.description != null) { finiDate = r.date; finiDescription = r.description }
+                if (r.date != null && r.description != null) {
+                    finiDate = r.date
+                    finiDescription = r.description
+                    dictee = ""
+                    withContext(Dispatchers.IO) { preferencesBrouillon.edit().remove("dictee").apply() }
+                }
                 occupe = false
             }
         }
