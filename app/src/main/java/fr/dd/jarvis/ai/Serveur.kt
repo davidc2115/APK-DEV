@@ -927,31 +927,61 @@ object Serveur {
 
     /**
      * Exécute un service puis CONFIRME le résultat : Home Assistant renvoie les états changés pendant l'appel ; pour un
-     * appareil plus lent (Zigbee, télé, poêle…), l'état est relu jusqu'à ~2,5 s. Le compte rendu dit ce qui est
-     * réellement constaté — avant, « exécuté » était annoncé même quand l'appareil, injoignable, n'avait pas bougé.
+     * appareil plus lent (Zigbee, télé, poêle…), l'état est relu pendant un budget global de ~2,5 s.
+     * Les actions sans état de confirmation standard ne déclenchent pas cette attente : elles sont signalées
+     * comme acceptées, mais non vérifiées. Le compte rendu distingue aussi les états inconnus et les transitions.
      */
+    /** Services dont le résultat peut être confirmé à partir de l’état standard de l’entité HA. */
+    internal fun verificationServiceConnue(service: String, donnees: JSONObject): Boolean = when (service) {
+        "turn_on", "turn_off", "open_cover", "close_cover", "open", "close", "lock", "unlock" -> true
+        "set_temperature" -> donnees.has("temperature")
+        "set_hvac_mode" -> donnees.has("hvac_mode")
+        "set_preset_mode" -> donnees.has("preset_mode")
+        "set_fan_mode" -> donnees.has("fan_mode")
+        "volume_set" -> donnees.has("volume_level")
+        "volume_mute" -> donnees.has("is_volume_muted")
+        "select_source" -> donnees.has("source")
+        "select_option" -> donnees.has("option")
+        "set_value" -> donnees.has("value")
+        else -> false
+    }
     fun haService(app: JarvisApp, domaine: String, service: String, entite: String, donnees: JSONObject?): String {
         val corps = donnees ?: JSONObject()
         val ids = entite.split(",").map { it.trim() }.filter { it.isNotBlank() }
         if (ids.isNotEmpty()) corps.put("entity_id", if (ids.size > 1) JSONArray(ids) else ids.first())
         val demandes = JSONObject(corps.toString())
         val reponse = ha(app, "POST", "/api/services/$domaine/$service", corps)
-        if (ids.isEmpty()) return "✅ $domaine.$service exécuté par Home Assistant."
+        if (ids.isEmpty()) return "⚠️ $domaine.$service accepté par Home Assistant, mais aucun entity_id ne permet de vérifier le résultat : ne le présente pas comme confirmé."
         val changes = HashMap<String, JSONObject>()
         runCatching { JSONArray(reponse) }.getOrNull()?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { changes[it.optString("entity_id")] = it } }
+        // Un seul budget de 2,5 s pour toute la commande, mais des lectures en tours :
+        // chaque entité a ainsi une chance d'être vérifiée, au lieu de laisser la première
+        // consommer tout le délai avant même de regarder les suivantes.
+        val observations = ids.associateWith { changes[it] }.toMutableMap()
+        val aVerifier = ids.filterTo(linkedSetOf()) { id ->
+            verificationServiceConnue(service, demandes) &&
+                (observations[id] == null || !confirmeService(domaine, service, demandes, observations[id]!!))
+        }
         val limite = System.currentTimeMillis() + 2_500
-        return ids.joinToString("\n") { id ->
-            var o: JSONObject? = changes[id]
-            while ((o == null || !confirmeService(domaine, service, demandes, o)) && System.currentTimeMillis() < limite) {
-                Thread.sleep(400)
-                o = runCatching { JSONObject(ha(app, "GET", "/api/states/$id")) }.getOrNull() ?: o
+        while (aVerifier.isNotEmpty() && System.currentTimeMillis() < limite) {
+            Thread.sleep(400)
+            for (id in aVerifier.toList()) {
+                if (System.currentTimeMillis() >= limite) break
+                val nouvelEtat = runCatching { JSONObject(ha(app, "GET", "/api/states/$id")) }.getOrNull()
+                if (nouvelEtat != null) {
+                    observations[id] = nouvelEtat
+                    if (confirmeService(domaine, service, demandes, nouvelEtat)) aVerifier.remove(id)
+                }
             }
+        }
+        return ids.joinToString("\n") { id ->
+            var o = observations[id]
             if (o == null) o = runCatching { JSONObject(ha(app, "GET", "/api/states/$id")) }.getOrNull()
             compteRenduService(domaine, service, id, demandes, o)
         }
     }
 
-    /** L'état relu correspond-il à ce que le service devait produire ? (vrai si rien de précis n'est attendu) */
+    /** L'état relu correspond-il au résultat attendu ? Retourne false dès qu'aucune confirmation fiable n'est possible. */
     internal fun confirmeService(domaine: String, service: String, donnees: JSONObject, o: JSONObject): Boolean {
         val etat = o.optString("state")
         if (etat in setOf("unavailable", "unknown")) return false
@@ -959,23 +989,35 @@ object Serveur {
         return when {
             service == "turn_on" -> etat !in setOf("off", "standby")
             service == "turn_off" -> etat in setOf("off", "standby")
-            service in setOf("open_cover", "open") -> etat in setOf("open", "opening")
-            service in setOf("close_cover", "close") -> etat in setOf("closed", "closing")
-            service == "lock" -> etat in setOf("locked", "locking")
-            service == "unlock" -> etat in setOf("unlocked", "unlocking", "open")
+            service in setOf("open_cover", "open") -> etat == "open"
+            service in setOf("close_cover", "close") -> etat == "closed"
+            service == "lock" -> etat == "locked"
+            service == "unlock" -> etat in setOf("unlocked", "open")
             service == "set_temperature" && donnees.has("temperature") ->
                 kotlin.math.abs(a.optDouble("temperature", Double.NaN) - donnees.optDouble("temperature", Double.NaN)) < 0.26
             service == "set_hvac_mode" && donnees.has("hvac_mode") -> etat == donnees.optString("hvac_mode")
-            service == "set_preset_mode" && donnees.has("preset_mode") -> a.optString("preset_mode").equals(donnees.optString("preset_mode"), true)
-            service == "set_fan_mode" && donnees.has("fan_mode") -> a.optString("fan_mode").equals(donnees.optString("fan_mode"), true)
-            service == "volume_set" && donnees.has("volume_level") ->
+            service == "set_preset_mode" && donnees.has("preset_mode") && a.has("preset_mode") ->
+                a.optString("preset_mode").equals(donnees.optString("preset_mode"), true)
+            service == "set_fan_mode" && donnees.has("fan_mode") && a.has("fan_mode") ->
+                a.optString("fan_mode").equals(donnees.optString("fan_mode"), true)
+            service == "volume_set" && donnees.has("volume_level") && a.has("volume_level") ->
                 kotlin.math.abs(a.optDouble("volume_level", Double.NaN) - donnees.optDouble("volume_level", Double.NaN)) < 0.03
-            service == "volume_mute" && donnees.has("is_volume_muted") -> a.optBoolean("is_volume_muted") == donnees.optBoolean("is_volume_muted")
-            service == "select_source" && donnees.has("source") -> a.optString("source").equals(donnees.optString("source"), true)
+            service == "volume_mute" && donnees.has("is_volume_muted") && a.has("is_volume_muted") ->
+                a.optBoolean("is_volume_muted") == donnees.optBoolean("is_volume_muted")
+            service == "select_source" && donnees.has("source") && a.has("source") ->
+                a.optString("source").equals(donnees.optString("source"), true)
             service == "select_option" && donnees.has("option") -> etat.equals(donnees.optString("option"), true)
             service == "set_value" && donnees.has("value") -> etat == donnees.opt("value").toString() || etat.toDoubleOrNull() == donnees.optDouble("value", Double.NaN)
-            else -> true
+            else -> false
         }
+    }
+
+    internal fun serviceEnTransition(service: String, etat: String): Boolean = when (service) {
+        "open_cover", "open" -> etat == "opening"
+        "close_cover", "close" -> etat == "closing"
+        "lock" -> etat == "locking"
+        "unlock" -> etat == "unlocking"
+        else -> false
     }
 
     internal fun compteRenduService(domaine: String, service: String, id: String, donnees: JSONObject, o: JSONObject?): String {
@@ -993,6 +1035,9 @@ object Serveur {
         }.joinToString(", ").let { if (it.isBlank()) "" else " ($it)" }
         return when {
             etat == "unavailable" -> "⚠️ $nom (`$id`) est INDISPONIBLE dans Home Assistant : la commande $domaine.$service a été acceptée mais l'appareil ne répond pas (hors ligne, intégration déconnectée…)."
+            etat == "unknown" -> "⚠️ $nom (`$id`) est en état INCONNU dans Home Assistant : $domaine.$service a été accepté, mais aucune confirmation fiable n'est possible."
+            serviceEnTransition(service, etat) -> "⏳ $nom (`$id`) : $domaine.$service est bien lancé, mais l'appareil est encore en transition (« $etat »)$detail. L'action n'est pas encore terminée."
+            !verificationServiceConnue(service, donnees) -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant ; état actuel « $etat »$detail. Le résultat fonctionnel n'est pas vérifiable automatiquement : ne le présente pas comme confirmé."
             confirmeService(domaine, service, donnees, o) -> "✅ $nom (`$id`) : $domaine.$service confirmé — état « $etat »$detail."
             else -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant, mais l'état reste « $etat »$detail après 2,5 s. Ne dis PAS que c'est fait : l'appareil n'a peut-être pas suivi (ou il réagit lentement)."
         }
