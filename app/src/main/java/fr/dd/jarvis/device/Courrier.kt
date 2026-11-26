@@ -370,7 +370,7 @@ object Courrier {
         .sortedByDescending { it.ts }.joinToString("\n") { "- " + ligne(it) + etiquette(it) }
 
     /** Factures, devis et rendez-vous reçus non traités. */
-    fun resumeATraiter(c: Context): String = liste(c).filter { !it.traite && it.type != COLIS && (it.type != RDV || (it.dateRdv ?: 0) > System.currentTimeMillis()) }
+    fun resumeATraiter(c: Context): String = liste(c).filter { !it.traite && it.type != COLIS && (it.type != RDV || it.dateRdv == null || it.dateRdv > System.currentTimeMillis()) }
         .sortedByDescending { it.ts }.take(12).joinToString("\n") { "- " + ligne(it) + etiquette(it) }
 
     // ------------------------------------------------------------------ demandes
