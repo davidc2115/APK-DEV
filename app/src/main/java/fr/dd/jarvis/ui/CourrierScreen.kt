@@ -44,6 +44,7 @@ fun CourrierScreen(app: JarvisApp) = CourrierListe(app, null)
 @Composable
 fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     var version by remember { mutableIntStateOf(0) }
+    var actionInfo by remember { mutableStateOf("") }
     var domaine by rememberSaveable { mutableStateOf(domaineFixe ?: "tous") }
     var type by rememberSaveable { mutableStateOf("tous") }
     var voirTraites by rememberSaveable { mutableStateOf(false) }
@@ -60,6 +61,7 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             HudPanel(Modifier.fillMaxWidth(), title = if (domaineFixe == Courrier.SOCIETE) "📬 Reçus pour la Société" else "📬 Courrier reçu") {
+                if (actionInfo.isNotBlank()) Text(actionInfo, color = HudDim, fontSize = 11.sp)
                 Text(if (domaineFixe == Courrier.SOCIETE) "Factures, devis, rendez-vous et colis classés « Société ». Les éléments perso ou à classer sont dans l'onglet Courrier."
                     else "Colis, rendez-vous, factures et devis repérés dans tes SMS et mails. Classe chacun 🏢 Société ou 🏠 Perso : ce qui vient d'un client de la Société (ou cite un de tes devis / factures, ou arrive sur la boîte mail de la Société) est classé tout seul, et ton choix est retenu pour les prochains messages du même expéditeur.",
                     color = HudDim, fontSize = 12.sp)
@@ -108,8 +110,15 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
                     }
                     if (e.type == Courrier.RDV) HudChip("📅 Ajouter à l'agenda") {
                         scope.launch {
-                            withContext(Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.ToolBox(app) { _, _ -> true }.execute("create_event", Courrier.argsEvenement(e)) } }
-                            Courrier.marquer(app, e.id); version++
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching { fr.dd.jarvis.ai.ToolBox(app) { _, _ -> true }.execute("create_event", Courrier.argsEvenement(e)) }
+                                    .getOrElse { fr.dd.jarvis.ai.ToolResult("Échec de création : " + (it.message ?: "erreur inconnue")) }
+                            }
+                            actionInfo = result.text
+                            if (result.text.startsWith("Événement «")) {
+                                Courrier.marquer(app, e.id)
+                                version++
+                            }
                         }
                     }
                     if (e.lien.isNotBlank()) HudChip("🔗 Suivi") {
