@@ -227,6 +227,41 @@ class RegistreApprentissage(
         return id
     }
 
+    /**
+     * Alimente le registre partagé depuis l'apprentissage historique de Memo.
+     * Une habitude ne devient candidate qu'après trois contenus de preuve réellement distincts ;
+     * changer le contexte ou la source d'une même phrase ne gonfle pas le compteur.
+     */
+    @Synchronized
+    fun enregistrerPreuveHabitude(
+        titre: String,
+        description: String,
+        provenance: String,
+        contenu: String,
+        contexte: String,
+        source: String,
+        acteur: String = "jarvis"
+    ): String {
+        val id = creer("habit", titre, description, provenance, acteur)
+        ajouterPreuve(id, contenu, contexte, source, acteur)
+        val item = entree(id) ?: throw IllegalStateException("Habitude introuvable après enregistrement.")
+        val preuves = item.optJSONArray("evidence") ?: JSONArray()
+        val contenusDistincts = mutableSetOf<String>()
+        for (i in 0 until preuves.length()) {
+            val texte = preuves.optJSONObject(i)?.optString("content").orEmpty()
+            if (texte.isBlank()) continue
+            val normalise = java.text.Normalizer.normalize(texte.lowercase(), java.text.Normalizer.Form.NFD)
+                .replace(Regex("\\p{M}"), "")
+                .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+                .trim()
+            if (normalise.isNotBlank()) contenusDistincts.add(empreinte(normalise))
+        }
+        if (item.optString("state") == ETAT_OBSERVED && contenusDistincts.size >= 3) {
+            changerEtat(id, ETAT_CANDIDATE, false, acteur)
+        }
+        return id
+    }
+
     /** Ajoute une preuve contextualisée ; son empreinte empêche les répétitions artificielles. */
     @Synchronized
     fun ajouterPreuve(id: String, contenu: String, contexte: String, source: String, acteur: String = "jarvis"): Boolean {
@@ -266,7 +301,8 @@ class RegistreApprentissage(
         val avant = avantMutation()
         var imported = 0
         val entries = donnees.getJSONArray("entries")
-        for ((legacyKey, rawHashes) in candidates.toSortedMap()) {
+        try {
+            for ((legacyKey, rawHashes) in candidates.toSortedMap()) {
             val separator = legacyKey.indexOf('|')
             if (separator <= 0 || separator == legacyKey.lastIndex) continue
             val category = legacyKey.substring(0, separator).trim().take(40)
@@ -306,6 +342,11 @@ class RegistreApprentissage(
                 .put("legacyOpaque", true))
             journal(id, "legacy_imported", "${hashes.size} empreinte(s) historique(s) importée(s), contexte non conservé", acteur)
             imported++
+            }
+        } catch (e: Exception) {
+            // Une ancienne entrée sensible ne doit laisser aucune migration partielle en mémoire.
+            donnees = avant
+            throw e
         }
         if (imported > 0) persisterMutation(avant)
         return imported
@@ -329,6 +370,86 @@ class RegistreApprentissage(
         persisterMutation(avant)
     }
 
+    /**
+     * Enregistre les permissions demandées par un skill/outil sans les accorder.
+     * Les scopes sont explicites et bornés ; wildcard, shell, root et exécution de code sont refusés.
+     */
+    @Synchronized
+    fun demanderPermissions(id: String, permissions: List<String>, acteur: String = "jarvis") {
+        synchroniserAvantLecture()
+        val item = entree(id) ?: throw IllegalArgumentException("Entrée inconnue : $id.")
+        if (item.optString("type") !in setOf("skill", "tool"))
+            throw IllegalArgumentException("Les permissions ne concernent que les skills et outils.")
+        if (permissions.isEmpty() || permissions.size > 12)
+            throw IllegalArgumentException("Indique entre 1 et 12 permissions précises.")
+        val autorisees = setOf(
+            "memory:read", "memory:write",
+            "calendar:read", "calendar:write",
+            "files:read", "files:write",
+            "homeassistant:read", "homeassistant:control",
+            "network:read", "network:request",
+            "phone:read", "phone:control",
+            "obsidian:read", "obsidian:write"
+        )
+        val normalisees = permissions.map { it.trim().lowercase() }.distinct()
+        val refusees = normalisees.filter { it !in autorisees }
+        if (refusees.isNotEmpty())
+            throw SecurityException("Permissions inconnues ou trop larges refusées : ${refusees.joinToString(", ")}.")
+        val avant = avantMutation()
+        item.put("requestedPermissions", JSONArray(normalisees.sorted()))
+        item.put("updatedAt", System.currentTimeMillis())
+        journal(id, "permissions_requested", "Permissions demandées : ${normalisees.sorted().joinToString(", ")}", acteur)
+        persisterMutation(avant)
+    }
+
+    /**
+     * Déclare le manifeste d'un skill/outil proposé : version, origine, dépendances, risque et plan de test.
+     * Ce manifeste est descriptif uniquement ; il ne télécharge, n'installe ni n'exécute rien.
+     */
+    @Synchronized
+    fun declarerManifest(
+        id: String,
+        version: String,
+        source: String,
+        dependances: List<String>,
+        risque: String,
+        planTest: String,
+        acteur: String = "jarvis"
+    ) {
+        synchroniserAvantLecture()
+        val item = entree(id) ?: throw IllegalArgumentException("Entrée inconnue : $id.")
+        if (item.optString("type") !in setOf("skill", "tool"))
+            throw IllegalArgumentException("Un manifeste ne concerne que les skills et outils.")
+        if (item.optString("state") in setOf(ETAT_REJECTED, ETAT_FAILED, ETAT_SUPERSEDED))
+            throw IllegalStateException("Impossible de documenter un skill refusé, échoué ou remplacé.")
+        val versionNet = version.trim()
+        if (!versionNet.matches(Regex("[0-9A-Za-z][0-9A-Za-z.+_-]{0,39}")))
+            throw IllegalArgumentException("Version invalide (40 caractères maximum).")
+        val origine = source.trim()
+        if (origine.length !in 3..500) throw IllegalArgumentException("Origine du skill obligatoire (500 caractères maximum).")
+        val depsBrutes = dependances.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        if (depsBrutes.size > 20 || depsBrutes.any { it.length !in 2..100 })
+            throw IllegalArgumentException("Indique au maximum 20 dépendances nommées de 2 à 100 caractères.")
+        val deps = depsBrutes
+        val niveauRisque = risque.trim().lowercase()
+        if (niveauRisque !in setOf("low", "medium", "high"))
+            throw IllegalArgumentException("Risque attendu : low, medium ou high.")
+        val plan = planTest.trim()
+        if (plan.length !in 10..1500) throw IllegalArgumentException("Plan de test invalide (10 à 1500 caractères).")
+        verifierConfidentialite(versionNet, origine, deps.joinToString(" "), plan)
+        val avant = avantMutation()
+        item.put("manifest", JSONObject()
+            .put("version", versionNet)
+            .put("source", origine)
+            .put("dependencies", JSONArray(deps))
+            .put("risk", niveauRisque)
+            .put("testPlan", plan)
+            .put("updatedAt", System.currentTimeMillis()))
+        item.put("updatedAt", System.currentTimeMillis())
+        journal(id, "manifest_declared", "Manifeste descriptif mis à jour (risque $niveauRisque)", acteur)
+        persisterMutation(avant)
+    }
+
     /** Toute activation exige une validation explicite ; les transitions impossibles sont refusées. */
     @Synchronized
     fun changerEtat(id: String, nouvelEtat: String, confirmationExplicite: Boolean, acteur: String = "jarvis") {
@@ -347,6 +468,48 @@ class RegistreApprentissage(
         item.put("version", item.optInt("version", 1) + 1)
         journal(id, "state_changed", "$actuel → $cible", acteur)
         persisterMutation(avant)
+    }
+
+    data class HabitudeApprentissage(val id: String, val titre: String, val etat: String, val preuves: Int)
+
+    /** Détail relu depuis le registre canonique, sans cache de candidats parallèle dans Memo. */
+    @Synchronized
+    fun habitudeApprentissage(id: String): HabitudeApprentissage? {
+        synchroniserAvantLecture()
+        val item = entree(id) ?: return null
+        if (item.optString("type") != "habit") return null
+        return HabitudeApprentissage(id, item.optString("title").trim(), item.optString("state"),
+            item.optJSONArray("evidence")?.length() ?: 0)
+    }
+
+    /** Toutes les habitudes non actives encore dans le cycle de proposition/validation. */
+    @Synchronized
+    fun habitudesEnApprentissage(): List<HabitudeApprentissage> {
+        synchroniserAvantLecture()
+        val entries = donnees.optJSONArray("entries") ?: return emptyList()
+        val etats = setOf(ETAT_OBSERVED, ETAT_CANDIDATE, ETAT_NEEDS_REVIEW, ETAT_APPROVED, ETAT_TESTING)
+        return (0 until entries.length()).mapNotNull { index ->
+            val item = entries.optJSONObject(index) ?: return@mapNotNull null
+            if (item.optString("type") != "habit" || item.optString("state") !in etats) return@mapNotNull null
+            val titre = item.optString("title").trim()
+            if (titre.isBlank()) return@mapNotNull null
+            HabitudeApprentissage(item.optString("id"), titre, item.optString("state"),
+                item.optJSONArray("evidence")?.length() ?: 0)
+        }
+    }
+
+    /** Habitudes explicitement activées, relues depuis la source partagée à chaque demande. */
+    @Synchronized
+    fun habitudesActives(): List<Pair<String, String>> {
+        synchroniserAvantLecture()
+        val entries = donnees.optJSONArray("entries") ?: return emptyList()
+        return (0 until entries.length()).mapNotNull { index ->
+            val item = entries.optJSONObject(index) ?: return@mapNotNull null
+            if (item.optString("type") != "habit" || item.optString("state") != ETAT_ACTIVE) return@mapNotNull null
+            val titre = item.optString("title").trim()
+            if (titre.isBlank()) return@mapNotNull null
+            titre to item.optString("description").trim()
+        }
     }
 
     @Synchronized
@@ -378,7 +541,21 @@ class RegistreApprentissage(
                 changerEtat(id, args.optString("etat"), args.optBoolean("confirmation_explicite", false), acteur)
                 """{"ok":true}"""
             }
-            else -> throw IllegalArgumentException("Action attendue : list, create, evidence, counterexample ou state.")
+            "permission_request" -> {
+                val scopes = args.optJSONArray("permissions") ?: JSONArray()
+                demanderPermissions(id, (0 until scopes.length()).mapNotNull { scopes.optString(it).takeIf(String::isNotBlank) }, acteur)
+                """{"ok":true,"granted":false}"""
+            }
+            "manifest" -> {
+                val deps = args.optJSONArray("dependances") ?: JSONArray()
+                declarerManifest(
+                    id, args.optString("version"), args.optString("source"),
+                    (0 until deps.length()).mapNotNull { deps.optString(it).takeIf(String::isNotBlank) },
+                    args.optString("risque"), args.optString("plan_test"), acteur
+                )
+                """{"ok":true,"installed":false,"executed":false}"""
+            }
+            else -> throw IllegalArgumentException("Action attendue : list, read, create, evidence, counterexample, manifest, permission_request ou state.")
         }
     }
 }
