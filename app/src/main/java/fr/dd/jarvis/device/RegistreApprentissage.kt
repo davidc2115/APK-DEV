@@ -301,7 +301,8 @@ class RegistreApprentissage(
         val avant = avantMutation()
         var imported = 0
         val entries = donnees.getJSONArray("entries")
-        for ((legacyKey, rawHashes) in candidates.toSortedMap()) {
+        try {
+            for ((legacyKey, rawHashes) in candidates.toSortedMap()) {
             val separator = legacyKey.indexOf('|')
             if (separator <= 0 || separator == legacyKey.lastIndex) continue
             val category = legacyKey.substring(0, separator).trim().take(40)
@@ -341,6 +342,11 @@ class RegistreApprentissage(
                 .put("legacyOpaque", true))
             journal(id, "legacy_imported", "${hashes.size} empreinte(s) historique(s) importée(s), contexte non conservé", acteur)
             imported++
+            }
+        } catch (e: Exception) {
+            // Une ancienne entrée sensible ne doit laisser aucune migration partielle en mémoire.
+            donnees = avant
+            throw e
         }
         if (imported > 0) persisterMutation(avant)
         return imported
