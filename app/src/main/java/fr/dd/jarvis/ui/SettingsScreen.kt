@@ -2187,7 +2187,7 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
                         Text(cle.empreinte, color = HudText)
                         Spacer(Modifier.height(8.dp))
                         Text("Compare cette empreinte à celle affichée directement sur Debian avec :")
-                        Text(if (nomCle.isNotBlank()) "ssh-keygen -E md5 -lf /etc/ssh/ssh_host_${nomCle}_key.pub" else "Type de clé inconnu : vérifie son empreinte avec ssh-keygen -lf sur la clé publique d'hôte correspondante.", color = HudText)
+                        Text(if (nomCle.isNotBlank()) "ssh-keygen -E md5 -lf /etc/ssh/ssh_host_${nomCle}_key.pub | awk '{print $2}' | sed 's/^MD5://'" else "Type de clé inconnu : vérifie son empreinte avec ssh-keygen -lf sur la clé publique d'hôte correspondante.", color = HudText)
                         Spacer(Modifier.height(8.dp))
                         Text("Si les valeurs ne correspondent pas exactement, refuse. Aucune commande SSH ne sera exécutée avant cette approbation.")
                     }
