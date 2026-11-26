@@ -174,7 +174,11 @@ object GuidageVoiture {
             val nomAppli = choix.ifBlank { "Google Maps" }
             when (attendre(t1, 10_000, app)) {
                 true -> { journal.noter("voiture", "guidage démarré par $nomAppli vers $nom"); return "🧭 Itinéraire vers $nom lancé dans $nomAppli." }
-                null -> return "🧭 Itinéraire vers $nom envoyé à $nomAppli."
+                null -> {
+                    val ouverte = attendreOuverture(t1, 6_000)
+                    return if (ouverte) "⚠️ $nomAppli s'est ouvert pour $nom, mais l'accès aux notifications ne permet pas de confirmer le guidage. Vérifie que l'itinéraire a bien démarré."
+                    else "⚠️ La demande a été transmise à $nomAppli, mais je ne peux pas vérifier que l'application ou le guidage s'est ouvert. Active l'accès aux notifications et l'accessibilité de JARVIS pour un contrôle fiable."
+                }
                 false -> {
                     val ouverte = attendreOuverture(t1, 6_000)
                     val blocage = blocageProbable(app)
