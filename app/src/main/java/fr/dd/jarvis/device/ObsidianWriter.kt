@@ -7,6 +7,10 @@ import fr.dd.jarvis.data.Store
 import java.io.File
 import java.io.IOException
 
+data class DoublonObsidian(val type: String, val chemins: List<String>, val empreinte: String)
+data class ChangementObsidian(val type: String, val chemin: String)
+data class RapportChangementsObsidian(val referenceInitialisee: Boolean, val changements: List<ChangementObsidian>)
+
 /**
  * Écrit les fichiers dans le dossier Obsidian choisi (sélecteur Android, sous-dossiers créés au besoin),
  * sinon dans le dossier propre à l'application (Android/data/fr.dd.jarvis/files/<dossier>).
@@ -546,6 +550,77 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Vrai si le coffre configuré est actuellement lisible ; le mode local reste valide sans coffre choisi. */
     fun coffreLisible(): Boolean = !coffreConfigure() || vaultRoot() != null
+
+    /** Les opérations de migration/écriture exigent un coffre lisible et inscriptible. */
+    fun coffreDisponible(): Boolean = vaultRoot()?.let { it.canRead() && it.canWrite() } == true
+
+    /** Vérifie réellement lecture, écriture et suppression d'un fichier temporaire à la racine du coffre. */
+    fun testerAccesComplet(): Boolean {
+        val root = vaultRoot() ?: return false
+        if (!root.canRead() || !root.canWrite()) return false
+        val probe = runCatching { root.createFile("application/octet-stream", "JARVIS-controle-acces-${System.nanoTime()}.tmp") }.getOrNull() ?: return false
+        return try {
+            val attendu = "JARVIS-OBSIDIAN-ACCESS".toByteArray(Charsets.UTF_8)
+            ctx.contentResolver.openOutputStream(probe.uri, "wt")?.use { it.write(attendu); it.flush() }
+                ?: throw IOException("Écriture refusée")
+            val relu = ctx.contentResolver.openInputStream(probe.uri)?.use { it.readBytes() }
+                ?: throw IOException("Lecture refusée")
+            if (!relu.contentEquals(attendu)) throw IOException("Vérification du contenu échouée")
+            if (!probe.delete()) throw IOException("Le fichier de contrôle n'a pas pu être supprimé")
+            true
+        } catch (_: Exception) {
+            runCatching { probe.delete() }
+            false
+        }
+    }
+
+    /**
+     * Lit d'abord la source configurée. Une copie locale n'est importée qu'une seule fois,
+     * après confirmation que la note est réellement absente et que le coffre est disponible.
+     */
+    fun lireOuMigrer(folder: String, fileName: String, ancienneCopie: String?, mime: String = "text/markdown"): String? {
+        if (coffreConfigure()) {
+            val distante = try {
+                lireAvecDateStrict(folder, fileName)?.first
+            } catch (e: Exception) {
+                runCatching { fr.dd.jarvis.voice.JournalVoix.noter("diagnostic", "Lecture Obsidian impossible pour $fileName ; migration suspendue : ${e.message ?: e.javaClass.simpleName}") }
+                throw IOException("Lecture Obsidian impossible pour $fileName ; migration locale suspendue.", e)
+            }
+            if (distante != null) return distante
+            if (!coffreDisponible()) return null
+            val cle = "$folder/$fileName"
+            val prefs = ctx.getSharedPreferences("obsidian_migrations", Context.MODE_PRIVATE)
+            if (prefs.getBoolean(cle, false)) return null
+            if (ancienneCopie.isNullOrEmpty()) {
+                prefs.edit().putBoolean(cle, true).apply()
+                return null
+            }
+            val migration = runCatching { saveBytes(folder, fileName, ancienneCopie.toByteArray(Charsets.UTF_8), mime) }
+            if (migration.isFailure) {
+                runCatching { fr.dd.jarvis.voice.JournalVoix.noter("diagnostic", "Migration Obsidian différée pour $fileName : ${migration.exceptionOrNull()?.message ?: "écriture refusée"}") }
+                return null
+            }
+            prefs.edit().putBoolean(cle, true).apply()
+            return ancienneCopie
+        }
+        return read(folder, fileName) ?: ancienneCopie
+    }
+
+    fun empreinteContenu(contenu: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(contenu.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+
+    /** Empêche d'écraser une mémoire modifiée dans Obsidian depuis sa dernière lecture. */
+    fun ecrireSiInchange(path: String, contenu: String, empreinteAttendue: String?): String {
+        val p = path.trim().trim('/')
+        val folder = p.substringBeforeLast('/', "")
+        val name = p.substringAfterLast('/')
+        val distant = lireAvecDateStrict(folder, name)?.first
+        if (distant?.let(::empreinteContenu) != empreinteAttendue)
+            throw IOException("Conflit Obsidian : « $path » a changé depuis sa dernière lecture. Aucune donnée n'a été écrasée.")
+        saveBytes(folder, name, contenu.toByteArray(Charsets.UTF_8), if (name.endsWith(".json", true)) "application/json" else "text/markdown")
+        return empreinteContenu(contenu)
+    }
 
     fun readNote(path: String): String? {
         signalerFilPrincipal("readNote")
