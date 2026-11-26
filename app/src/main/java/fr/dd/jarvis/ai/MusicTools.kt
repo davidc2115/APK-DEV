@@ -8,7 +8,7 @@ import org.json.JSONObject
 /** Outils de recherche et de pilotage de YT Music Morphe via les sessions Android. */
 class MusicTools(private val app: JarvisApp) {
     companion object {
-        val KEYWORDS = Regex("musique|music|morceau|chanson|titre|artiste|album|playlist|biblioth[eè]que|j.aime|al[ée]atoire|file d.attente|yt ?music|morphe|spotify|lecture musicale|\u00e9couter|mets le \\d", RegexOption.IGNORE_CASE)
+        val KEYWORDS = Regex("musique|music|morceau|chanson|titre|artiste|album|playlist|biblioth[eè]que|j.aime|al[ée]atoire|r[ée]p[eè]tition|r[ée]p[eè]ter|repeat|boucle|shuffle|m[eè]lange|file d.attente|yt ?music|morphe|spotify|lecture musicale|\u00e9couter|mets le \\d", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
         val NAMES = setOf("musique_etat", "musique_commander", "musique_rechercher", "musique_resultats", "musique_choisir", "musique_bibliotheque", "musique_action", "musique_file")
 
