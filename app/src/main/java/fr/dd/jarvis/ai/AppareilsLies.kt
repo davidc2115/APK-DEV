@@ -173,8 +173,8 @@ object AppareilsLies {
     /** Le téléphone est-il sur le réseau de la maison ? (même réseau que le serveur, sinon que les appareils relevés) */
     fun aLaMaison(app: JarvisApp): Boolean {
         val lan = listOf(app.store.sshHost.value.trim(), app.store.serveurIpLocale.value.trim()).firstOrNull { Serveur.ipPrivee(it) }
-        if (lan != null) return Serveur.telephoneSurReseau(lan)
-        return runCatching { Registre.tous(app).take(10).any { Serveur.telephoneSurReseau(it.optString("ip")) } }.getOrDefault(false)
+        if (lan != null) return Serveur.telephoneSurReseau(app, lan)
+        return runCatching { Registre.tous(app).take(10).any { Serveur.telephoneSurReseau(app, it.optString("ip")) } }.getOrDefault(false)
     }
 
     /**
