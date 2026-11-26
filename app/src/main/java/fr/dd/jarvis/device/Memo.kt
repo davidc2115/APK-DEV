@@ -99,49 +99,37 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val hash = MessageDigest.getInstance("SHA-256").digest(preuveNormalisee.toByteArray())
             .joinToString("") { "%02x".format(it) }.take(20)
         val proofs = candidates.getOrPut(key) { linkedSetOf() }
+        // Le registre Jarvis/Hermès reçoit les mêmes preuves, sans attendre la migration legacy.
+        // Il garde leur contexte et ne passe en candidate qu'après trois preuves distinctes.
+        registreApprentissage.enregistrerPreuveHabitude(
+            "[$category] $value",
+            "Préférence candidate de la rubrique $category",
+            "Memo.apprendre",
+            evidence,
+            category,
+            "memo.apprendre",
+            "jarvis"
+        )
         if (!proofs.add(hash)) {
             // Si la confirmation précédente a échoué sur Obsidian, les trois preuves restent présentes :
             // retenter aussi la mémoire durable avant d'annoncer que l'habitude est enregistrée.
             if (proofs.size >= 3) {
-                persist()
-                candidates.remove(key)
-                try {
-                    persistCandidates()
-                } catch (e: Exception) {
-                    candidates[key] = proofs
-                    runCatching { restaurerPreuvesLocales() }
-                    throw e
-                }
-                return "Habitude confirmée après trois preuves distinctes et ajoutée à la mémoire durable : $value"
+                // Trois preuves rendent la proposition candidate, jamais active automatiquement.
+                // Le registre partagé conserve l'état candidate jusqu'à une validation explicite.
+                persistCandidates()
+                return "Habitude candidate prête pour validation explicite (3/3 preuves) : $value"
             }
             persistCandidates()
             return "Cette preuve a déjà été prise en compte (${proofs.size}/3)."
         }
         if (proofs.size < 3) {
             persistCandidates()
-            return "Préférence candidate conservée (${proofs.size}/3 preuves distinctes). Elle ne sera pas appliquée comme habitude avant confirmation par répétition."
+            return "Préférence candidate conservée (${proofs.size}/3 preuves distinctes). Elle ne sera pas appliquée comme habitude avant validation explicite."
         }
-        val habitLine = "- $value"
-        val current = items["habitudes"].orEmpty()
-        val updated = if (current.lines().any { it.equals(habitLine, true) }) current
-            else listOf(current.trim(), habitLine).filter { it.isNotBlank() }.joinToString("\n")
-        val anciennesHabitudes = items["habitudes"]
-        items["habitudes"] = updated
-        // Garder les preuves tant que la mémoire durable n'est pas écrite. En cas d'échec
-        // de l'écriture locale, restaurer aussi la rubrique modifiée en mémoire.
-        try { persist() } catch (e: EcritureLocaleMemoireException) {
-            if (anciennesHabitudes == null) items.remove("habitudes") else items["habitudes"] = anciennesHabitudes
-            throw e
-        }
-        candidates.remove(key)
-        try {
-            persistCandidates()
-        } catch (e: Exception) {
-            candidates[key] = proofs
-            runCatching { restaurerPreuvesLocales() }
-            throw e
-        }
-        return "Habitude confirmée après trois preuves distinctes et ajoutée à la mémoire durable : $value"
+        // Ne pas injecter dans items["habitudes"] : cette rubrique alimente directement les prompts.
+        // L'entrée reste candidate dans le registre Jarvis/Hermès jusqu'à confirmation explicite.
+        persistCandidates()
+        return "Habitude candidate prête pour validation explicite (3/3 preuves) : $value"
     }
 
     @Synchronized
@@ -597,10 +585,18 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         ensure()
         val identite = "## Identité\nDans cette installation, tu es Hermès, le cerveau principal de JARVIS, l'assistant personnel de l'utilisateur sur son téléphone : " +
             "tu réponds à toutes ses demandes, avec les outils du téléphone (Jarvis) et une seule mémoire partagée.\n\n"
-        if (items.isEmpty()) return identite.trim()
+        val habitudesActives = registreApprentissage.habitudesActives()
+        val memoire = LinkedHashMap(items)
+        if (habitudesActives.isNotEmpty()) {
+            val lignes = memoire["habitudes"].orEmpty().lines().filter { it.isNotBlank() }
+            memoire["habitudes"] = (lignes + habitudesActives.map { (titre, description) ->
+                if (description.isBlank()) "- $titre" else "- $titre : $description"
+            }).distinct().joinToString("\n")
+        }
+        if (memoire.isEmpty()) return identite.trim()
         return identite + "## Mémoire partagée avec JARVIS\n" +
             "Consignes durables de l'utilisateur enregistrées par JARVIS (synchronisées automatiquement ; pour les modifier, utilise mcp_jarvis_memoire_ajouter ou mcp_jarvis_memoire_oublier) :\n" +
-            items.entries.joinToString("\n") { "- [${it.key}] ${it.value.replace("\n", " ").take(600)}" }.take(6000)
+            memoire.entries.joinToString("\n") { "- [${it.key}] ${it.value.replace("\n", " ").take(600)}" }.take(6000)
     }
 
     /**
@@ -611,7 +607,16 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     fun pourPrompt(): String = try {
         ensure()
-        blocPrompt(items, vocal = fr.dd.jarvis.ai.CanalDemande.vocal)
+        val memoireAvecHabitudesActives = LinkedHashMap(items)
+        val actives = registreApprentissage.habitudesActives()
+        if (actives.isNotEmpty()) {
+            val anciennes = memoireAvecHabitudesActives["habitudes"].orEmpty().lines().filter { it.isNotBlank() }
+            val partagees = actives.map { (titre, description) ->
+                if (description.isBlank()) "- $titre" else "- $titre : $description"
+            }
+            memoireAvecHabitudesActives["habitudes"] = (anciennes + partagees).distinct().joinToString("\n")
+        }
+        blocPrompt(memoireAvecHabitudesActives, vocal = fr.dd.jarvis.ai.CanalDemande.vocal)
     } catch (e: Exception) {
         "\n\nMÉMOIRE DURABLE TEMPORAIREMENT INACCESSIBLE : le coffre Obsidian n'a pas pu être lu. N'affirme pas qu'aucune consigne n'existe et ne remplace pas la mémoire par une ancienne copie locale. Réessaie lorsque l'accès sera rétabli."
     }
