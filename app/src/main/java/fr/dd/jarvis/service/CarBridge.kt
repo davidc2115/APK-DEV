@@ -18,6 +18,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Android Auto : JARVIS apparaît comme une conversation de messagerie. Dans la voiture, Android Auto lit ses messages à voix haute
@@ -29,6 +31,9 @@ object CarBridge {
     const val KEY_TEXT = "car_text"
     const val NOTIF_ID = 4100
     private val history = mutableListOf<ChatMsg>()
+    // Un seul tour vocal à la fois : conserve l'ordre des demandes et du contexte partagé.
+    private val replyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val replyMutex = Mutex()
 
     private val jarvis get() = Person.Builder().setName("JARVIS").setKey("jarvis").setImportant(true).build()
 
@@ -51,10 +56,10 @@ object CarBridge {
         val style = NotificationCompat.MessagingStyle(me).setConversationTitle("JARVIS")
         val recent = synchronized(history) { history.takeLast(8) }
         recent.forEach { m ->
-            style.addMessage((if (m.fromUser) m.text else fr.dd.jarvis.voice.TexteParle.preparer(m.text)).take(500), m.ts, if (m.fromUser) me else jarvis)
+            style.addMessage(if (m.fromUser) m.text else fr.dd.jarvis.voice.TexteParle.preparer(m.text), m.ts, if (m.fromUser) me else jarvis)
         }
         if (recent.lastOrNull()?.let { !it.fromUser && (it.text == texteBrut || it.text == texte) } != true) {
-            style.addMessage(texte.take(600), System.currentTimeMillis(), jarvis)
+            style.addMessage(texte, System.currentTimeMillis(), jarvis)
         }
 
         val flagsMut = PendingIntent.FLAG_UPDATE_CURRENT or (if (android.os.Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
@@ -82,7 +87,9 @@ object CarBridge {
     /** Traite une réponse dictée depuis l’écran Android Auto et actualise la conversation. */
     fun repondre(ctx: Context, texte: String, apres: (() -> Unit)? = null) {
         val app = ctx.applicationContext as JarvisApp
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        replyScope.launch {
+            try {
+                replyMutex.withLock {
             withContext(Dispatchers.Main) {
                 app.chatCharger()
                 if (contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { ajouter(it) }
@@ -92,13 +99,20 @@ object CarBridge {
             val rep = try {
                 // Les opérations qui exigent une confirmation explicite restent bloquées depuis l’interface voiture.
                 Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(contexte(), vocal = true) { }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Throwable) { "Désolé, je n’ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
             val propre = rep.replace(Regex("[#*_`>|]+"), "").replace(Regex("\\s+"), " ").trim().ifBlank { "C’est fait." }
             ajouter(ChatMsg(false, propre))
             post(ctx, propre)
             withContext(Dispatchers.Main) {
                 app.chatAjouter(ChatMsg(false, propre))
-                apres?.invoke()
+            }
+                }
+            } finally {
+                // Le BroadcastReceiver a appelé goAsync() : libérer son PendingResult même
+                // si le tour vocal est annulé pendant une réponse ou une attente d'outil.
+                runCatching { apres?.invoke() }
             }
         }
     }
