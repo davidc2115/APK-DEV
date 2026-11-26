@@ -2073,6 +2073,7 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
     val scope = rememberCoroutineScope()
     var msg by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var empreinteEnAttente by remember { mutableStateOf<fr.dd.jarvis.ai.Serveur.EmpreinteSSH?>(null) }
     HudPanel(Modifier.fillMaxWidth(), title = "Serveur — SSH et Home Assistant") {
         Text(
             "Permet à JARVIS de piloter ton serveur (commandes, fichiers, Docker) et Home Assistant (appareils, fichiers YAML de configuration). Les commandes destructrices demandent toujours ta confirmation ; chaque fichier modifié est sauvegardé avant écriture.",
@@ -2141,10 +2142,26 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
                     busy = false
                 }
             }
+            HudButton(if (busy) "Lecture…" else "Vérifier clé SSH", enabled = !busy && fr.dd.jarvis.ai.Serveur.sshConfigure(app)) {
+                scope.launch {
+                    busy = true
+                    msg = ""
+                    try {
+                        empreinteEnAttente = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            fr.dd.jarvis.ai.Serveur.empreinteServeurPrincipal(app)
+                        }
+                    } catch (e: Exception) { msg = "❌ \${e.message}" }
+                    busy = false
+                }
+            }
         }
         if (store.sshFp.value.isNotBlank()) Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("🔒 Empreinte mémorisée", color = HudDim, fontSize = 11.sp, modifier = Modifier.weight(1f))
-            Text("Effacer", color = HudText, fontSize = 12.sp, modifier = Modifier.clickable { store.sshFp.set("") })
+            Text("🔒 Clé SSH principale approuvée", color = HudDim, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            Text("Effacer", color = HudText, fontSize = 12.sp, modifier = Modifier.clickable {
+                store.sshFp.set("")
+                runCatching { store.sshHostKey.clear() }
+                msg = "Confiance SSH principale effacée. Les commandes SSH resteront bloquées jusqu'à une nouvelle vérification."
+            })
         }
         if (store.sshEmpreintesCibles.value.isNotBlank()) {
             Text("Les clés des autres serveurs SSH sont conservées séparément et vérifiées avant authentification.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
@@ -2152,6 +2169,42 @@ private fun ServeurPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvi
                 store.sshEmpreintesCibles.clear()
                 msg = "Les clés SSH secondaires ont été effacées. Chaque machine devra être approuvée à sa prochaine connexion."
             }
+        }
+        if (empreinteEnAttente != null) {
+            val cle = empreinteEnAttente!!
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { empreinteEnAttente = null },
+                title = { Text("Vérifier la clé du serveur SSH") },
+                text = {
+                    Column {
+                        Text("Empreinte \${cle.type} :")
+                        Text(cle.empreinte, color = HudText)
+                        Spacer(Modifier.height(8.dp))
+                        Text("Compare cette empreinte à celle affichée directement sur Debian avec :")
+                        Text("ssh-keygen -lf /etc/ssh/ssh_host_\${cle.type}_key.pub", color = HudText)
+                        Spacer(Modifier.height(8.dp))
+                        Text("Si les valeurs ne correspondent pas exactement, refuse. Aucune commande SSH ne sera exécutée avant cette approbation.")
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        scope.launch {
+                            busy = true
+                            msg = try {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    fr.dd.jarvis.ai.Serveur.memoriserEmpreinteServeurPrincipal(app, cle)
+                                }
+                                "✅ Clé SSH principale approuvée. Les connexions suivantes la vérifieront avant authentification."
+                            } catch (e: Exception) { "❌ \${e.message}" }
+                            empreinteEnAttente = null
+                            busy = false
+                        }
+                    }) { Text("J'ai vérifié, approuver") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { empreinteEnAttente = null }) { Text("Refuser") }
+                }
+            )
         }
         if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
     }
