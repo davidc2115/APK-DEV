@@ -63,11 +63,14 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         val json = JSONObject()
         candidates.forEach { (key, values) -> json.put(key, JSONArray(values.toList())) }
         val raw = json.toString(2)
-        // Une preuve n'est confirmée qu'après écriture durable locale ET miroir Obsidian.
-        // Si Obsidian est temporairement indisponible, l'exception remonte : le prochain essai
-        // de la même preuve retentera la synchronisation au lieu de l'annoncer comme déjà sauvée.
-        persisterCopieHermes(habitsFile, raw)
-        obsidian.saveIn(FOLDER, "Apprentissage en cours", raw)
+        // Avec un coffre configuré, l'écriture Obsidian est prioritaire ; le fichier privé n'est qu'un cache.
+        if (obsidian.coffreConfigure()) {
+            obsidian.saveIn(FOLDER, "Apprentissage en cours", raw)
+            runCatching { persisterCopieHermes(habitsFile, raw) }
+        } else {
+            persisterCopieHermes(habitsFile, raw)
+            obsidian.saveIn(FOLDER, "Apprentissage en cours", raw)
+        }
     }
 
     /** Enregistre une préférence candidate après une correction ou observation pertinente. */
@@ -494,19 +497,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     fun hermes(): String {
         hermesCache?.let { return it }
-        val source = if (obsidian.coffreConfigure()) {
-            // Une erreur d'accès SAF remonte : la copie privée n'est pas une source concurrente.
-            val distante = obsidian.lireAvecDateStrict(FOLDER, "Mémoire Hermès source.md")?.first
-            if (distante != null) distante else {
-                // Migration unique d'une ancienne installation : le fichier local n'est utilisé
-                // que si la note est réellement absente, jamais si le coffre est inaccessible.
-                val ancienne = hermesLocal.takeIf { it.isFile }?.readText().orEmpty()
-                if (ancienne.isNotBlank()) obsidian.saveIn(FOLDER, "Mémoire Hermès source", ancienne)
-                ancienne
-            }
-        } else {
-            hermesLocal.takeIf { it.isFile }?.readText().orEmpty()
-        }
+        val source = obsidian.lireOuMigrer(
+            FOLDER, "Mémoire Hermès source.md", hermesLocal.takeIf { it.isFile }?.readText()
+        ).orEmpty()
         hermesCache = source
         return source
     }
@@ -516,6 +509,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     /** Section « mémoire d'Hermès » pour le cerveau de Jarvis : en entier si elle est courte, sinon le profil seul. */
     fun hermesPourPrompt(): String {
+        rafraichirDepuisCoffreSiNecessaire()
         val (notes, profil) = entreesHermes(hermes())
         if (notes.isEmpty() && profil.isEmpty()) return ""
         val tout = (notes + profil).joinToString("\n") { "- " + it.replace("\n", " ").take(500) }
@@ -533,24 +527,23 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     fun majCapacitesHermes(json: String) {
         require(json.length <= 60_000) { "Les capacités Hermès dépassent la taille maximale autorisée." }
         val j = org.json.JSONObject(json)
-        // Même garantie que la mémoire : pas d'accusé de réception si le fichier durable
-        // n'a pas été remplacé correctement, afin que le hook réessaie.
-        persisterCopieHermes(capacitesLocal, json)
-        obsidian.saveBytes(FOLDER, "Capacités Hermès.json", json.toByteArray(Charsets.UTF_8), "application/json")
+        if (obsidian.coffreConfigure()) {
+            obsidian.saveBytes(FOLDER, "Capacités Hermès.json", json.toByteArray(Charsets.UTF_8), "application/json")
+            runCatching { persisterCopieHermes(capacitesLocal, json) }
+        } else {
+            persisterCopieHermes(capacitesLocal, json)
+            obsidian.saveBytes(FOLDER, "Capacités Hermès.json", json.toByteArray(Charsets.UTF_8), "application/json")
+        }
         capacitesCache = j
     }
 
     @Synchronized
     private fun capacites(): org.json.JSONObject {
+        rafraichirDepuisCoffreSiNecessaire()
         capacitesCache?.let { return it }
-        val brut = if (obsidian.coffreConfigure()) {
-            val distante = obsidian.lireAvecDateStrict(FOLDER, "Capacités Hermès.json")?.first
-            if (distante != null) distante else {
-                val ancienne = capacitesLocal.takeIf { it.isFile }?.readText().orEmpty()
-                if (ancienne.isNotBlank()) obsidian.saveBytes(FOLDER, "Capacités Hermès.json", ancienne.toByteArray(Charsets.UTF_8), "application/json")
-                ancienne
-            }
-        } else capacitesLocal.takeIf { it.isFile }?.readText().orEmpty()
+        val brut = obsidian.lireOuMigrer(
+            FOLDER, "Capacités Hermès.json", capacitesLocal.takeIf { it.isFile }?.readText(), "application/json"
+        ).orEmpty()
         val resultat = if (brut.isBlank()) org.json.JSONObject() else org.json.JSONObject(brut)
         capacitesCache = resultat
         return resultat
@@ -598,6 +591,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     /** Mémoire de Jarvis telle qu'Hermès la recopie dans son SOUL.md (bloc géré, chargé à chaque session). */
     fun pourHermes(): String {
         ensure()
+        rafraichirDepuisCoffreSiNecessaire()
         val identite = "## Identité\nDans cette installation, tu es Hermès, le cerveau principal de JARVIS, l'assistant personnel de l'utilisateur sur son téléphone : " +
             "tu réponds à toutes ses demandes, avec les outils du téléphone (Jarvis) et une seule mémoire partagée.\n\n"
         val habitudesActives = registreApprentissage.habitudesActives()
@@ -622,6 +616,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     fun pourPrompt(): String = try {
         ensure()
+        rafraichirDepuisCoffreSiNecessaire()
         val memoireAvecHabitudesActives = LinkedHashMap(items)
         val actives = registreApprentissage.habitudesActives()
         if (actives.isNotEmpty()) {
@@ -638,6 +633,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     /** Consignes (de JARVIS et d'Hermès) qui concernent cette demande, à placer en fin de prompt ; vide sinon. */
     fun consignesPour(demande: String): String {
+        rafraichirDepuisCoffreSiNecessaire()
         val tout: Map<String, String> = synchronized(this) { ensure(); LinkedHashMap(items) }
         val hermes = runCatching { entreesHermesListe().joinToString("\n") }.getOrDefault("")
         return blocDemande(if (hermes.isBlank()) tout else tout + ("hermes" to hermes), demande, fr.dd.jarvis.ai.CanalDemande.vocal)
