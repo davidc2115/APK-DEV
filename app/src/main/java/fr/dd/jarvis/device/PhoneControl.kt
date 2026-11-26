@@ -115,8 +115,7 @@ class PhoneControl(private val ctx: Context) {
             extras.forEach { (k, v) -> i.putExtra(k, v) }
             // JARVIS en arrière-plan (Android Auto, écran éteint) : point de superposition visible + service d'accessibilité,
             // sinon Android bloque le lancement en silence.
-            LancementFond.demarrer(ctx, i)
-            ""
+            if (LancementFond.demarrer(ctx, i)) "" else "Android n'a pas accepté l'ouverture de l'application GPS. Vérifie les autorisations de lancement en arrière-plan."
         } catch (e: Exception) { "Lancement impossible : ${e.message}. (Pour lancer des applis quand JARVIS est en arrière-plan : appairer l'ADB intégré ou autoriser l'affichage par-dessus les autres applis.)" }
     }
 
@@ -609,23 +608,35 @@ class PhoneControl(private val ctx: Context) {
         return out
     }
 
+    /** Lance une URI GPS vers le paquet choisi, sans passer par am start qui pouvait annoncer un faux succès. */
+    private fun ouvrirNavigation(uri: String, paquet: String, nom: String, destination: String): String {
+        if (!installed(paquet)) return "❌ $nom n'est pas installé sur ce téléphone."
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).setPackage(paquet)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val resolu = runCatching {
+            ctx.packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY) != null
+        }.getOrDefault(false)
+        if (!resolu) return "❌ $nom ne reconnaît pas cette demande d'itinéraire (URI : ${uri.substringBefore('?')})."
+        val ok = runCatching { LancementFond.demarrer(ctx, intent) }.getOrDefault(false)
+        return if (ok) "🧭 Demande d'itinéraire transmise à $nom pour $destination ; je vérifie ensuite que l'application s'ouvre et que le guidage démarre."
+        else "❌ Android n'a pas réussi à ouvrir $nom. Vérifie que l'application est à jour et autorisée à s'ouvrir depuis JARVIS."
+    }
+
     /** Lance la navigation vers une destination dans l'application [appli] (Waze, Google Maps ou autre ; vide = Google Maps). */
     fun navigate(dest: String, mode: String, appli: String = "", point: Pair<Double, Double>? = null): String {
         val m = when (mode.trim().lowercase()) { "marche", "a pied", "à pied", "walking", "w" -> "w"; "velo", "vélo", "bicycling", "b" -> "b"; else -> "d" }
         val a = appli.trim().lowercase()
         if (a.contains("waze")) {
             val uri = if (point != null) "waze://?ll=${point.first},${point.second}&navigate=yes" else "waze://?q=" + Uri.encode(dest) + "&navigate=yes"
-            val r = start(Intent.ACTION_VIEW, uri, "com.waze")
-            return if (r.isBlank()) "🧭 Demande d'itinéraire transmise à Waze pour $dest ; le démarrage réel du guidage reste à confirmer." else "Waze : $r"
+            return ouvrirNavigation(uri, "com.waze", "Waze", dest)
         }
         if (a.isNotBlank() && !a.contains("google") && !a.contains("maps")) {
             val (pkg, label) = findPackage(a) ?: return "Application « $appli » introuvable."
             val geo = if (point != null) "geo:${point.first},${point.second}?q=${point.first},${point.second}(${Uri.encode(dest)})" else "geo:0,0?q=" + Uri.encode(dest)
-            val r = start(Intent.ACTION_VIEW, geo, pkg)
-            return if (r.isBlank()) "🧭 Demande d'ouverture transmise à $label pour $dest ; le démarrage du guidage n'est pas confirmé." else "$label : $r"
+            return ouvrirNavigation(geo, pkg, label, dest)
         }
-        val r = start(Intent.ACTION_VIEW, "google.navigation:q=" + Uri.encode(dest) + "&mode=$m", "com.google.android.apps.maps")
-        return if (r.isBlank()) "🧭 Demande d'itinéraire transmise à Google Maps pour $dest ; le démarrage réel du guidage reste à confirmer." else "Google Maps : $r"
+        val uri = "google.navigation:q=" + Uri.encode(dest) + "&mode=$m"
+        return ouvrirNavigation(uri, "com.google.android.apps.maps", "Google Maps", dest)
     }
 
     /** Lance la lecture d'une vidéo (URL http:// locale ou distante) dans le lecteur vidéo par défaut du téléphone — aucune app spécifique requise. */
