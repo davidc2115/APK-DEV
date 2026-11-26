@@ -48,6 +48,7 @@ object Serveur {
     }
 
     private fun ouvrir(app: JarvisApp, cible: Cible? = null): Session {
+        invaliderConnexionsSiReseauChange(app)
         if (cible != null) {
             val s = JSch().getSession(cible.user, cible.hote, cible.port)
             s.setPassword(cible.pass); s.setConfig("StrictHostKeyChecking", "no"); s.connect(12000); return s
@@ -59,13 +60,21 @@ object Serveur {
                 st.sshPass.value.takeIf { it.isNotBlank() }?.toByteArray())
         }
         val local = st.sshHost.value.trim() to (st.sshPort.value.toIntOrNull() ?: 22)
-        val distant = st.sshHostDistant.value.trim().takeIf { it.isNotBlank() }?.let { it to (st.sshPortDistant.value.toIntOrNull() ?: local.second) }
-        // Bonne adresse d'abord : hors du réseau de la maison, on ne perd plus 6 s à attendre l'adresse locale.
-        var ordre = if (distant == null) listOf(local) else if (distantDabord(local.first)) listOf(distant, local) else listOf(local, distant)
-        // À la maison avec une adresse PUBLIQUE dans les Réglages : l'adresse locale relevée du serveur passe en premier
-        // (beaucoup de box ne savent pas « revenir » vers leur propre IP publique depuis le réseau local).
-        val lan = st.serveurIpLocale.value.trim().takeIf { ipPrivee(it) && ordre.none { o -> o.first == it } }
-        if (lan != null && telephoneSurReseau(lan)) ordre = (listOf(lan to local.second, lan to 22).distinct() + ordre).distinct()
+        val distant = st.sshHostDistant.value.trim().takeIf { it.isNotBlank() }
+            ?.let { it to (st.sshPortDistant.value.toIntOrNull() ?: local.second) }
+            ?: local.takeIf { it.first.isNotBlank() && !ipPrivee(it.first) }
+        val lanIp = st.serveurIpLocale.value.trim().takeIf { ipPrivee(it) }
+        // Une adresse locale n'est prioritaire que si Android confirme une route Wi-Fi/VPN et que SSH répond dessus.
+        // Les IP privées attribuées par l'opérateur mobile ne sont jamais utilisées pour conclure « même réseau ».
+        val lan = lanIp?.let { listOf(it to local.second, it to 22).distinct() }.orEmpty()
+        val surReseauMaison = (lan + listOf(local)).any { (hote, port) ->
+            ipPrivee(hote) && telephoneSurReseau(app, hote, port)
+        }
+        val ordre = ordreCiblesSsh(local, distant, lan, surReseauMaison)
+        if (ordre.isEmpty()) throw IllegalStateException(
+            "Le téléphone n'a pas de route Wi-Fi/VPN vers le serveur et aucune adresse SSH distante n'est configurée. " +
+                "Renseigne l'adresse distante dans Réglages › Maison › Serveur (nom DNS ou IP publique avec port SSH redirigé), ou active WireGuard."
+        )
         var erreur: Exception? = null
         val essais = mutableListOf<String>()
         for ((i, cibleAdr) in ordre.withIndex()) {
@@ -102,11 +111,61 @@ object Serveur {
         throw erreur ?: IllegalStateException("Connexion SSH impossible")
     }
 
-    /** Le téléphone est-il sur le même réseau local que [ipServeur] (même préfixe /24) ? */
-    fun telephoneSurReseau(ipServeur: String): Boolean {
-        val prefixe = ipServeur.substringBeforeLast('.') + "."
-        return adressesTelephone().any { it.second.startsWith(prefixe) }
+    /** Compare deux IPv4 selon le vrai préfixe réseau fourni par Android (pas un /24 supposé). */
+    internal fun memeSousReseau(ipA: String, ipB: String, prefixe: Int): Boolean {
+        if (prefixe !in 0..32) return false
+        fun octets(ip: String): IntArray? {
+            val parties = ip.trim().split(".")
+            if (parties.size != 4) return null
+            val valeurs = parties.map { it.toIntOrNull()?.takeIf { n -> n in 0..255 } ?: return null }
+            return valeurs.toIntArray()
+        }
+        val a = octets(ipA) ?: return false
+        val b = octets(ipB) ?: return false
+        var bits = prefixe
+        for (i in 0..3) {
+            val masque = when { bits >= 8 -> 255; bits <= 0 -> 0; else -> (255 shl (8 - bits)) and 255 }
+            if ((a[i] and masque) != (b[i] and masque)) return false
+            bits -= 8
+        }
+        return true
     }
+
+    /**
+     * Confirme l'accès au serveur depuis un réseau Wi-Fi ou VPN Android.
+     * Les interfaces cellulaires sont ignorées : les opérateurs attribuent aussi des adresses privées 10.x.x.x.
+     * Avec [port], un test TCP lié au réseau Android confirme que SSH/API répond par cette route.
+     */
+    fun telephoneSurReseau(app: JarvisApp, ipServeur: String, port: Int? = null): Boolean = runCatching {
+        val parties = ipServeur.trim().split(".")
+        if (parties.size != 4) return false
+        val valeurs = parties.map { it.toIntOrNull()?.takeIf { n -> n in 0..255 } ?: return false }
+        val cible = java.net.InetAddress.getByAddress(valeurs.map { it.toByte() }.toByteArray())
+        val cm = app.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return false
+        val reseaux = (cm.allNetworks.toList() + listOfNotNull(cm.activeNetwork)).distinct()
+        reseaux.any { reseau ->
+            val caps = cm.getNetworkCapabilities(reseau) ?: return@any false
+            val wifi = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) &&
+                !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
+            val vpn = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
+            if (!wifi && !vpn) return@any false
+            val lp = cm.getLinkProperties(reseau) ?: return@any false
+            val memeLan = lp.linkAddresses.any { adresse ->
+                adresse.address is java.net.Inet4Address &&
+                    memeSousReseau(ipServeur, adresse.address.hostAddress.orEmpty(), adresse.prefixLength)
+            }
+            val routeVpn = vpn && lp.routes.any { it.matches(cible) }
+            if (!memeLan && !routeVpn) return@any false
+            if (port == null) return@any true
+            if (port !in 1..65535) return@any false
+            runCatching {
+                reseau.socketFactory.createSocket().use { socket ->
+                    socket.connect(java.net.InetSocketAddress(cible, port), 900)
+                    true
+                }
+            }.getOrDefault(false)
+        }
+    }.getOrDefault(false)
 
     /** Adresses IPv4 du téléphone : (interface, adresse). wlan = Wi-Fi ; rmnet / ccmni = données mobiles. */
     fun adressesTelephone(): List<Pair<String, String>> = runCatching {
@@ -117,16 +176,21 @@ object Serveur {
     /** Situation réseau en clair : à la maison (connexion locale) ou dehors (connexion à distance), et par quelle adresse. */
     fun situation(app: JarvisApp): String {
         val st = app.store
-        val lan = listOf(st.sshHost.value.trim(), st.serveurIpLocale.value.trim()).firstOrNull { ipPrivee(it) }
-        val tel = adressesTelephone()
-        val wifi = tel.firstOrNull { it.first.startsWith("wlan") }?.second
-        val mobile = tel.any { Regex("^(rmnet|ccmni|pdp|seth|v4-rmnet)").containsMatchIn(it.first) }
+        val lan = listOf(st.serveurIpLocale.value.trim(), st.sshHost.value.trim()).firstOrNull { ipPrivee(it) }
+        val cm = app.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        val caps = cm?.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+        val vpn = caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true
+        val mobile = caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) == true
+        val wifi = caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true ||
+            cm?.allNetworks?.any { cm.getNetworkCapabilities(it)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true } == true
         val distant = st.sshHostDistant.value.trim().ifBlank { st.sshHost.value.trim().takeIf { !ipPrivee(it) }.orEmpty() }
+        val surMaison = lan != null && telephoneSurReseau(app, lan, st.sshPort.value.toIntOrNull() ?: 22)
+        val reseau = when { vpn -> "VPN actif"; mobile -> "données mobiles"; wifi -> "Wi-Fi"; else -> "réseau inconnu" }
         val ou = when {
-            lan != null && telephoneSurReseau(lan) -> "🏠 téléphone sur le réseau de la maison (Wi-Fi $wifi) → connexion LOCALE au serveur ($lan)"
-            lan == null -> "réseau du téléphone : ${if (wifi != null) "Wi-Fi $wifi" else if (mobile) "données mobiles" else "inconnu"} (adresse locale du serveur pas encore relevée)"
-            else -> "🌍 téléphone HORS du réseau de la maison (${if (wifi != null) "autre Wi-Fi $wifi" else "données mobiles"}) → connexion À DISTANCE" +
-                (if (distant.isNotBlank()) " par $distant" else " : aucune adresse distante dans les Réglages")
+            surMaison -> "🏠 accès local confirmé (route Wi-Fi/VPN et SSH joignable) → connexion LOCALE au serveur ($lan)"
+            lan == null -> "réseau du téléphone : $reseau (adresse locale du serveur pas encore relevée)"
+            else -> "🌍 téléphone hors du réseau de la maison ($reseau) → connexion À DISTANCE" +
+                (if (distant.isNotBlank()) " par $distant" else " : aucune adresse SSH distante configurée")
         }
         val d = derniereAdresse?.let { (adr, quand) -> " · dernière connexion SSH réussie par $adr il y a ${(System.currentTimeMillis() - quand) / 60_000} min" }.orEmpty()
         return ou + d
@@ -135,26 +199,16 @@ object Serveur {
     /** Adresse qui a fonctionné en dernier (et quand). */
     @Volatile private var derniereAdresse: Pair<String, Long>? = null
 
-    /**
-     * Faut-il essayer l'adresse distante en premier ? Oui si l'adresse locale est une IP privée d'un autre réseau que celui
-     * du téléphone (4G, autre Wi-Fi) ; sinon on suit la dernière adresse qui a marché (moins de 30 min).
-     */
-    private fun distantDabord(hoteLocal: String): Boolean {
-        val ip = Regex("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.\\d{1,3}$").matchEntire(hoteLocal)
-        if (ip != null) {
-            val prive = ip.groupValues[1] == "10" || (ip.groupValues[1] == "192" && ip.groupValues[2] == "168") ||
-                (ip.groupValues[1] == "172" && ip.groupValues[2].toInt() in 16..31)
-            if (prive) {
-                val prefixe = hoteLocal.substringBeforeLast('.') + "."
-                val adresses = runCatching {
-                    java.net.NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
-                        .flatMap { it.inetAddresses.toList() }.filterIsInstance<java.net.Inet4Address>().map { it.hostAddress.orEmpty() }
-                }.getOrDefault(emptyList())
-                return adresses.none { it.startsWith(prefixe) }
-            }
-        }
-        val d = derniereAdresse ?: return false
-        return d.first != hoteLocal && System.currentTimeMillis() - d.second < 30 * 60_000L
+    /** Ordre strict : LAN seulement après confirmation Wi-Fi/VPN ; hors LAN, ne tente que l'adresse distante. */
+    internal fun ordreCiblesSsh(
+        local: Pair<String, Int>,
+        distant: Pair<String, Int>?,
+        lan: List<Pair<String, Int>>,
+        surReseauMaison: Boolean
+    ): List<Pair<String, Int>> {
+        val candidates = if (surReseauMaison) lan + listOf(local) + listOfNotNull(distant)
+            else listOfNotNull(distant ?: local.takeIf { it.first.isNotBlank() && !ipPrivee(it.first) })
+        return candidates.filter { it.first.isNotBlank() && it.second in 1..65535 }.distinct()
     }
 
     // Session SSH principale gardée ouverte quelques minutes : les commandes suivantes ne refont ni la connexion ni l'authentification.
@@ -163,11 +217,48 @@ object Serveur {
     @Volatile private var principaleUtilisee = 0L
     private const val INACTIVITE = 4 * 60_000L
 
+    private fun signatureReseau(app: JarvisApp): String = runCatching {
+        val cm = app.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val active = cm.activeNetwork?.toString().orEmpty()
+        val reseaux = cm.allNetworks.mapNotNull { n ->
+            val caps = cm.getNetworkCapabilities(n) ?: return@mapNotNull null
+            val lp = cm.getLinkProperties(n)
+            val transports = listOf(
+                "wifi" to android.net.NetworkCapabilities.TRANSPORT_WIFI,
+                "mobile" to android.net.NetworkCapabilities.TRANSPORT_CELLULAR,
+                "vpn" to android.net.NetworkCapabilities.TRANSPORT_VPN,
+                "ethernet" to android.net.NetworkCapabilities.TRANSPORT_ETHERNET
+            ).filter { caps.hasTransport(it.second) }.joinToString("+") { it.first }
+            "$transports:${lp?.linkAddresses?.joinToString(",") { "${it.address.hostAddress}/${it.prefixLength}" }}:${lp?.routes?.joinToString(",") { it.destination.toString() }}"
+        }.sorted()
+        active + "|" + reseaux.joinToString(";")
+    }.getOrDefault("réseau-inconnu")
+
+    @Volatile private var derniereSignatureReseau: String? = null
+
+    /** Une bascule Wi-Fi/4G/VPN invalide les sessions et tunnels JSch encore marqués connectés. */
+    @Synchronized private fun invaliderConnexionsSiReseauChange(app: JarvisApp) {
+        val signature = signatureReseau(app)
+        val precedente = derniereSignatureReseau
+        if (precedente != null && precedente != signature) {
+            principale?.let { runCatching { it.disconnect() } }
+            principale = null
+            principaleCle = ""
+            (tunnels.values.map { it.first } + tunnelsLan.values.map { it.first }).distinct().forEach {
+                runCatching { it.disconnect() }
+            }
+            tunnels.clear()
+            tunnelsLan.clear()
+        }
+        derniereSignatureReseau = signature
+    }
+
     private fun cleReglages(app: JarvisApp) = with(app.store) {
         listOf(sshHost.value, sshPort.value, sshHostDistant.value, sshPortDistant.value, sshUser.value, sshPass.value.hashCode(), sshKey.value.hashCode()).joinToString("|")
     }
 
     @Synchronized private fun sessionPrincipale(app: JarvisApp): Session {
+        invaliderConnexionsSiReseauChange(app)
         val cle = cleReglages(app)
         principale?.let { s ->
             if (s.isConnected && cle == principaleCle && System.currentTimeMillis() - principaleUtilisee < INACTIVITE) {
@@ -197,6 +288,7 @@ object Serveur {
      */
     @Synchronized
     fun tunnel(app: JarvisApp, portDistant: Int): Int {
+        invaliderConnexionsSiReseauChange(app)
         tunnels[portDistant]?.let { (s, p) -> if (s.isConnected) return p; runCatching { s.disconnect() } }
         val s = try { ouvrir(app) } catch (e: Exception) {
             throw IllegalStateException(expliquer(e, app.store.sshHost.value, app.store.sshPort.value.toIntOrNull() ?: 22), e)
@@ -220,6 +312,7 @@ object Serveur {
      */
     @Synchronized
     fun tunnelVers(app: JarvisApp, hote: String, port: Int): Int {
+        invaliderConnexionsSiReseauChange(app)
         val k = "$hote:$port"
         tunnelsLan[k]?.let { (s, p) -> if (s.isConnected) return p; runCatching { s.disconnect() } }
         val s = try { ouvrir(app) } catch (e: Exception) {
@@ -585,7 +678,7 @@ object Serveur {
         val b = base(app)
         val u = runCatching { java.net.URI(b) }.getOrNull() ?: return b
         val hote = u.host.orEmpty()
-        if (!ipPrivee(hote) || telephoneSurReseau(hote)) return b
+        if (!ipPrivee(hote) || telephoneSurReseau(app, hote, if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80)) return b
         return haDistant(app, hote, if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80) ?: b
     }
 
@@ -598,7 +691,7 @@ object Serveur {
         val b = base(app)
         val u = runCatching { java.net.URI(b) }.getOrNull() ?: return b to http
         val hote = u.host.orEmpty()
-        if (!ipPrivee(hote) || telephoneSurReseau(hote)) return b to http
+        if (!ipPrivee(hote) || telephoneSurReseau(app, hote, if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80)) return b to http
         val portLocal = if (u.port > 0) u.port else if (u.scheme == "https") 443 else 80
         haDistant(app, hote, portLocal)?.let { return it to http }
         val estServeur = hote == app.store.sshHost.value.trim() || hote == app.store.serveurIpLocale.value.trim()
