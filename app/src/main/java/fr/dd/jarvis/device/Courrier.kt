@@ -68,9 +68,9 @@ object Courrier {
     private val CODE_RETRAIT = Regex("(?i)code (?:de retrait|de collecte|d'ouverture|d’ouverture|de deverrouillage|de déverrouillage|pin|de livraison|de recuperation|de récupération|a presenter|à présenter)\\s*[:=]?\\s*([A-Z0-9]{4,10})")
 
     private val MONTANT = Regex("(\\d{1,3}(?:[ .\\u202F\\u00A0]\\d{3})*(?:[,.]\\d{1,2})?)\\s?(?:€|eur\\b|euros?\\b)", RegexOption.IGNORE_CASE)
-    private val FACTURE_RE = Regex("\\b(facture|factures|avis d echeance|echeancier|invoice|a regler|montant (a payer|du|preleve|de votre facture)|prelevement|votre releve|mise en demeure|relance de paiement|impaye)\\b")
-    private val DEVIS_RE = Regex("\\b(devis|proposition commerciale|offre de prix|estimation)\\b")
-    private val RDV_RE = Regex("\\b(rendez vous|rdv|convocation|votre visite|intervention (prevue|programmee|planifiee)|passage (de notre |du |d un )?technicien|technicien passera|creneau (confirme|reserve)|reservation confirmee|consultation|vidange|controle technique|ct|revision|entretien du vehicule|garage|atelier automobile|pneumatiques?)\\b")
+    private val FACTURE_RE = Regex("\\b(facture|factures|facturation|facture jointe|facture disponible|avis d echeance|echeancier|invoice|a regler|a payer|montant (a payer|du|preleve|de votre facture)|prelevement|votre releve|mise en demeure|relance de paiement|impaye|paiement en attente|appel de paiement|recu de paiement|justificatif de paiement)\\b")
+    private val DEVIS_RE = Regex("\\b(devis|proposition commerciale|offre de prix|offre commerciale|estimation|chiffrage|bon pour accord)\\b")
+    private val RDV_RE = Regex("\\b(rendez vous|rdv|convocation|votre visite|visite prevue|visite technique|intervention|passage (de notre |du |d un )?technicien|technicien passera|creneau|reservation|consultation|vidange|controle technique|ct|revision|entretien du vehicule|garage|atelier automobile|pneumatiques?|votre venue|vous etes attendu|je passerai|nous passerons|je viendrai|nous viendrons|confirmation de visite|confirmation de rendez vous)\\b")|passage (de notre |du |d un )?technicien|technicien passera|creneau (confirme|reserve)|reservation confirmee|consultation|vidange|controle technique|ct|revision|entretien du vehicule|garage|atelier automobile|pneumatiques?)\\b")
     private val HEURE = Regex("\\b(\\d{1,2}) ?(?:h|:) ?(\\d{2})?\\b")
     private val ADRESSE = Regex("(\\d{1,4}(?: ?bis| ?ter)?,? (?:rue|avenue|av\\.?|bd|boulevard|chemin|place|allee|allée|impasse|route|quai|cours|faubourg|zone|za|zi|lieu[- ]dit)[^,\\n.]{2,60}(?:,? ?\\d{5} [A-Za-zÀ-ÿ' -]{2,40})?)", RegexOption.IGNORE_CASE)
     private val GARAGE_RDV = Regex("\\bgarage\\s+([A-ZÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\\s+[A-ZÀ-ÿ][A-Za-zÀ-ÿ'’-]*){0,2})", RegexOption.IGNORE_CASE)
@@ -126,29 +126,29 @@ object Courrier {
                 if (numero != null && t != null) t.lien(numero) else "", statut, code)
             return out
         }
-        // Rendez-vous (une date à venir est indispensable)
+        // Rendez-vous : conserver aussi les messages incomplets (date/heure absente ou formulation libre).
         if (RDV_RE.containsMatchIn(n)) {
             val nd = DatesFr.normaliser(brut)
-            val jour = DatesFr.jour(nd, aujourdhui)?.date
-            if (jour != null && !jour.isBefore(aujourdhui)) {
-                val h = HEURE.findAll(nd).firstOrNull { (it.groupValues[1].toIntOrNull() ?: 99) in 6..21 }
-                val heure = h?.groupValues?.get(1)?.toIntOrNull()
-                val minute = h?.groupValues?.get(2)?.toIntOrNull() ?: 0
-                val debut = jour.atTime(heure ?: 9, minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                val lieu = ADRESSE.find(brut)?.value?.trim().orEmpty().ifBlank { GARAGE_RDV.find(texte)?.groupValues?.get(1)?.let { "Garage " + it.trim() }.orEmpty() }
-                out += Element(id(RDV, emetteur, jour.toString(), "${heure ?: ""}"), RDV, source, emetteur, resume, ts, dateRdv = debut, lieu = lieu,
-                    statut = if (heure == null) "heure non précisée" else "")
-                return out
-            }
+            val jourTrouve = DatesFr.jour(nd, aujourdhui)?.date
+            val jour = jourTrouve?.takeIf { !it.isBefore(aujourdhui) }
+            val h = if (jour != null) HEURE.findAll(nd).firstOrNull { (it.groupValues[1].toIntOrNull() ?: 99) in 6..21 } else null
+            val heure = h?.groupValues?.get(1)?.toIntOrNull()
+            val minute = h?.groupValues?.get(2)?.toIntOrNull() ?: 0
+            val debut = jour?.atTime(heure ?: 9, minute)?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
+            val lieu = ADRESSE.find(brut)?.value?.trim().orEmpty().ifBlank { GARAGE_RDV.find(texte)?.groupValues?.get(1)?.let { "Garage " + it.trim() }.orEmpty() }
+            out += Element(id(RDV, source, emetteur, ts.toString(), normaliser(resume)), RDV, source, emetteur, resume, ts, dateRdv = debut, lieu = lieu,
+                statut = when { jour == null -> "date non précisée"; heure == null -> "heure non précisée"; else -> "" })
+            return out
         }
-        // Facture / devis (un montant est indispensable)
+        // Facture / devis : le montant est facultatif, car souvent absent de l'aperçu d'un SMS ou d'un mail.
         val m = montant(brut)
-        if (m != null && (FACTURE_RE.containsMatchIn(n) || DEVIS_RE.containsMatchIn(n))) {
+        if (FACTURE_RE.containsMatchIn(n) || DEVIS_RE.containsMatchIn(n)) {
             val devis = DEVIS_RE.containsMatchIn(n) && !FACTURE_RE.containsMatchIn(n)
             val ech = Regex("\\b(?:avant le|au plus tard le|date limite(?: de paiement)?|echeance(?: le| du)?|preleve le|sera preleve le|a payer (?:avant )?le|valable jusqu au|le) ?:? ?(.{4,30})").find(DatesFr.normaliser(brut))
                 ?.groupValues?.get(1)?.let { DatesFr.jour(DatesFr.normaliser(it), aujourdhui)?.date?.toString() }.orEmpty()
-            out += Element(id(if (devis) DEVIS else FACTURE, emetteur, "%.2f".format(java.util.Locale.ROOT, m), ech), if (devis) DEVIS else FACTURE, source, emetteur, resume, ts,
-                montant = m, echeance = ech)
+            val montantCle = m?.let { "%.2f".format(java.util.Locale.ROOT, it) } ?: "inconnu"
+            out += Element(id(if (devis) DEVIS else FACTURE, source, emetteur, ts.toString(), montantCle, normaliser(resume)),
+                if (devis) DEVIS else FACTURE, source, emetteur, resume, ts, montant = m, echeance = ech)
         }
         return out
     }
@@ -171,9 +171,8 @@ object Courrier {
     @Synchronized
     private fun sauver(c: Context, l: List<Element>) {
         val a = JSONArray()
-        // Gardés 60 jours (traités : 15 jours).
-        val limite = System.currentTimeMillis() - 60L * 86_400_000
-        l.filter { it.ts > limite && !(it.traite && it.ts < System.currentTimeMillis() - 15L * 86_400_000) }.takeLast(300).forEach { e ->
+        // Historique conservé, y compris les éléments traités ; limite technique large.
+        l.sortedBy { it.ts }.takeLast(1000).forEach { e ->
             a.put(JSONObject().put("id", e.id).put("type", e.type).put("source", e.source).put("emetteur", e.emetteur).put("resume", e.resume).put("ts", e.ts)
                 .put("transporteur", e.transporteur).put("numero", e.numero).put("lien", e.lien).put("statut", e.statut).put("code", e.code)
                 .apply { e.montant?.let { put("montant", it) }; e.dateRdv?.let { put("dateRdv", it) } }
@@ -193,6 +192,7 @@ object Courrier {
             if (i < 0) { l += e; vraimentNouveaux += e }
             else if (e.type == COLIS && e.statut != l[i].statut) l[i] = l[i].copy(statut = e.statut, ts = e.ts, code = e.code.ifBlank { l[i].code }, resume = e.resume,
                 traite = if (e.statut == "livré") l[i].traite else false, domaine = l[i].domaine.ifBlank { e.domaine }, auto = if (l[i].domaine.isBlank()) e.auto else l[i].auto)
+            else if (e.type != COLIS) l[i] = e.copy(traite = l[i].traite, domaine = l[i].domaine.ifBlank { e.domaine }, auto = if (l[i].domaine.isBlank()) e.auto else l[i].auto)
         }
         sauver(c, l)
         return vraimentNouveaux
@@ -274,7 +274,7 @@ object Courrier {
     /** Rattrapage des SMS déjà présents dans la boîte de réception. Seuls les messages reconnus sont conservés. */
     fun importerSmsRecents(app: JarvisApp): Int {
         if (!app.store.courrierAnalyse.value || app.checkSelfPermission(android.Manifest.permission.READ_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return 0
-        val depuis = System.currentTimeMillis() - 60L * 86_400_000L
+        val depuis = System.currentTimeMillis() - 90L * 86_400_000L
         val trouves = mutableListOf<Element>()
         runCatching {
             app.contentResolver.query(android.provider.Telephony.Sms.Inbox.CONTENT_URI,
@@ -284,7 +284,7 @@ object Courrier {
                 val ib = cursor.getColumnIndex(android.provider.Telephony.Sms.BODY)
                 val idate = cursor.getColumnIndex(android.provider.Telephony.Sms.DATE)
                 var lus = 0
-                while (cursor.moveToNext() && lus++ < 300) {
+                while (cursor.moveToNext() && lus++ < 1000) {
                     val corps = if (ib >= 0) cursor.getString(ib).orEmpty() else ""
                     val adresse = if (ia >= 0) cursor.getString(ia).orEmpty() else "SMS"
                     val date = if (idate >= 0) cursor.getLong(idate) else System.currentTimeMillis()
