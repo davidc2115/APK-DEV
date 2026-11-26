@@ -140,7 +140,7 @@ object Courrier {
         val corpsNormalise = normaliser(texte)
         val contenuPromotionnel = PUB_RDV_RE.containsMatchIn(corpsNormalise)
         val rdvExpliciteDansCorps = RDV_RE.containsMatchIn(corpsNormalise)
-        val rdvExplicite = rdvExpliciteDansCorps && (jourTrouve != null || !contenuPromotionnel)
+        val rdvExplicite = (RDV_RE.containsMatchIn(n) && jourTrouve != null) || (rdvExpliciteDansCorps && !contenuPromotionnel)
         val rdvAutomobile = RDV_AUTO_RE.containsMatchIn(corpsNormalise) && jourTrouve != null && heurePresente
         val rdvPersonnel = RENCONTRE_RE.containsMatchIn(corpsNormalise) && jourTrouve != null
         if ((rdvExplicite || rdvAutomobile || rdvPersonnel) && !contenuPromotionnel && !FACTURE_RE.containsMatchIn(n) && !DEVIS_RE.containsMatchIn(n)) {
