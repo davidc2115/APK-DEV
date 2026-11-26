@@ -308,15 +308,21 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     private fun persist(): String {
         val md = render()
-        // L'écriture locale fait partie de la validation : ne jamais annoncer une consigne
-        // enregistrée si le fichier durable n'a pas été remplacé correctement.
-        try { persisterCopieHermes(local, md) }
-        catch (e: Exception) { throw EcritureLocaleMemoireException(e) }
-        // Si seul le miroir Obsidian échoue, la copie locale est déjà durable : ne pas annuler
-        // le cache en mémoire, sinon l'état visible divergerait de la copie qui sera resynchronisée.
-        return obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), md)
+        // Le coffre configuré est la source canonique ; l'empreinte empêche d'écraser
+        // une modification concurrente faite directement dans Obsidian.
+        val emplacement = if (obsidian.coffreConfigure()) {
+            val hash = obsidian.ecrireSiInchange("$FOLDER/$FILE", md, empreinteCoffreMemoire)
+            empreinteCoffreMemoire = hash
+            conflitMemoireExterne = false
+            "coffre Obsidian › $FOLDER › $FILE"
+        } else {
+            obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), md)
+        }
+        empreinteEtatCharge = obsidian.empreinteContenu(md)
+        runCatching { persisterCopieHermes(local, md) }
+            .onFailure { fr.dd.jarvis.voice.JournalVoix.noter("diagnostic", "Cache privé de la mémoire non actualisé : " + (it.message ?: it.javaClass.simpleName)) }
+        return emplacement
     }
-
     @Synchronized
     fun set(sujet: String, texte: String): String = avecRollbackSiEcritureLocaleEchoue {
         ensure(); items[sujet.trim().lowercase().ifBlank { "general" }] = texte.trim(); persist()
