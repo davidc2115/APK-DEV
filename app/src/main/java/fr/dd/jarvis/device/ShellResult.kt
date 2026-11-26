@@ -3,7 +3,7 @@ package fr.dd.jarvis.device
 /** Normalise les résultats shell pour qu'un code de sortie non nul ne puisse jamais être annoncé comme un succès. */
 internal object ShellResult {
     private val marker = Regex("(?m)^__JARVIS_EXIT_CODE__=(-?\\d+)\\s*$")
-    private val erreurExplicite = Regex("(?im)^(?:error(?::|\\\\b)|exception\\\\b|unknown command\\\\b|permission denied\\\\b|securityexception\\\\b|failure \\\\[|can't find service\\\\b|/system/bin/sh:.*(?:not found|permission denied))")
+    private val erreurExplicite = Regex("(?im)^(?:error(?::|\\b)|exception\\b|unknown command\\b|permission denied\\b|securityexception\\b|failure \\[|can't find service\\b|/system/bin/sh:.*(?:not found|permission denied))")
 
     fun withExitCode(command: String): String =
         "$command\n__jarvis_status=\$?\nprintf '\\n__JARVIS_EXIT_CODE__=%s\\n' \"\$__jarvis_status\""
