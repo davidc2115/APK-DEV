@@ -509,36 +509,40 @@ class SocieteService(
             site.nom.replace(Regex("[\\\\/:*?\"<>|]"), "_")
         val existantes = if (avant) intervention.photosAvant else intervention.photosApres
         val ajoutees = mutableListOf<String>()
+        val echecs = mutableListOf<String>()
         var totalOctets = 0L
-        uris.take(10).forEach { uri ->
+        uris.take(10).forEachIndexed { index, uri ->
+            var copieTemporaire: File? = null
             runCatching {
                 val mime = ctx.contentResolver.getType(uri) ?: "image/jpeg"
-                if (!mime.startsWith("image/")) return@runCatching
+                require(mime.startsWith("image/")) { "format non image" }
+                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw java.io.IOException("lecture impossible")
+                require(bytes.isNotEmpty() && bytes.size <= 15 * 1024 * 1024) { "taille invalide (15 Mo maximum)" }
+                require(totalOctets + bytes.size <= 40L * 1024 * 1024) { "limite de 40 Mo par ajout dépassée" }
                 val extension = when (mime.lowercase()) {
                     "image/png" -> "png"
                     "image/webp" -> "webp"
                     "image/heic", "image/heif" -> "heic"
                     else -> "jpg"
                 }
-                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@runCatching
-                if (bytes.isEmpty() || bytes.size > 15 * 1024 * 1024) return@runCatching
-                totalOctets += bytes.size
-                if (totalOctets > 40L * 1024 * 1024) return@runCatching
                 val numero = existantes.size + ajoutees.size + 1
                 val nom = (if (avant) "avant" else "apres") + "-%02d.%s".format(numero, extension)
-                val copieTemporaire = File(dossierLocal, nom)
-                try {
-                    copieTemporaire.writeBytes(bytes)
-                    // Ne rattacher la photo à l'intervention qu'après confirmation de son écriture Obsidian.
-                    obsidian.saveBytes(dossierObsidian, "$interventionId-$nom", bytes, mime)
-                    ajoutees += "interventions/$interventionId/$nom"
-                } catch (e: Exception) {
-                    runCatching { copieTemporaire.delete() }
-                    throw e
-                }
+                val destination = File(dossierLocal, nom)
+                destination.writeBytes(bytes)
+                copieTemporaire = destination
+                obsidian.saveBytes(dossierObsidian, "$interventionId-$nom", bytes, mime)
+                ajoutees += "interventions/$interventionId/$nom"
+                totalOctets += bytes.size
+            }.onFailure { erreur ->
+                copieTemporaire?.let { runCatching { it.delete() } }
+                echecs += "Photo ${index + 1} : ${erreur.message ?: erreur.javaClass.simpleName}"
             }
         }
-        if (ajoutees.isEmpty()) return "Aucune image exploitable. Formats image uniquement, 15 Mo maximum par photo et 40 Mo par ajout."
+        if (ajoutees.isEmpty()) {
+            val detail = echecs.firstOrNull()?.let { " $it" }.orEmpty()
+            return "Aucune photo n'a été ajoutée. Vérifie le format, les limites de taille et l'accès en écriture au coffre Obsidian.$detail"
+        }
         val maj = intervention.copy(
             photosAvant = if (avant) intervention.photosAvant + ajoutees else intervention.photosAvant,
             photosApres = if (avant) intervention.photosApres else intervention.photosApres + ajoutees
@@ -550,6 +554,8 @@ class SocieteService(
                 })
             }) }
             ecrireRapport(client, site, maj)
+        } catch (e: Exception) {
+            return "⚠️ Les photos sont enregistrées dans Obsidian, mais l'historique Société n'a pas été mis à jour : ${e.message ?: e.javaClass.simpleName}. Aucune photo n'est annoncée comme ajoutée."
         } finally {
             // Les originaux sont déjà dans Obsidian ; les fichiers privés n'ont servi qu'à intégrer
             // les images au PDF courant. Les rapports futurs reliront les originaux dans le coffre.
@@ -557,7 +563,10 @@ class SocieteService(
                 File(ctx.filesDir, "societe/$relatif").let { fichier -> runCatching { fichier.delete() } }
             }
         }
-        return "${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note mise à jour : $emplacement — $pdf"
+        return buildString {
+            append("${ajoutees.size} photo(s) ${if (avant) "avant" else "après"} ajoutée(s). Note mise à jour : $emplacement — $pdf")
+            if (echecs.isNotEmpty()) append("\n⚠️ Certaines photos n'ont pas été ajoutées : " + echecs.joinToString(" ; "))
+        }
     }
 
     // ------------------------------------------------------------------ export (Obsidian + PDF)
