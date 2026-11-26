@@ -21,6 +21,18 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Volatile private var loaded = false
     @Volatile private var loadError: String? = null
 
+    /** Registre commun Jarvis/Hermès, rangé dans le coffre Obsidian configuré. */
+    private val registreApprentissage by lazy {
+        RegistreApprentissage(
+            File(ctx.filesDir, "apprentissage-registre.json"),
+            { obsidian.coffreConfigure() },
+            { obsidian.lireAvecDateStrict("JARVIS/Apprentissage", "index.json")?.first },
+            { raw -> obsidian.saveBytes("JARVIS/Apprentissage", "index.json", raw.toByteArray(Charsets.UTF_8), "application/json") }
+        )
+    }
+
+    fun registreApprentissage(): RegistreApprentissage = registreApprentissage
+
     private val sensitivePattern = Regex(
         "\\b(sant[eé]|m[eé]dical|maladie|diagnostic|m[eé]dicament|banque|bancaire|carte bancaire|mot de passe|password|secret|cl[eé] api|token|religion|politique|orientation sexuelle|sexualit[eé]|syndicat)\\b",
         RegexOption.IGNORE_CASE
