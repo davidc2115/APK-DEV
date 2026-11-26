@@ -277,12 +277,8 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
             return // loaded reste false : la prochaine tentative pourra relire le coffre.
         }
         if (md != null) parse(md)
-        empreinteCoffreMemoire = if (obsidian.coffreConfigure()) try {
-            obsidian.readNoteStrict("$FOLDER/$FILE")?.let(obsidian::empreinteContenu)
-        } catch (e: Exception) {
-            loadError = e.message ?: e.javaClass.simpleName
-            return
-        } else null
+        // L'empreinte est calculée sur le texte réellement chargé, sans seconde lecture SAF susceptible de voir une autre version.
+        empreinteCoffreMemoire = if (obsidian.coffreConfigure()) md?.let(obsidian::empreinteContenu) else null
         empreinteEtatCharge = obsidian.empreinteContenu(render())
         conflitMemoireExterne = false
         loadCandidates()
