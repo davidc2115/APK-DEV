@@ -224,12 +224,15 @@ object AdbShell {
         try {
             val m = mgr(ctx)
             if (!m.isConnected && !m.connectTls(ctx.applicationContext, 6000)) return@withContext "ADB non connecté (Réglages › Téléphone › Contrôle)."
-            val stream = m.openStream("shell:$command")
+            // Le protocole shell ADB classique ne fournit pas directement le code retour :
+            // on l'écrit explicitement dans la sortie pour distinguer succès et refus Android.
+            val stream = m.openStream("shell:${ShellResult.withExitCode(command)}")
             val lecteur = Executors.newSingleThreadExecutor()
             try {
                 val sortie = lecteur.submit(Callable { stream.openInputStream().use { lireSortieLimitee(it) } })
                 try {
-                    sortie.get(20, TimeUnit.SECONDS).ifEmpty { "(commande exécutée)" }
+                    val brut = sortie.get(20, TimeUnit.SECONDS)
+                    ShellResult.fromAdbOutput(brut) ?: "Erreur ADB : code de sortie shell absent (résultat non vérifiable)."
                 } catch (_: TimeoutException) {
                     runCatching { stream.close() }
                     sortie.cancel(true)
