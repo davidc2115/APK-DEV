@@ -217,11 +217,11 @@ object Courrier {
     fun revaliderHistorique(c: Context): Int {
         val anciens = liste(c)
         val valides = anciens.mapNotNull { ancien ->
-            analyser(ancien.emetteur, ancien.resume, ancien.source, ancien.ts)
-                .firstOrNull { it.type == ancien.type }
-                ?.copy(id = ancien.id, traite = ancien.traite, domaine = ancien.domaine, auto = ancien.auto,
-                    dateRdv = it.dateRdv ?: ancien.dateRdv, lieu = it.lieu.ifBlank { ancien.lieu },
-                    statut = if (it.dateRdv == null && ancien.dateRdv != null) ancien.statut else it.statut)
+            val actuel = analyser(ancien.emetteur, ancien.resume, ancien.source, ancien.ts)
+                .firstOrNull { it.type == ancien.type } ?: return@mapNotNull null
+            actuel.copy(id = ancien.id, traite = ancien.traite, domaine = ancien.domaine, auto = ancien.auto,
+                dateRdv = actuel.dateRdv ?: ancien.dateRdv, lieu = actuel.lieu.ifBlank { ancien.lieu },
+                statut = if (actuel.dateRdv == null && ancien.dateRdv != null) ancien.statut else actuel.statut)
         }
         val retires = anciens.size - valides.size
         if (retires > 0 || valides.size != anciens.size) sauver(c, valides)
