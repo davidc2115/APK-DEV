@@ -337,7 +337,7 @@ class ToolBox(
             mapOf("requete" to prop("Titre, artiste ou style à écouter."), "appli" to prop("Nom exact d'une application RENVOYÉE PAR applis_musique ou déjà mémorisée (jamais une application supposée sans l'avoir vérifiée)."), "toujours" to prop("« true » pour toujours utiliser cette application pour la musique."))))
         put(tool("controle_media", "Contrôle la lecture en cours : play, pause, next, previous, stop.", mapOf("action" to prop("play | pause | next | previous | stop")), listOf("action")))
         put(tool("mode_sonore", "Mode sonore du téléphone : ne pas déranger (NPD / silencieux), vibreur, sonnerie (sonnerie + vibreur), ou l'état actuel.", mapOf("mode" to prop("npd | npd_off | vibreur | sonnerie | etat")), listOf("mode")))
-        put(tool("naviguer", "OBLIGATOIRE pour toute demande de lancement/démarrage d’un itinéraire GPS vers une adresse ou un lieu : transmet la destination à Waze, Google Maps ou l’application choisie afin de démarrer le guidage, pas seulement d’ouvrir sa page d’accueil. Appelle-le DIRECTEMENT, sans demander de confirmation (« oui ou non ») ; n’utilise jamais phone_action ni pilote_ecran pour ouvrir Waze / Maps ou appuyer sur « Y aller » : cet outil démarre et vérifie lui-même le guidage. Si l’application n’est pas précisée et qu’aucune n’est mémorisée, demande laquelle (Waze / Google Maps…) et si le choix doit être conservé (« toujours ») ou ponctuel (« une seule fois »), puis rappelle l’outil.",
+        put(tool("naviguer", "OBLIGATOIRE pour toute demande de lancement/démarrage d’un itinéraire GPS vers une adresse ou un lieu. Appelle-le DIRECTEMENT, sans demander de confirmation. Pour « chez moi », « au travail », « à l’école » ou tout autre lieu mémorisé, transmets le nom exact de ce lieu sans l'inventer ni le remplacer par une commune proche ; utilise l'adresse enregistrée dans la mémoire partagée. Pour une adresse dictée, conserve intégralement numéro, rue et commune. N'envoie des coordonnées qu'en cas de correspondance fiable au numéro demandé ; si seul le nom de rue est reconnu alors qu'un numéro a été dicté, laisse Waze/Maps rechercher le texte complet. En Android Auto, une simple ouverture de Waze/Maps, une épingle ou une notification persistante ne prouve pas que le guidage a démarré : annonce « guidage lancé » uniquement après confirmation d'une notification explicitement classée NAVIGATION ou d'une sortie audio de guidage. N'utilise jamais phone_action ni pilote_ecran pour appuyer sur « Y aller ». Si l'application n'est pas précisée et qu'aucune n'est mémorisée, demande laquelle et si le choix doit être conservé ou ponctuel.",
             mapOf("destination" to prop("Adresse ou lieu."), "mode" to prop("voiture (défaut), marche ou velo"),
                 "appli" to prop("Application : Waze, Google Maps, ou autre (optionnel)."),
                 "toujours" to prop("« true » si l'utilisateur veut toujours utiliser cette application pour ce type de demande ; « false » pour cette fois seulement.")), listOf("destination")))
@@ -1073,7 +1073,13 @@ class ToolBox(
             // En voiture : Android Auto lance son propre GPS (Waze / Maps de la voiture), sans question ni écran du téléphone.
             // Vérifié : « guidage lancé » seulement si Waze / Maps l'a vraiment démarré (sinon réponse honnête + notification).
             if (app.enVoiture && a.optString("destination").isNotBlank()) {
-                val pt = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) } }.getOrNull()
+                val destination = a.optString("destination").trim()
+                val pt = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val loc = fr.dd.jarvis.societe.Geo.localiser(destination)
+                    val numeroDemande = Regex("""(?:^|[\\s,])\\d{1,4}(?:\\s*(?:bis|ter|quater|[a-d])\\b)?(?=[\\s,]+[^\\d\\s,])""", RegexOption.IGNORE_CASE).containsMatchIn(destination)
+                    loc?.takeIf { it.precision == fr.dd.jarvis.societe.Geo.Precision.NUMERO ||
+                        (!numeroDemande && it.precision == fr.dd.jarvis.societe.Geo.Precision.RUE) }?.point
+                } }.getOrNull()
                 // Réponse directe : le modèle ne « termine » pas le guidage en pilotant l'écran de Waze (appuis à confirmer).
                 return ToolResult(fr.dd.jarvis.car.GuidageVoiture.lancer(app, a.optString("destination"), pt?.let { it.lat to it.lon }, a.optString("appli").trim()), direct = true)
             }
@@ -1088,7 +1094,13 @@ class ToolBox(
             else {
                 if (appli.isBlank()) appli = dispo.firstOrNull().orEmpty()
                 if (toujours && a.optString("appli").isNotBlank()) app.store.setAppPref("navigation", a.optString("appli").trim())
-                val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) runCatching { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) }.getOrNull() else null
+                val destination = a.optString("destination").trim()
+                val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) runCatching {
+                    val loc = fr.dd.jarvis.societe.Geo.localiser(destination)
+                    val numeroDemande = Regex("""(?:^|[\\s,])\\d{1,4}(?:\\s*(?:bis|ter|quater|[a-d])\\b)?(?=[\\s,]+[^\\d\\s,])""", RegexOption.IGNORE_CASE).containsMatchIn(destination)
+                    loc?.takeIf { it.precision == fr.dd.jarvis.societe.Geo.Precision.NUMERO ||
+                        (!numeroDemande && it.precision == fr.dd.jarvis.societe.Geo.Precision.RUE) }?.point
+                }.getOrNull() else null
                 ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     app.phone.navigate(a.optString("destination"), a.optString("mode"), appli, pt?.let { it.lat to it.lon }) +
                         (if (toujours && a.optString("appli").isNotBlank()) " (${a.optString("appli")} mémorisé pour les itinéraires)" else "")
