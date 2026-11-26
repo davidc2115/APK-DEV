@@ -125,7 +125,7 @@ class JarvisApp : Application() {
         val graphDatabase = GraphDatabase.getInstance(this)
         val graphIndexer = GraphIndexer(graphDatabase, obsidian)
         knowledgeRepository = KnowledgeRepository(graphDatabase, graphIndexer)
-        // Index du graphe Obsidian (lecture de 400 notes) : au plus toutes les 6 h, et pas pendant les 30 premières
+        // Index du graphe Obsidian (jusqu'à 3 000 notes, liens lus sur 1 200) : au plus toutes les 6 h, et pas pendant les 30 premières
         // secondes (le processus démarre aussi pour les tâches de fond : inutile de relire tout le coffre à chaque fois).
         if (System.currentTimeMillis() - (store.grapheIndexeLe.value.toLongOrNull() ?: 0L) > 6 * 3_600_000L) graphScope.launch {
             kotlinx.coroutines.delay(30_000)
