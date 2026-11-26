@@ -1811,7 +1811,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         },
     )
 
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxSize()) {
         ReglagesNavigation(
             onglet = onglet, sous = sousCourant, recherche = recherche,
             onOnglet = { id -> onglet = id; sous = ""; recherche = null; store.reglagesVue.set(id) },
@@ -1819,14 +1819,15 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             onRecherche = { recherche = it },
         )
         val r = recherche
+        Box(Modifier.weight(1f).fillMaxWidth()) {
         if (r == null && onglet == "fichiers") {
             DocumentLibraryScreen(app, onAsk)
         } else {
             val visibles = if (r != null) volets.filter { it.correspond(r) } else volets.filter { it.onglet == onglet && it.sous == sousCourant }
             LazyColumn(
-                Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 if (r != null && r.isNotBlank() && visibles.isEmpty()) item {
                     Text("Aucun réglage ne correspond à « $r ». Essaie un autre mot (ex. voix, batterie, Freebox, clés, anti-vol).", color = HudDim, fontSize = 12.sp)
@@ -1852,6 +1853,7 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
             )
                 }
             }
+        }
         }
     }
 }
