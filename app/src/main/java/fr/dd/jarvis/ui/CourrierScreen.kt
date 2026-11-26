@@ -47,7 +47,7 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     var actionInfo by remember { mutableStateOf("") }
     var domaine by rememberSaveable { mutableStateOf(domaineFixe ?: "tous") }
     var type by rememberSaveable { mutableStateOf("tous") }
-    var filtreEtat by rememberSaveable { mutableStateOf("a_traiter") }
+    var filtreEtat by rememberSaveable("courrier_filtre_etat_v2") { mutableStateOf("a_traiter") }
     val tout = remember(version) { Courrier.liste(app).sortedByDescending { it.ts } }
     val l = tout.filter { e ->
         (filtreEtat == "tout" || (filtreEtat == "traites" && e.traite) || (filtreEtat == "a_traiter" && !e.traite)) && (type == "tous" || e.type == type) &&
