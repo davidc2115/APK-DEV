@@ -192,14 +192,64 @@ object Horloge {
         return true
     }
 
+    internal fun estPaquetHorloge(pkg: String?): Boolean = pkg != null && pkg in setOf(
+        "com.android.deskclock", "com.miui.clock", "com.xiaomi.clock", "com.google.android.deskclock"
+    )
+
+    /**
+     * Diagnostic strictement en lecture seule de l'Horloge native.
+     * Ne lance jamais d'activité, d'intent SET_ALARM ni l'application Horloge.
+     */
+    private fun diagnosticHorlogeNative(c: Context): String = buildString {
+        val pm = c.packageManager
+        val paquets = listOf("com.android.deskclock", "com.miui.clock", "com.xiaomi.clock", "com.google.android.deskclock")
+        val trouves = paquets.mapNotNull { pkg ->
+            runCatching {
+                val info = pm.getPackageInfo(pkg, 0)
+                val provider = runCatching { pm.resolveContentProvider(pkg, 0) }.getOrNull()
+                buildString {
+                    append(pkg).append(" v").append(info.versionName ?: "?")
+                    append(" · fournisseur=").append(
+                        when {
+                            provider == null -> "absent"
+                            !provider.exported -> "non exporté (inaccessible aux autres applis)"
+                            else -> "exporté"
+                        }
+                    )
+                    if (provider?.readPermission != null) append(" · lecture protégée: ").append(provider.readPermission)
+                    if (provider?.writePermission != null) append(" · écriture protégée: ").append(provider.writePermission)
+                }
+            }.getOrNull()
+        }
+        appendLine("Horloge native installée : ${trouves.joinToString(" ; ").ifBlank { "aucun paquet connu détecté" }}")
+        val service = fr.dd.jarvis.service.JarvisAccessibilityService.instance
+        val pkgActif = runCatching { service?.activePackageName() }.getOrNull()
+        appendLine("Accessibilité JARVIS : ${if (service == null) "inactive ou non connectée" else "connectée"}")
+        appendLine("Fenêtre active : ${pkgActif ?: "non accessible"}")
+        if (estPaquetHorloge(pkgActif)) {
+            val ecran = runCatching { service?.readScreen().orEmpty() }.getOrDefault("")
+            val pkgRelu = Regex("APPLICATION AU PREMIER PLAN : ([^\\n]+)").find(ecran)?.groupValues?.get(1)?.trim()
+            if (estPaquetHorloge(pkgRelu)) {
+                appendLine("Écran Horloge lu sans interaction :")
+                append(ecran.take(7000))
+            } else {
+                appendLine("La fenêtre a changé pendant le diagnostic ; aucun contenu d'écran n'a été conservé.")
+            }
+        } else {
+            appendLine("Horloge non affichée : aucun écran n'a été ouvert et aucune action n'a été effectuée.")
+        }
+    }
+
     fun diagnostic(c: Context): String {
         channels(c)
         val exact = exactAutorise(c)
         val notifications = notificationsAutorisees(c)
-        val next = am(c).nextAlarmClock?.triggerTime?.let {
+        val nextInfo = am(c).nextAlarmClock
+        val next = nextInfo?.triggerTime?.let {
             java.time.Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
                 .format(java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm:ss"))
         } ?: "aucune alarme système"
+        val origine = nextInfo?.showIntent?.creatorPackage ?: "inconnue"
         val chrono = prefs(c).getLong("chrono", 0L)
         val saved = load(c)
         return buildString {
@@ -208,9 +258,11 @@ object Horloge {
             appendLine("Alarmes exactes : ${if (exact) "AUTORISÉES" else "REFUSÉES"}")
             appendLine("Shizuku : ${if (!ShizukuShell.installed(c)) "non installé" else if (!ShizukuShell.running()) "installé, non démarré" else if (!ShizukuShell.granted()) "démarré, accès JARVIS refusé" else "prêt"}")
             appendLine("Notifications : ${if (notifications) "autorisées" else "bloquées"}")
-            appendLine("Prochaine alarme système : $next")
+            appendLine("Prochaine alarme système : $next · application propriétaire : $origine")
             appendLine("Alarmes/minuteurs enregistrés : ${saved.size}")
-            append("Chronomètre : ${if (chrono == 0L) "arrêté" else "actif depuis " + formater(System.currentTimeMillis() - chrono)}")
+            appendLine("Chronomètre : ${if (chrono == 0L) "arrêté" else "actif depuis " + formater(System.currentTimeMillis() - chrono)}")
+            appendLine()
+            append(diagnosticHorlogeNative(c))
         }
     }
 
