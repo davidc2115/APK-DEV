@@ -326,7 +326,7 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         runCatching { obsidian.readNoteStrict("$FOLDER/Mémoire Hermès source.md") }.getOrNull()?.let { brut ->
             if (brut != hermesCache) hermesCache = brut
         }
-        runCatching { obsidian.readNoteStrict("$FOLDER/Capacités Hermès.json") }.getOrNull()?.let { brut ->
+        runCatching { obsidian.lireAvecDateStrict(FOLDER, "Capacités Hermès.json")?.first }.getOrNull()?.let { brut ->
             runCatching { org.json.JSONObject(brut) }.getOrNull()?.let { capacitesCache = it }
         }
     }
