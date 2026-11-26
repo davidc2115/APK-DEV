@@ -585,10 +585,18 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         ensure()
         val identite = "## Identité\nDans cette installation, tu es Hermès, le cerveau principal de JARVIS, l'assistant personnel de l'utilisateur sur son téléphone : " +
             "tu réponds à toutes ses demandes, avec les outils du téléphone (Jarvis) et une seule mémoire partagée.\n\n"
-        if (items.isEmpty()) return identite.trim()
+        val habitudesActives = registreApprentissage.habitudesActives()
+        val memoire = LinkedHashMap(items)
+        if (habitudesActives.isNotEmpty()) {
+            val lignes = memoire["habitudes"].orEmpty().lines().filter { it.isNotBlank() }
+            memoire["habitudes"] = (lignes + habitudesActives.map { (titre, description) ->
+                if (description.isBlank()) "- $titre" else "- $titre : $description"
+            }).distinct().joinToString("\n")
+        }
+        if (memoire.isEmpty()) return identite.trim()
         return identite + "## Mémoire partagée avec JARVIS\n" +
             "Consignes durables de l'utilisateur enregistrées par JARVIS (synchronisées automatiquement ; pour les modifier, utilise mcp_jarvis_memoire_ajouter ou mcp_jarvis_memoire_oublier) :\n" +
-            items.entries.joinToString("\n") { "- [${it.key}] ${it.value.replace("\n", " ").take(600)}" }.take(6000)
+            memoire.entries.joinToString("\n") { "- [${it.key}] ${it.value.replace("\n", " ").take(600)}" }.take(6000)
     }
 
     /**
@@ -599,7 +607,16 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     fun pourPrompt(): String = try {
         ensure()
-        blocPrompt(items, vocal = fr.dd.jarvis.ai.CanalDemande.vocal)
+        val memoireAvecHabitudesActives = LinkedHashMap(items)
+        val actives = registreApprentissage.habitudesActives()
+        if (actives.isNotEmpty()) {
+            val anciennes = memoireAvecHabitudesActives["habitudes"].orEmpty().lines().filter { it.isNotBlank() }
+            val partagees = actives.map { (titre, description) ->
+                if (description.isBlank()) "- $titre" else "- $titre : $description"
+            }
+            memoireAvecHabitudesActives["habitudes"] = (anciennes + partagees).distinct().joinToString("\n")
+        }
+        blocPrompt(memoireAvecHabitudesActives, vocal = fr.dd.jarvis.ai.CanalDemande.vocal)
     } catch (e: Exception) {
         "\n\nMÉMOIRE DURABLE TEMPORAIREMENT INACCESSIBLE : le coffre Obsidian n'a pas pu être lu. N'affirme pas qu'aucune consigne n'existe et ne remplace pas la mémoire par une ancienne copie locale. Réessaie lorsque l'accès sera rétabli."
     }
