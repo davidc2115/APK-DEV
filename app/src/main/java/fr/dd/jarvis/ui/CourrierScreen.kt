@@ -47,10 +47,10 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     var actionInfo by remember { mutableStateOf("") }
     var domaine by rememberSaveable { mutableStateOf(domaineFixe ?: "tous") }
     var type by rememberSaveable { mutableStateOf("tous") }
-    var voirTraites by rememberSaveable { mutableStateOf(false) }
+    var filtreEtat by rememberSaveable { mutableStateOf("a_traiter") }
     val tout = remember(version) { Courrier.liste(app).sortedByDescending { it.ts } }
     val l = tout.filter { e ->
-        (voirTraites || !e.traite) && (type == "tous" || e.type == type) &&
+        (filtreEtat == "tout" || (filtreEtat == "traites" && e.traite) || (filtreEtat == "a_traiter" && !e.traite)) && (type == "tous" || e.type == type) &&
             when (domaine) { "tous" -> true; "a_classer" -> e.domaine.isBlank(); else -> e.domaine == domaine }
     }
     val scope = rememberCoroutineScope()
@@ -79,8 +79,9 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
                         .forEach { (k, v) -> HudChip(v, type == k) { type = k } }
                 }
                 Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    HudChip("À traiter", !voirTraites) { voirTraites = false }
-                    HudChip("Avec les traités", voirTraites) { voirTraites = true }
+                    HudChip("À traiter", filtreEtat == "a_traiter") { filtreEtat = "a_traiter" }
+                    HudChip("Traités", filtreEtat == "traites") { filtreEtat = "traites" }
+                    HudChip("Tout", filtreEtat == "tout") { filtreEtat = "tout" }
                 }
             }
         }
@@ -108,7 +109,7 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
                         if (e.domaine.isBlank()) Courrier.classer(app, e.id, Courrier.SOCIETE)
                         Courrier.marquer(app, e.id); version++
                     }
-                    if (e.type == Courrier.RDV) HudChip("📅 Ajouter à l'agenda") {
+                    if (e.type == Courrier.RDV && e.dateRdv != null) HudChip("📅 Ajouter à l'agenda") {
                         scope.launch {
                             val result = withContext(Dispatchers.IO) {
                                 runCatching { fr.dd.jarvis.ai.ToolBox(app) { _, _ -> true }.execute("create_event", Courrier.argsEvenement(e)) }
