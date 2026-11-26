@@ -721,7 +721,10 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 throw IOException("Lecture Obsidian impossible pour $fileName ; migration locale suspendue.", e)
             }
             if (distante != null) return distante
-            if (!coffreDisponible()) return null
+            if (!coffreDisponible()) {
+                if (!ancienneCopie.isNullOrEmpty()) throw IOException("Le coffre Obsidian est en lecture seule ou indisponible en écriture ; migration locale suspendue.")
+                return null
+            }
             val cle = "$folder/$fileName"
             val prefs = ctx.getSharedPreferences("obsidian_migrations", Context.MODE_PRIVATE)
             if (prefs.getBoolean(cle, false)) return null
