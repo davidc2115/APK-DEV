@@ -10,17 +10,28 @@ class GuidageVoitureTest {
         assertEquals("12+rue+de+la+Paix,+Dijon", GuidageVoiture.requete("12 rue de la Paix,  Dijon"))
         assertEquals("%C3%89glise+Saint-B%C3%A9nigne", GuidageVoiture.requete("Église Saint-Bénigne"))
         assertEquals("geo:0,0?q=8+place+d%27Arcy,+21000+Dijon", GuidageVoiture.geo("8 place d'Arcy, 21000 Dijon", null))
-        assertEquals("geo:47.322047,5.041480", GuidageVoiture.geo("peu importe", 47.322047 to 5.04148))
+        // Même avec un point GPS exact, ACTION_NAVIGATE doit demander une recherche/route, pas seulement une épingle.
+        assertEquals("geo:0,0?q=8+place+d%27Arcy,+Dijon", GuidageVoiture.geo("8 place d'Arcy, Dijon", 47.322047 to 5.04148))
+        assertEquals("geo:0,0?q=47.322047,5.041480", GuidageVoiture.geo("", 47.322047 to 5.04148))
     }
 
-    @Test fun guidageVerifieParLaNotificationDeNavigation() {
-        val t = 1_000_000_000_000L
-        GuidageVoiture.noter("com.spotify.music", t + 500, "navigation", true)       // pas une appli de navigation
-        GuidageVoiture.noter("com.waze", t + 500, null, false)                       // ni permanente ni « navigation »
-        assertNull(GuidageVoiture.demarreDepuis(t))                                  // sans accès aux notifications : inconnu
-        GuidageVoiture.noter("com.waze", t + 800, null, true)
+    @Test fun seuleUneNotificationExplicitementNavigationConfirmeLeDepart() {
+        GuidageVoiture.reinitialiserPourTests()
+        val t = System.currentTimeMillis() - 100
+        GuidageVoiture.noter("com.spotify.music", t + 10, "navigation", true) // mauvais paquet
+        GuidageVoiture.noter("com.waze", t + 20, null, true) // notification persistante, mais pas classée navigation
+        assertTrue(GuidageVoiture.demarreDepuis(t) != true)
+        GuidageVoiture.noter("com.waze", t + 30, android.app.Notification.CATEGORY_NAVIGATION, false)
         assertTrue(GuidageVoiture.demarreDepuis(t) == true)
-        assertNull(GuidageVoiture.demarreDepuis(t + 10_000))                         // plus ancienne que la demande
+        GuidageVoiture.reinitialiserPourTests()
+    }
+
+    @Test fun ouvertureDeWazeSeuleNeConfirmePasLeGuidage() {
+        GuidageVoiture.reinitialiserPourTests()
+        val t = System.currentTimeMillis() - 100
+        GuidageVoiture.noterFenetre("com.waze")
+        assertTrue(GuidageVoiture.demarreDepuis(t) != true)
+        GuidageVoiture.reinitialiserPourTests()
     }
 }
 

@@ -31,15 +31,19 @@ object GuidageVoiture {
     private const val NOTIF = 7731
 
     /** Notification d'une appli de navigation (appelé par l'écouteur de notifications). */
-    fun noter(pkg: String, quand: Long, categorie: String?, permanente: Boolean) {
+    fun noter(pkg: String, quand: Long, categorie: String?, @Suppress("UNUSED_PARAMETER") permanente: Boolean) {
         if (pkg !in PAQUETS) return
-        if (categorie == Notification.CATEGORY_NAVIGATION || permanente) dernieres.merge(pkg, quand) { a, b -> maxOf(a, b) }
+        // Une notification persistante seule ne prouve pas que le calcul d’itinéraire a démarré.
+        if (categorie == Notification.CATEGORY_NAVIGATION) dernieres.merge(pkg, quand) { a, b -> maxOf(a, b) }
     }
 
     /** Fenêtre de Waze / Maps ouverte sur le téléphone (appelé par le service d'accessibilité). */
     fun noterFenetre(pkg: String) { if (pkg in PAQUETS) fenetres[pkg] = System.currentTimeMillis() }
 
-    /** Waze / Maps affiché il y a moins de [ms]. */
+    /** Réinitialisation déterministe réservée aux tests unitaires. */
+    internal fun reinitialiserPourTests() { dernieres.clear(); fenetres.clear() }
+
+    /** Waze / Maps affiché il y a moins de [ms] (diagnostic uniquement, jamais une preuve de guidage). */
     fun fenetreRecente(ms: Long = 120_000): Boolean = fenetres.values.any { System.currentTimeMillis() - it < ms }
 
     /** Bouton de départ du guidage (« Y aller », « Démarrer »…) : appuyer dessus est sans risque, aucune confirmation. */
@@ -53,11 +57,12 @@ object GuidageVoiture {
     }.getOrDefault(false)
 
     /**
-     * Guidage démarré depuis [depuis] ? Indices : notification de navigation publiée ou mise à jour, fenêtre de Waze / Maps
-     * ouverte, voix de guidage. null = impossible à savoir (ni notifications ni accessibilité).
+     * Guidage démarré depuis [depuis] ? Seules une notification explicitement classée NAVIGATION ou une sortie audio
+     * ASSISTANCE_NAVIGATION_GUIDANCE comptent. Une simple ouverture de Waze/Maps ne suffit pas.
+     * null = impossible à savoir (ni notifications ni accessibilité).
      */
     fun demarreDepuis(depuis: Long, ctx: Context? = null): Boolean? {
-        if (dernieres.values.any { it >= depuis } || fenetres.values.any { it >= depuis }) return true
+        if (dernieres.values.any { it >= depuis }) return true
         if (ctx != null && guidageVocal(ctx)) return true
         val notif = fr.dd.jarvis.service.JarvisNotificationListener.navigationActive(PAQUETS, depuis)
         if (notif == null && fr.dd.jarvis.service.JarvisAccessibilityService.instance != null) return false
@@ -99,9 +104,12 @@ object GuidageVoiture {
 
     private fun etat(b: Boolean?) = when (b) { true -> "oui"; false -> "NON"; null -> "inconnu" }
 
-    /** URI geo: pour Android Auto : coordonnées si connues (guidage direct), sinon l'adresse. */
-    fun geo(destination: String, point: Pair<Double, Double>?): String =
-        if (point != null) "geo:${coord(point.first)},${coord(point.second)}" else "geo:0,0?q=" + requete(destination)
+    /** URI de recherche pour Android Auto : geo:lat,lon peut ouvrir une simple épingle sans calculer l'itinéraire.
+     * Le paramètre q demande à l'application GPS de rechercher la destination textuelle ou les coordonnées. */
+    fun geo(destination: String, point: Pair<Double, Double>?): String {
+        val cible = destination.trim().ifBlank { point?.let { "${coord(it.first)},${coord(it.second)}" }.orEmpty() }
+        return "geo:0,0?q=" + requete(cible)
+    }
 
     /**
      * Lance le guidage et ne l'annonce que s'il a vraiment démarré. [appli] : Waze, Google Maps… (vide = Waze s'il est
