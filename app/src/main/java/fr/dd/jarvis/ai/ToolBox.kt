@@ -1072,7 +1072,9 @@ class ToolBox(
         "naviguer" -> {
             // En voiture : Android Auto lance son propre GPS (Waze / Maps de la voiture), sans question ni écran du téléphone.
             // Vérifié : « guidage lancé » seulement si Waze / Maps l'a vraiment démarré (sinon réponse honnête + notification).
-            if (app.enVoiture && a.optString("destination").isNotBlank()) {
+            // La présence du CarContext est la preuve la plus fiable qu'Android Auto est réellement connecté.
+            // app.enVoiture peut être momentanément faux (Bluetooth/état de trajet), ne pas contourner Android Auto.
+            if ((app.enVoiture || fr.dd.jarvis.car.NavigationVoiture.contexte != null) && a.optString("destination").isNotBlank()) {
                 val destination = a.optString("destination").trim()
                 val pt = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     val loc = fr.dd.jarvis.societe.Geo.localiser(destination)

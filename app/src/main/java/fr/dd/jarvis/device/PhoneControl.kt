@@ -616,16 +616,16 @@ class PhoneControl(private val ctx: Context) {
         if (a.contains("waze")) {
             val uri = if (point != null) "waze://?ll=${point.first},${point.second}&navigate=yes" else "waze://?q=" + Uri.encode(dest) + "&navigate=yes"
             val r = start(Intent.ACTION_VIEW, uri, "com.waze")
-            return r.ifBlank { "🧭 Waze : navigation vers $dest lancée." }
+            return if (r.isBlank()) "🧭 Demande d'itinéraire transmise à Waze pour $dest ; le démarrage réel du guidage reste à confirmer." else "Waze : $r"
         }
         if (a.isNotBlank() && !a.contains("google") && !a.contains("maps")) {
             val (pkg, label) = findPackage(a) ?: return "Application « $appli » introuvable."
             val geo = if (point != null) "geo:${point.first},${point.second}?q=${point.first},${point.second}(${Uri.encode(dest)})" else "geo:0,0?q=" + Uri.encode(dest)
             val r = start(Intent.ACTION_VIEW, geo, pkg)
-            return r.ifBlank { "🧭 $label : $dest ouvert." }
+            return if (r.isBlank()) "🧭 Demande d'ouverture transmise à $label pour $dest ; le démarrage du guidage n'est pas confirmé." else "$label : $r"
         }
         val r = start(Intent.ACTION_VIEW, "google.navigation:q=" + Uri.encode(dest) + "&mode=$m", "com.google.android.apps.maps")
-        return r.ifBlank { "🧭 Google Maps : navigation vers $dest lancée." }
+        return if (r.isBlank()) "🧭 Demande d'itinéraire transmise à Google Maps pour $dest ; le démarrage réel du guidage reste à confirmer." else "Google Maps : $r"
     }
 
     /** Lance la lecture d'une vidéo (URL http:// locale ou distante) dans le lecteur vidéo par défaut du téléphone — aucune app spécifique requise. */

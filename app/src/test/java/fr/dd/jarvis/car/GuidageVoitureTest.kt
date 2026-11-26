@@ -30,7 +30,9 @@ class GuidageVoitureTest {
         GuidageVoiture.reinitialiserPourTests()
         val t = System.currentTimeMillis() - 100
         GuidageVoiture.noterFenetre("com.waze")
-        assertTrue(GuidageVoiture.demarreDepuis(t) != true)
+        assertTrue(GuidageVoiture.fenetreDepuis(t))
+        assertTrue(GuidageVoiture.demarreDepuis(t) != true) // l'ouverture ne vaut jamais départ d'itinéraire
+        assertTrue(!GuidageVoiture.fenetreDepuis(System.currentTimeMillis() + 1))
         GuidageVoiture.reinitialiserPourTests()
     }
 }
