@@ -1114,11 +1114,13 @@ class ToolBox(
             else { app.store.setAppPref(t, ap); ToolResult("✅ $ap sera toujours utilisée pour « $t ».") }
         }
         "obsidian_chercher" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            if (!app.obsidian.coffreLisible()) throw java.io.IOException("Le coffre Obsidian configuré n'est pas accessible en lecture ; aucune recherche locale de secours n'a été utilisée.")
             val r = app.obsidian.searchNotes(a.optString("requete"))
             if (r.isEmpty()) "Aucune note ne contient « ${a.optString("requete")} »." else r.joinToString("\n") { "- ${it.first}" + (if (it.second.isNotBlank()) " : …${it.second}…" else "") }
         })
-        "obsidian_lire" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.readNote(a.optString("chemin"))?.take(6000) ?: "Note introuvable : ${a.optString("chemin")}" })
+        "obsidian_lire" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.obsidian.readNoteStrict(a.optString("chemin"))?.take(6000) ?: "Note introuvable dans le coffre configuré : ${a.optString("chemin")}" })
         "obsidian_lister" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            if (!app.obsidian.coffreLisible()) throw java.io.IOException("Le coffre Obsidian configuré n'est pas accessible en lecture ; aucune liste locale de secours n'a été utilisée.")
             val l = app.obsidian.listNotes(a.optString("dossier")); if (l.isEmpty()) "Aucune note." else l.take(120).joinToString("\n") + (if (l.size > 120) "\n… (${l.size} notes)" else "")
         })
         "obsidian_ecrire" -> {
