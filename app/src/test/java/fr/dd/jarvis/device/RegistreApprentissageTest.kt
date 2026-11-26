@@ -119,4 +119,26 @@ class RegistreApprentissageTest {
         } finally { dir.deleteRecursively() }
     }
 
+    @Test
+    fun registreRefuseSecretsEtDonneesSensiblesAvantToutePersistance() {
+        val dir = Files.createTempDirectory("registre-confidentialite").toFile()
+        try {
+            val r = registre(dir)
+            assertThrows(SecurityException::class.java) {
+                r.creer("tool", "Connecteur privé", "Utilise cette API key pour se connecter", "conversation")
+            }
+            val id = r.creer("habit", "Préférence de réponse", "Réponse concise", "conversation")
+            assertThrows(SecurityException::class.java) {
+                r.ajouterPreuve(id, "Mon mot de passe est azerty123", "configuration", "conversation")
+            }
+            assertThrows(SecurityException::class.java) {
+                r.ajouterContreExemple(id, "Mon IBAN personnel est FR761234567890", "conversation")
+            }
+            val snapshot = JSONObject(r.snapshot()).getJSONArray("entries")
+            assertEquals(1, snapshot.length())
+            assertEquals(0, snapshot.getJSONObject(0).getJSONArray("evidence").length())
+            assertEquals(0, snapshot.getJSONObject(0).getJSONArray("counterexamples").length())
+        } finally { dir.deleteRecursively() }
+    }
+
 }
