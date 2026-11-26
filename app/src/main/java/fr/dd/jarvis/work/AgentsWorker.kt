@@ -1,5 +1,9 @@
 package fr.dd.jarvis.work
 
+/** Politique de déclenchement du rangement : indépendant de l'analyse des nouveaux mails. */
+internal fun gmailOrganizerEnabled(agentRanger: Boolean, only: String?): Boolean =
+    agentRanger && (only == null || only == "mails")
+
 import android.Manifest
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -112,15 +116,19 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
 
     override suspend fun doWork(): Result {
         val only = inputData.getString("only")
-        val tri = false // plus de tri déclenché par les bannières Jarvis (supprimées) : seuls les agents activés tournent
         if (!store.agentsOn.value) return Result.success()
         val enLigne = reseauDisponible()
         // Le centre de surveillance collecte ses propres mesures : ce n’est plus un agent spécialisé.
         PhoneHealth.recordSample(app)
         val steps = listOf<Pair<String, suspend () -> Unit>>(
             "Mails" to {
-                if (tri || (store.agentMails.value && (only == null || only == "mails"))) {
-                    if (enLigne) { mails(); mailsLus() } else journal.append("- ⏸️ Mails : reportés, connexion Internet indisponible.\n")
+                if (store.agentMails.value && (only == null || only == "mails")) {
+                    if (enLigne) mails() else journal.append("- ⏸️ Mails : reportés, connexion Internet indisponible.\n")
+                }
+            },
+            "Rangement Gmail" to {
+                if (gmailOrganizerEnabled(store.agentRanger.value, only)) {
+                    if (enLigne) mailsLus() else journal.append("- ⏸️ Rangement Gmail : reporté, connexion Internet indisponible.\n")
                 }
             },
             "Factures" to { if (store.agentFactures.value && only == null) factures() },
@@ -137,7 +145,8 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         for ((nom, f) in steps) {
             val journalStart = journal.length
             val active = when (nom) {
-                "Mails" -> tri || (store.agentMails.value && (only == null || only == "mails"))
+                "Mails" -> store.agentMails.value && (only == null || only == "mails")
+                "Rangement Gmail" -> gmailOrganizerEnabled(store.agentRanger.value, only)
                 "Factures" -> store.agentFactures.value && only == null
                 "Planning", "Tâches personnelles" -> store.agentPlanning.value && only == null
                 "Notifications" -> store.agentNotifs.value && (only == null || only == "notifs")
@@ -145,6 +154,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
             }
             val prerequisite = when (nom) {
                 "Mails" -> if (active && !store.mailConfigured()) "configuration mail manquante" else null
+                "Rangement Gmail" -> if (active && store.gmailAccounts.isEmpty()) "aucun compte Gmail configuré" else null
                 "Planning" -> if (active && !app.calendar.hasPermission()) "autorisation agenda manquante" else null
                 "Notifications" -> if (active && !PhoneHealth.dashboard(app).notificationListener) "accès aux notifications du téléphone non autorisé" else null
                 else -> null
