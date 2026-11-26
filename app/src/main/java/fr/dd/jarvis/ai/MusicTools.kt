@@ -19,9 +19,9 @@ class MusicTools(private val app: JarvisApp) {
             val s = java.text.Normalizer.normalize(brut.lowercase(java.util.Locale.ROOT), java.text.Normalizer.Form.NFD)
                 .replace(Regex("\\p{M}+"), "").replace(' ', '_').replace('-', '_')
             val retrait = listOf("desactive", "desactiver", "retire", "retirer", "enleve", "enlever", "arrete", "arreter", "stop", "sans", "off", "aucune", "aucun", "plus_de")
-                .any { s.contains(it) }
+                .any { s.contains(it) } || s.contains("_plus") || s.endsWith("plus")
             val parleAleatoire = s.contains("aleatoire") || s.contains("shuffle") || s.contains("melange") || s.contains("hasard")
-            val parleRepetition = s.contains("repeter") || s.contains("repeat") || s.contains("boucle") || s.contains("repetition")
+            val parleRepetition = s.contains("repeter") || s.contains("repete") || s.contains("repeat") || s.contains("boucle") || s.contains("repetition")
             return when {
                 retrait && parleAleatoire -> "aleatoire_off"
                 retrait && parleRepetition -> "repeter_aucune"
