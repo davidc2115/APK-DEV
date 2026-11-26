@@ -92,7 +92,7 @@ class SocieteService(
             id = newId(), clientId = clientId, siteId = siteId,
             date = LocalDate.now().toString(), creeLe = now, modifieLe = now
         )
-        repo.update { it.copy(brouillonsRapport = it.brouillonsRapport + brouillon) }
+        repo.update(synchroniserCoffres = false) { it.copy(brouillonsRapport = it.brouillonsRapport + brouillon) }
         return repo.data.brouillonsRapport.firstOrNull { it.id == brouillon.id }
     }
 
@@ -105,7 +105,7 @@ class SocieteService(
             creeLe = actuel.creeLe.ifBlank { java.time.Instant.now().toString() },
             modifieLe = java.time.Instant.now().toString()
         )
-        repo.update { d -> d.copy(brouillonsRapport = d.brouillonsRapport.map { if (it.id == maj.id) maj else it }) }
+        repo.update(synchroniserCoffres = false) { d -> d.copy(brouillonsRapport = d.brouillonsRapport.map { if (it.id == maj.id) maj else it }) }
         return repo.data.brouillonsRapport.any { it == maj }
     }
 
@@ -113,7 +113,7 @@ class SocieteService(
     @Synchronized
     fun supprimerBrouillon(id: String): Boolean {
         if (repo.data.brouillonsRapport.none { it.id == id }) return false
-        repo.update { it.copy(brouillonsRapport = it.brouillonsRapport.filterNot { b -> b.id == id }) }
+        repo.update(synchroniserCoffres = false) { it.copy(brouillonsRapport = it.brouillonsRapport.filterNot { b -> b.id == id }) }
         return repo.data.brouillonsRapport.none { it.id == id }
     }
 
