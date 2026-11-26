@@ -428,7 +428,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
             }
         }
 
-        // Navigation principale : cinq destinations fixes, les écrans secondaires sont regroupés dans Outils.
+        // Navigation principale : Accueil, Chat, Agenda, Société et Réglages restent fixes ; les autres écrans sont regroupés dans Outils.
         if (!imeOpen) Row(
             Modifier.fillMaxWidth().height(70.dp)
                 .background(accent.copy(alpha = 0.075f))
@@ -436,7 +436,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            listOf(0, 1, 2).forEach { i ->
+            listOf(0, 1, 2, 5).forEach { i ->
                 val t = tabs[i]
                 val sel = tab == i
                 Column(
@@ -449,7 +449,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
                 }
             }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                val sel = tab in 3..8
+                val sel = tab in 3..8 && tab != 5
                 Column(
                     Modifier.fillMaxWidth().height(62.dp).clickable { outilsMenu = !outilsMenu }.padding(vertical = 5.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -463,7 +463,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
                     onDismissRequest = { outilsMenu = false }
                 ) {
                     tabs.forEachIndexed { i, t ->
-                        if (i in 3..8) {
+                        if (i in 3..8 && i != 5) {
                             androidx.compose.material3.DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
