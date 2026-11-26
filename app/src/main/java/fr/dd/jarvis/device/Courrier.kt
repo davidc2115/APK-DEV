@@ -73,6 +73,7 @@ object Courrier {
     private val DEVIS_RE = Regex("\\b(devis|proposition de devis|offre de prix|estimation de travaux|chiffrage|bon pour accord)\\b")
     private val RDV_RE = Regex("\\b(rendez vous|rdv|convocation|rappel de votre rendez vous|confirmation de rendez vous|confirmation du rendez vous|votre rendez vous|visite prevue|visite technique|votre consultation|consultation prevue|creneau confirme|creneau reserve|votre venue|vous etes attendu|nous vous attendons|passage de notre technicien|passage du technicien|technicien passera|confirmation de visite)\\b")
     private val RDV_AUTO_RE = Regex("\\b(vidange|controle technique|ct|revision|entretien du vehicule|pneumatiques?|changement de pneus)\\b")
+    private val RENCONTRE_RE = Regex("\\b(on se voit|on se retrouve|on se rejoint|je passe te voir|je passerai te voir|je viens te voir|je viendrai te voir|je serai chez toi|je serai chez vous|je t attends|je vous attends|je passe chez toi|je passerai chez toi|je viens chez toi|je viendrai chez toi)\\b")
     private val PROMOTION_RE = Regex("\\b(option budget|code promo|promotion|promotions|offre speciale|offre exclusive|profitez de|decouvrez notre offre|remise exceptionnelle|vente privee|abonnez vous|souscrivez|jusqu a -?\\d{1,2} ?%)\\b")
     private val HEURE = Regex("\\b(\\d{1,2}) ?(?:h|:) ?(\\d{2})?\\b")
     private val ADRESSE = Regex("(\\d{1,4}(?: ?bis| ?ter)?,? (?:rue|avenue|av\\.?|bd|boulevard|chemin|place|allee|allée|impasse|route|quai|cours|faubourg|zone|za|zi|lieu[- ]dit)[^,\\n.]{2,60}(?:,? ?\\d{5} [A-Za-zÀ-ÿ' -]{2,40})?)", RegexOption.IGNORE_CASE)
@@ -135,7 +136,8 @@ object Courrier {
         val heurePresente = HEURE.containsMatchIn(nd)
         val rdvExplicite = RDV_RE.containsMatchIn(n)
         val rdvAutomobile = RDV_AUTO_RE.containsMatchIn(n) && jourTrouve != null && heurePresente
-        if ((rdvExplicite || rdvAutomobile) && !FACTURE_RE.containsMatchIn(n) && !DEVIS_RE.containsMatchIn(n)) {
+        val rdvPersonnel = RENCONTRE_RE.containsMatchIn(n) && jourTrouve != null
+        if ((rdvExplicite || rdvAutomobile || rdvPersonnel) && !FACTURE_RE.containsMatchIn(n) && !DEVIS_RE.containsMatchIn(n)) {
             val jourTrouve = DatesFr.jour(nd, aujourdhui)?.date
             val jour = jourTrouve?.takeIf { !it.isBefore(aujourdhui) }
             val h = if (jour != null) HEURE.findAll(nd).firstOrNull { (it.groupValues[1].toIntOrNull() ?: 99) in 6..21 } else null
