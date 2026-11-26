@@ -134,6 +134,7 @@ class CourrierTest {
         assertTrue(a("Garage", "Découvrez notre garage et nos offres promotionnelles sur l'entretien.").isEmpty())
         assertTrue(a("Banque", "Votre option budget évolue, un prélèvement sera effectué selon votre choix.").isEmpty())
         assertTrue(a("Transport", "Profitez de la livraison gratuite sur toutes nos commandes.").isEmpty())
+        assertTrue(a("Boutique", "Découvrez votre colis idéal pour vos vacances avec notre offre spéciale.").isEmpty())
     }
 
     @Test fun rendezVousPersonnelSansMotRendezVousEstDetecte() {
