@@ -19,6 +19,10 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     private val candidates = linkedMapOf<String, MutableSet<String>>()
     @Volatile private var loaded = false
     @Volatile private var loadError: String? = null
+    private var empreinteCoffreMemoire: String? = null
+    private var empreinteEtatCharge: String? = null
+    @Volatile private var conflitMemoireExterne = false
+    @Volatile private var derniereRelectureCoffre = 0L
 
     /** Registre commun Jarvis/Hermès, rangé dans le coffre Obsidian configuré. */
     private val registreApprentissage by lazy {
@@ -39,15 +43,9 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
 
     private fun loadCandidates() {
         candidates.clear()
-        // Obsidian et la copie locale peuvent être momentanément désynchronisés :
-        // fusionner les preuves évite de perdre un apprentissage récent au redémarrage.
-        // Comme pour la mémoire principale, une erreur SAF ne signifie pas « journal absent ».
-        // Si le coffre est configuré mais inaccessible, load() doit échouer et rester réessayable :
-        // ne jamais valider un apprentissage incomplet à partir de la seule copie locale.
-        val note = obsidian.lireAvecDateStrict(FOLDER, "Apprentissage en cours.md")?.first
-        val copieLocale = habitsFile.takeIf { it.isFile }?.readText()
-        val sources = listOfNotNull(note, copieLocale).distinct()
-        sources.forEach { raw ->
+        // Le coffre choisi est la source unique ; la copie privée n'est relue que pour une migration unique.
+        val source = obsidian.lireOuMigrer(FOLDER, "Apprentissage en cours.md", habitsFile.takeIf { it.isFile }?.readText())
+        listOfNotNull(source).distinct().forEach { raw ->
             runCatching {
                 val json = JSONObject(raw)
                 val keys = json.keys()
@@ -269,29 +267,22 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
      */
     @Synchronized
     fun load() {
-        // Une erreur SAF ne doit jamais être interprétée comme une note absente : sinon une
-        // copie locale plus ancienne pourrait remplacer la mémoire réelle du coffre.
-        val note = try { obsidian.lireAvecDateStrict(FOLDER, FILE) }
-        catch (e: Exception) {
+        val md = try {
+            obsidian.lireOuMigrer(FOLDER, FILE, local.takeIf { it.isFile }?.readText())
+        } catch (e: Exception) {
             loadError = e.message ?: e.javaClass.simpleName
-            return // loaded reste false : le prochain accès pourra réessayer après rétablissement du coffre.
+            return // loaded reste false : la prochaine tentative pourra relire le coffre.
         }
-        val copie = runCatching { local.takeIf { it.exists() }?.let { it.readText() to it.lastModified() } }.getOrNull()
-        val choix = choisirSource(note, copie)
-        if (choix != null) {
-            if (note == null && obsidian.coffreConfigure()) {
-                // Note réellement absente : migration unique de la copie de secours, uniquement
-                // après une lecture du coffre réussie et une écriture vérifiée.
-                obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), choix.first)
-            } else if (note != null && choix.second) {
-                obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), choix.first)
-            }
-            parse(choix.first)
-        }
+        if (md != null) parse(md)
+        empreinteCoffreMemoire = if (obsidian.coffreConfigure()) try {
+            obsidian.readNoteStrict("$FOLDER/$FILE")?.let(obsidian::empreinteContenu)
+        } catch (e: Exception) {
+            loadError = e.message ?: e.javaClass.simpleName
+            return
+        } else null
+        empreinteEtatCharge = obsidian.empreinteContenu(render())
+        conflitMemoireExterne = false
         loadCandidates()
-        // Migration idempotente : les clés historiques conservent le sujet et la préférence,
-        // mais les hash seuls ne permettent pas de reconstruire le contexte des preuves.
-        // On ne vide l'ancien journal qu'après la persistance confirmée du nouveau registre.
         if (candidates.isNotEmpty()) {
             registreApprentissage.importerAnciennesHabitudes(candidates.mapValues { it.value.toSet() })
             candidates.clear()
@@ -299,13 +290,42 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         }
         loaded = true
         loadError = null
-        if (choix != null && copie == null) runCatching { persisterCopieHermes(local, render()) }
     }
 
     @Synchronized
     private fun ensure() {
         if (!loaded) runCatching { load() }.onFailure { loadError = it.message ?: it.javaClass.simpleName }
         if (!loaded) throw IOException("Mémoire Obsidian indisponible : ${loadError ?: "lecture non confirmée"}. Aucune ancienne copie locale n'a été utilisée.")
+    }
+
+    // Relecture légère du coffre : les modifications faites directement dans Obsidian sont visibles sans redémarrage.
+    @Synchronized
+    private fun rafraichirDepuisCoffreSiNecessaire() {
+        if (!obsidian.coffreConfigure()) return
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return
+        val maintenant = android.os.SystemClock.elapsedRealtime()
+        if (maintenant - derniereRelectureCoffre < 30_000L) return
+        derniereRelectureCoffre = maintenant
+        if (!obsidian.coffreDisponible()) return
+        val distant = try { obsidian.readNoteStrict("$FOLDER/$FILE") } catch (_: Exception) { return }
+        val empreinteDistante = distant?.let(obsidian::empreinteContenu)
+        if (empreinteDistante != empreinteCoffreMemoire) {
+            if (obsidian.empreinteContenu(render()) != empreinteEtatCharge || distant == null) {
+                conflitMemoireExterne = true
+                return
+            }
+            parse(distant)
+            empreinteCoffreMemoire = empreinteDistante
+            empreinteEtatCharge = obsidian.empreinteContenu(render())
+            conflitMemoireExterne = false
+        }
+        runCatching { loadCandidates() }
+        runCatching { obsidian.readNoteStrict("$FOLDER/Mémoire Hermès source.md") }.getOrNull()?.let { brut ->
+            if (brut != hermesCache) hermesCache = brut
+        }
+        runCatching { obsidian.readNoteStrict("$FOLDER/Capacités Hermès.json") }.getOrNull()?.let { brut ->
+            runCatching { org.json.JSONObject(brut) }.getOrNull()?.let { capacitesCache = it }
+        }
     }
 
     /** Une panne d'écriture locale annule la mutation en mémoire ; une panne du miroir Obsidian
@@ -325,13 +345,19 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
     @Synchronized
     private fun persist(): String {
         val md = render()
-        // L'écriture locale fait partie de la validation : ne jamais annoncer une consigne
-        // enregistrée si le fichier durable n'a pas été remplacé correctement.
-        try { persisterCopieHermes(local, md) }
-        catch (e: Exception) { throw EcritureLocaleMemoireException(e) }
-        // Si seul le miroir Obsidian échoue, la copie locale est déjà durable : ne pas annuler
-        // le cache en mémoire, sinon l'état visible divergerait de la copie qui sera resynchronisée.
-        return obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), md)
+        val emplacement = if (obsidian.coffreConfigure()) {
+            val hash = obsidian.ecrireSiInchange("$FOLDER/$FILE", md, empreinteCoffreMemoire)
+            empreinteCoffreMemoire = hash
+            conflitMemoireExterne = false
+            runCatching { persisterCopieHermes(local, md) } // cache privé facultatif, jamais source de vérité.
+            "coffre Obsidian › $FOLDER › $FILE"
+        } else {
+            try { persisterCopieHermes(local, md) }
+            catch (e: Exception) { throw EcritureLocaleMemoireException(e) }
+            obsidian.saveIn(FOLDER, FILE.removeSuffix(".md"), md)
+        }
+        empreinteEtatCharge = obsidian.empreinteContenu(md)
+        return emplacement
     }
 
     @Synchronized
