@@ -197,8 +197,7 @@ object Serveur {
     private fun socketFactoryLieeAuReseau(reseau: android.net.Network): com.jcraft.jsch.SocketFactory =
         object : com.jcraft.jsch.SocketFactory {
             override fun createSocket(host: String, port: Int): Socket {
-                val adresse = runCatching { InetAddress.getByName(host) }
-                    .getOrElse { reseau.getByName(host) }
+                val adresse = reseau.getByName(host)
                 return reseau.socketFactory.createSocket().apply {
                     connect(InetSocketAddress(adresse, port), 12_000)
                 }
