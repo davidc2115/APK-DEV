@@ -48,6 +48,25 @@ class CourrierTest {
         assertEquals(30, date.minute)
     }
 
+    @Test fun rendezVousAutomobileSansMotRendezVousSontDetectesDepuisLeSms() {
+        val base = LocalDate.of(2026, 11, 26)
+        val vidange = Courrier.analyser("Garage", "Jeudi 3 à 15h kadjar vidange garage vitteaux", "SMS", 0L, base).single()
+        assertEquals(Courrier.RDV, vidange.type)
+        val dateVidange = java.time.Instant.ofEpochMilli(vidange.dateRdv!!).atZone(java.time.ZoneId.systemDefault())
+        assertEquals(LocalDate.of(2026, 12, 3), dateVidange.toLocalDate())
+        assertEquals(15, dateVidange.hour)
+        assertEquals(0, dateVidange.minute)
+        assertEquals("Garage vitteaux", vidange.lieu)
+        assertTrue(Courrier.ligne(vidange).contains("Kadjar — Vidange"))
+
+        val ct = Courrier.analyser("Garage", "Lundi 7 à 17h20 CT kadjar", "SMS", 0L, base).single()
+        assertEquals(Courrier.RDV, ct.type)
+        val dateCt = java.time.Instant.ofEpochMilli(ct.dateRdv!!).atZone(java.time.ZoneId.systemDefault())
+        assertEquals(LocalDate.of(2026, 12, 7), dateCt.toLocalDate())
+        assertEquals(17, dateCt.hour)
+        assertEquals(20, dateCt.minute)
+        assertTrue(Courrier.ligne(ct).contains("Kadjar — Contrôle technique"))
+    }
     @Test fun texteNotificationResteUnSecoursSiAucunDernierSmsNestExpose() {
         assertEquals("Rendez-vous demain à 9h", Courrier.contenuNotification("Rendez-vous demain à 9h", " "))
     }
