@@ -382,7 +382,7 @@ fun ConstellationVue(
                 .pointerInput(c) {
                     detectTransformGestures { _, pan, zoom, _ ->
                         // Zoom autour du centre de l'écran : le déplacement suit le même facteur.
-                        val z = (zoomUser * zoom).coerceIn(0.6f, 5f) / zoomUser
+                        val z = (zoomUser * zoom).coerceIn(0.12f, 5f) / zoomUser
                         zoomUser *= z
                         panUser = panUser * z + pan
                     }
