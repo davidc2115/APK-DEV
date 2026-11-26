@@ -33,7 +33,9 @@ object Serveur {
     /** Client HTTP dont sockets ET résolution DNS restent liés au même Wi-Fi/VPN que la route vérifiée. */
     private fun httpSurReseau(reseau: android.net.Network): OkHttpClient = http.newBuilder()
         .socketFactory(reseau.socketFactory)
-        .dns(Dns { hote -> reseau.getAllByName(hote).toList() })
+        .dns(object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> = reseau.getAllByName(hostname).toList()
+        })
         .build()
 
     // ------------------------------------------------------------------ SSH
