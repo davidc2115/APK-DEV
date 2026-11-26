@@ -19,4 +19,13 @@ class AdbShellTest {
         assertTrue(resultat.contains("\n… (sortie tronquée)"))
         assertTrue(resultat.length < 150)
     }
+
+    @Test
+    fun conserveMarqueurFinalQuandLaSortieEstLongue() {
+        val entree = "z".repeat(10000) + "\n__JARVIS_EXIT_CODE__=7\n"
+        val resultat = AdbShell.lireSortieLimitee(ByteArrayInputStream(entree.toByteArray()), 4000, conserverFin = true)
+        assertTrue(resultat.startsWith("z"))
+        assertTrue(resultat.contains("__JARVIS_EXIT_CODE__=7"))
+        assertTrue(ShellResult.fromAdbOutput(resultat)?.startsWith("Erreur shell (code 7)") == true)
+    }
 }
