@@ -425,6 +425,28 @@ class VoiceManager(private val ctx: Context) {
                     main.removeCallbacks(finSegments)
                     main.postDelayed(finSegments, pauseMs + 1500)
                 }
+
+                /**
+                 * Repli pour les moteurs Android qui publient les mots progressivement dans onPartialResults,
+                 * mais n'envoient jamais onResults. En mode conversation, la garde de silence est désactivée
+                 * dès que l'utilisateur parle : sans ce repli, le service peut rester en écoute sans fin.
+                 */
+                @Volatile private var secoursDemande = false
+                private val secoursFinPartiel = Runnable {
+                    if (!actif() || segmente) return@Runnable
+                    if (texte(partielSur()).isBlank()) return@Runnable
+                    secoursDemande = true
+                    JournalVoix.noter(nom, "partiels reçus sans résultat final : clôture de reconnaissance")
+                    runCatching { r.stopListening() }
+                    main.postDelayed({
+                        if (!actif()) return@postDelayed
+                        val dernier = texte(partielSur())
+                        if (dernier.isNotBlank()) {
+                            JournalVoix.noter(nom, "récupération du dernier partiel en résultat final")
+                            livrer(dernier, "fin de phrase (secours)")
+                        }
+                    }, 1800)
+                }
                 /** Écoute longue : voix détectée mais aucun mot reconnu en 6 s → traité comme « rien compris ». */
                 private val sansTexte = Runnable {
                     if (actif() && segments.isEmpty() && dernierPartiel.isBlank()) { runCatching { r.cancel() }; onError(SpeechRecognizer.ERROR_NO_MATCH) }
@@ -441,7 +463,10 @@ class VoiceManager(private val ctx: Context) {
                     main.postDelayed(garde, 60_000)
                     if (fenetreFin <= 0) main.postDelayed(sansParole, 8000)
                 }
-                private fun annulerGardes() { main.removeCallbacks(finSegments); main.removeCallbacks(garde); main.removeCallbacks(sansParole); main.removeCallbacks(sansTexte) }
+                private fun annulerGardes() {
+                    main.removeCallbacks(finSegments); main.removeCallbacks(garde); main.removeCallbacks(sansParole)
+                    main.removeCallbacks(sansTexte); main.removeCallbacks(secoursFinPartiel)
+                }
 
                 override fun onReadyForSpeech(params: Bundle?) {}
                 override fun onBeginningOfSpeech() { if (actif()) aParle() }
@@ -459,6 +484,16 @@ class VoiceManager(private val ctx: Context) {
 
                 override fun onError(error: Int) {
                     if (!actif()) return
+                    // stopListening() peut être suivi d'un ERROR_NO_MATCH au lieu de onResults.
+                    // Dans ce cas, le dernier partiel constitue déjà une transcription exploitable.
+                    if (secoursDemande) {
+                        val dernier = texte(partielSur())
+                        if (dernier.isNotBlank()) {
+                            JournalVoix.noter(nom, "résultat final absent après clôture : récupération sur erreur")
+                            livrer(dernier, "fin de phrase (secours)")
+                            return
+                        }
+                    }
                     termine = true
                     JournalVoix.noter(nom, "reconnaissance : erreur $error${if (parole) " (après parole)" else ""}")
                     ecoute = false
@@ -592,6 +627,12 @@ class VoiceManager(private val ctx: Context) {
                         aParle()
                         main.removeCallbacks(sansTexte)
                         relancerFinSegments()
+                        // Les moteurs non segmentés n'ont pas de finSegments : armer un secours,
+                        // réinitialisé à chaque partiel pour laisser finir une phrase en cours.
+                        if (!segmente) {
+                            main.removeCallbacks(secoursFinPartiel)
+                            main.postDelayed(secoursFinPartiel, pauseMs + 1800)
+                        }
                         val vu = texte(sansMorceaux(t))
                         Presence.entendu = vu
                         onPartial(vu)
@@ -1054,13 +1095,15 @@ class VoiceManager(private val ctx: Context) {
 
     // ------------------------------------------------------------------ micro Bluetooth (casque, voiture sans Android Auto)
 
-    /** Appareil qui joue le son des médias en ce moment (casque, autoradio…), null si inconnu. */
-    private fun sortieMedia(): AudioDeviceInfo? = runCatching {
-        if (Build.VERSION.SDK_INT >= 33) am.getAudioDevicesForAttributes(attrBluetooth).firstOrNull()
-        else am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull {
-            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET || it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
-        }
-    }.getOrNull()
+    /** Appareil qui joue le son des médias (casque, autoradio…). Le repli couvre les ROM qui ne publient pas
+     * encore la route de sortie via getAudioDevicesForAttributes tant qu'aucun flux média n'est actif. */
+    private fun sortieMedia(): AudioDeviceInfo? {
+        val types = setOf(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER)
+        val routee = if (Build.VERSION.SDK_INT >= 33) runCatching {
+            am.getAudioDevicesForAttributes(attrBluetooth).firstOrNull { it.type in types }
+        }.getOrNull() else null
+        return routee ?: runCatching { am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type in types } }.getOrNull()
+    }
 
     /**
      * Micro Bluetooth à utiliser, par le profil mains-libres :
@@ -1074,29 +1117,52 @@ class VoiceManager(private val ctx: Context) {
     private fun appareilMicroBluetooth(): AudioDeviceInfo? {
         if (Build.VERSION.SDK_INT < 31) return null
         val app = appli() ?: return null
-        if (!app.store.microBluetooth.value) return null
-        if (am.mode != AudioManager.MODE_NORMAL) return null                    // appel en cours : on n'y touche pas
+        if (!app.store.microBluetooth.value) {
+            JournalVoix.noter(nom, "micro Bluetooth désactivé dans les réglages")
+            return null
+        }
+        if (am.mode != AudioManager.MODE_NORMAL) {
+            JournalVoix.noter(nom, "micro Bluetooth non ouvert : Android est déjà en mode communication/appel")
+            return null
+        }
         val comm = runCatching { am.availableCommunicationDevices }.getOrNull() ?: return null
+        val montre = Regex("(?i)watch|montre|\\bband\\b|\\bgear\\b")
+        val candidats = comm.filter {
+            it.type in setOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET) &&
+                !montre.containsMatchIn(it.productName.toString())
+        }
         if (app.enVoiture) {
-            // Essai (réglage, désactivé par défaut) : la voiture passe en mode « appel » pendant la conversation, et
-            // certains autoradios remplacent alors le lecteur JARVIS par leur écran d'appel.
-            if (!app.store.microVoitureBt.value) return null
-            // JARVIS ouvert sur l'écran de la voiture : vrai micro de la voiture par Android Auto (MicroJarvis).
+            // En projection Android Auto, on n'active jamais HFP par défaut : certains autoradios passent en écran d'appel.
+            if (!app.store.microVoitureBt.value) {
+                JournalVoix.noter(nom, "Android Auto : micro Bluetooth voiture désactivé, canal média conservé")
+                return null
+            }
             if (fr.dd.jarvis.car.NavigationVoiture.microVoiture() != null) return null
-            val montre = Regex("(?i)watch|montre|\\bband\\b|\\bgear\\b")
-            val voiture = comm.filter { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && !montre.containsMatchIn(it.productName.toString()) }
-            if (voiture.isEmpty()) JournalVoix.noter(nom, "Android Auto : aucune liaison mains-libres Bluetooth avec la voiture " +
-                "(appareils : ${comm.joinToString { "${it.productName}/${it.type}" }}) → micro du téléphone")
-            return voiture.firstOrNull()
+            val voiture = candidats.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            if (voiture == null) JournalVoix.noter(nom, "Android Auto : aucun micro mains-libres voiture disponible")
+            return voiture
         }
-        val sortie = sortieMedia() ?: return null
-        fun meme(d: AudioDeviceInfo) = (sortie.address.isNotBlank() && d.address == sortie.address) ||
+        val sortie = sortieMedia()
+        fun meme(d: AudioDeviceInfo) = sortie != null && (
+            (sortie.address.isNotBlank() && d.address.isNotBlank() && d.address == sortie.address) ||
             (d.productName.toString().isNotBlank() && d.productName.toString() == sortie.productName.toString())
-        return when (sortie.type) {
-            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> comm.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && meme(it) }
-            AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER -> comm.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLE_HEADSET && meme(it) }
-            else -> null
+        )
+        val typeAttendu = when (sortie?.type) {
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER -> AudioDeviceInfo.TYPE_BLE_HEADSET
+            else -> 0
         }
+        val correspond = candidats.firstOrNull { it.type == typeAttendu && meme(it) }
+        if (correspond != null) return correspond
+        // Certains téléphones publient des noms différents pour A2DP et HFP. Si un seul micro mains-libres
+        // Bluetooth est connecté, il est sans ambiguïté : on peut l'utiliser pour la conversation, sans le garder après.
+        val unique = candidats.singleOrNull()
+        if (unique != null) {
+            JournalVoix.noter(nom, "micro Bluetooth choisi (seul appareil mains-libres disponible : ${unique.productName}) ; sortie média=${sortie?.productName ?: "non publiée"}")
+            return unique
+        }
+        JournalVoix.noter(nom, "micro Bluetooth introuvable : sortie=${sortie?.let { "${it.productName}/${it.type}" } ?: "aucune"} ; entrées=${candidats.joinToString { "${it.productName}/${it.type}" }.ifBlank { "aucune" }}")
+        return null
     }
 
     private val verifMicroBt = object : Runnable {
