@@ -11,10 +11,6 @@ import java.io.IOException
  * Écrit les fichiers dans le dossier Obsidian choisi (sélecteur Android, sous-dossiers créés au besoin),
  * sinon dans le dossier propre à l'application (Android/data/fr.dd.jarvis/files/<dossier>).
  */
-data class DoublonObsidian(val type: String, val chemins: List<String>, val empreinte: String)
-data class ChangementObsidian(val type: String, val chemin: String)
-data class RapportChangementsObsidian(val referenceInitialisee: Boolean, val changements: List<ChangementObsidian>)
-
 class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     /** Indique si l'utilisateur a choisi un coffre externe comme source de référence. */
