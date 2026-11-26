@@ -307,7 +307,7 @@ class AdbPairReceiver : android.content.BroadcastReceiver() {
 
 /** Shell du téléphone : Shizuku en priorité, repli ADB uniquement sur une panne de transport Shizuku. */
 object PhoneShell {
-    fun ready(ctx: Context): Boolean = ShizukuShell.ready() || AdbShell.connected()
+    fun ready(ctx: Context): Boolean = ShizukuShell.ready() || AdbShell.connected() || AdbShell.hasKey(ctx)
 
     private fun panneTransportShizuku(resultat: String): Boolean =
         resultat.startsWith("Erreur shell :") ||
