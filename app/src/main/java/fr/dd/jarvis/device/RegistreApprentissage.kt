@@ -255,6 +255,62 @@ class RegistreApprentissage(
         return true
     }
 
+    /**
+     * Importe les habitudes candidates de l'ancien Memo. Les hash historiques sont opaques :
+     * ils sont conservés tels quels, sans inventer le texte ni le contexte de leurs preuves.
+     * L'identifiant déterministe rend une reprise après interruption strictement idempotente.
+     */
+    @Synchronized
+    fun importerAnciennesHabitudes(candidates: Map<String, Set<String>>, acteur: String = "migration_memo"): Int {
+        synchroniserAvantLecture()
+        val avant = avantMutation()
+        var imported = 0
+        val entries = donnees.getJSONArray("entries")
+        for ((legacyKey, rawHashes) in candidates.toSortedMap()) {
+            val separator = legacyKey.indexOf('|')
+            if (separator <= 0 || separator == legacyKey.lastIndex) continue
+            val category = legacyKey.substring(0, separator).trim().take(40)
+            val title = legacyKey.substring(separator + 1).trim().replace(Regex("\\s+"), " ").take(240)
+            if (title.length < 3) continue
+            val hashes = rawHashes.map { it.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+            if (hashes.isEmpty()) continue
+            verifierConfidentialite(category, title)
+            val stableKey = "$category|${title.lowercase()}"
+            val id = "legacy-habit-" + empreinte(stableKey).take(32)
+            if ((0 until entries.length()).any { entries.optJSONObject(it)?.optString("id") == id }) continue
+            val now = System.currentTimeMillis()
+            val evidence = JSONArray()
+            hashes.forEach { legacyHash ->
+                evidence.put(JSONObject()
+                    .put("hash", "legacy:$legacyHash")
+                    .put("legacyHash", legacyHash)
+                    .put("content", "Empreinte héritée : $legacyHash")
+                    .put("context", "Contexte non conservé par l'ancien format")
+                    .put("source", "Memo.habits-learning.json (format historique)")
+                    .put("legacyOpaque", true)
+                    .put("at", now))
+            }
+            entries.put(JSONObject()
+                .put("id", id)
+                .put("type", "habit")
+                .put("title", title)
+                .put("description", "Habitude candidate importée depuis l'ancien système (catégorie : $category). Les preuves sont des empreintes opaques.")
+                .put("state", ETAT_CANDIDATE)
+                .put("provenance", "Migration du journal historique Memo")
+                .put("createdAt", now)
+                .put("updatedAt", now)
+                .put("evidence", evidence)
+                .put("counterexamples", JSONArray())
+                .put("permissions", JSONArray())
+                .put("version", 1)
+                .put("legacyOpaque", true))
+            journal(id, "legacy_imported", "${hashes.size} empreinte(s) historique(s) importée(s), contexte non conservé", acteur)
+            imported++
+        }
+        if (imported > 0) persisterMutation(avant)
+        return imported
+    }
+
     @Synchronized
     fun ajouterContreExemple(id: String, contenu: String, contexte: String, acteur: String = "jarvis") {
         synchroniserAvantLecture()

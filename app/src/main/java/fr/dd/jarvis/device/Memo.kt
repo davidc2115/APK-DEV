@@ -320,6 +320,14 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
             parse(choix.first)
         }
         loadCandidates()
+        // Migration idempotente : les clés historiques conservent le sujet et la préférence,
+        // mais les hash seuls ne permettent pas de reconstruire le contexte des preuves.
+        // On ne vide l'ancien journal qu'après la persistance confirmée du nouveau registre.
+        if (candidates.isNotEmpty()) {
+            registreApprentissage.importerAnciennesHabitudes(candidates.mapValues { it.value.toSet() })
+            candidates.clear()
+            persistCandidates()
+        }
         loaded = true
         loadError = null
         if (choix != null && copie == null) runCatching { persisterCopieHermes(local, render()) }
