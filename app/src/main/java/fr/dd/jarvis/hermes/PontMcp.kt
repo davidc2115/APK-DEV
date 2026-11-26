@@ -126,7 +126,13 @@ object PontMcp {
             // Certains clients Hermes préfixent les noms MCP par mcp_jarvis_.
             val nomCanonique = nom.removePrefix("mcp_jarvis_")
             if (nomCanonique == "jarvis_apprentissage") {
-                return runCatching { app.memo.registreApprentissage().executer(args) }
+                val action = args.optString("action").trim().lowercase()
+                val etat = args.optString("etat").trim().lowercase()
+                if (action == "state" && etat in setOf("approved", "testing", "active")) {
+                    return "Confirmation requise dans l'interface Jarvis : Hermès peut proposer cette transition, mais ne peut pas confirmer à la place de l'utilisateur." to true
+                }
+                val sansConfirmation = JSONObject(args.toString()).put("confirmation_explicite", false)
+                return runCatching { app.memo.registreApprentissage().executer(sansConfirmation) }
                     .fold({ it to false }, { e -> "❌ Registre d'apprentissage : ${e.message ?: e.javaClass.simpleName}" to true })
             }
             if (nomCanonique == "jarvis_rechercher_outils") {
@@ -542,9 +548,9 @@ object PontMcp {
                 .put("required", JSONArray().put("message"))))
         out.put(JSONObject()
             .put("name", "jarvis_apprentissage")
-            .put("description", "REGISTRE DURABLE PARTAGÉ JARVIS/HERMÈS. Gère les observations, habitudes candidates, skills et outils proposés, avec preuves contextualisées, contre-exemples, provenance et historique. Actions : list/read ; create (type=habit|skill|tool|error, titre, description, provenance) ; evidence (id, contenu, contexte, source) ; counterexample (id, contenu, contexte) ; state (id, etat, confirmation_explicite). Toute activation/approbation exige une confirmation explicite. Cet outil n'installe ni n'exécute aucun code : il gère uniquement le cycle de validation.")
+            .put("description", "REGISTRE DURABLE PARTAGÉ JARVIS/HERMÈS. Gère les observations, habitudes candidates, skills et outils proposés, avec preuves contextualisées, contre-exemples, provenance et historique. Actions : list/read ; create ; evidence ; counterexample ; manifest (version, source, dependances, risque, plan_test) ; permission_request (id, permissions) ; state. Le manifeste décrit le skill sans jamais l'installer ni l'exécuter. permission_request enregistre uniquement des scopes demandés, jamais accordés ; scopes précis uniquement, aucun wildcard/shell/root/code arbitraire. Les transitions vers approved/testing/active doivent être confirmées dans l'interface native Jarvis ; Hermès ne peut pas s'auto-accorder ce consentement. Cet outil n'installe ni n'exécute aucun code.")
             .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject()
-                .put("action", JSONObject().put("type", "string").put("enum", JSONArray().put("list").put("read").put("create").put("evidence").put("counterexample").put("state")))
+                .put("action", JSONObject().put("type", "string").put("enum", JSONArray().put("list").put("read").put("create").put("evidence").put("counterexample").put("manifest").put("permission_request").put("state")))
                 .put("id", JSONObject().put("type", "string"))
                 .put("type", JSONObject().put("type", "string").put("enum", JSONArray().put("habit").put("skill").put("tool").put("error")))
                 .put("titre", JSONObject().put("type", "string"))
@@ -554,7 +560,11 @@ object PontMcp {
                 .put("contexte", JSONObject().put("type", "string"))
                 .put("source", JSONObject().put("type", "string"))
                 .put("etat", JSONObject().put("type", "string").put("enum", JSONArray().put("observed").put("candidate").put("needs_review").put("approved").put("testing").put("active").put("paused").put("rejected").put("failed").put("superseded")))
-                .put("confirmation_explicite", JSONObject().put("type", "boolean"))
+                .put("permissions", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string").put("enum", JSONArray().put("memory:read").put("memory:write").put("calendar:read").put("calendar:write").put("files:read").put("files:write").put("homeassistant:read").put("homeassistant:control").put("network:read").put("network:request").put("phone:read").put("phone:control").put("obsidian:read").put("obsidian:write"))))
+                .put("version", JSONObject().put("type", "string"))
+                .put("dependances", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string")))
+                .put("risque", JSONObject().put("type", "string").put("enum", JSONArray().put("low").put("medium").put("high")))
+                .put("plan_test", JSONObject().put("type", "string"))
                 .put("acteur", JSONObject().put("type", "string")))
                 .put("required", JSONArray().put("action"))))
         out.put(JSONObject()
