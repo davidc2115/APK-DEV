@@ -349,7 +349,8 @@ vxo6c0dSSNrr7dDN+m2/dRvgoIpGL2GauOGqDFY=
         val question = when (action) {
             "ajouter_redirection" -> "Freebox : ouvrir le port ${a.optString("port_externe").ifBlank { a.optString("port") }} (${a.optString("protocole").ifBlank { "tcp" }}) vers ${a.optString("appareil").ifBlank { a.optString("ip") }}:${a.optString("port")} ? Confirme uniquement si ce service est réellement servi en HTTPS/TLS avec certificat valide (reverse proxy sécurisé) ; le port 443/8443/9443 seul ne le garantit pas."
             "supprimer_redirection" -> "Freebox : supprimer la redirection ${a.optString("id").ifBlank { "du port " + a.optString("port") }} ?"
-            "activer_redirection", "desactiver_redirection" -> "Freebox : ${if (action.startsWith("activer")) "activer" else "désactiver"} la redirection ${a.optString("id")} ?"
+            "activer_redirection" -> "Freebox : activer la redirection ${a.optString("id")} ? Confirme uniquement si le service interne utilise réellement HTTPS/TLS avec un certificat valide et un reverse proxy sécurisé ; le port seul ne prouve pas le chiffrement."
+            "desactiver_redirection" -> "Freebox : désactiver la redirection ${a.optString("id")} ?"
             "activer_vpn", "desactiver_vpn" -> "Freebox : ${if (action.startsWith("activer")) "activer" else "désactiver"} le serveur VPN ${a.optString("serveur").ifBlank { "(WireGuard par défaut)" }} ?"
             "ajouter_vpn_utilisateur" -> "Freebox : créer l'utilisateur VPN « ${a.optString("login")} » ?"
             "supprimer_vpn_utilisateur" -> "Freebox : supprimer l'utilisateur VPN « ${a.optString("login")} » ?"
