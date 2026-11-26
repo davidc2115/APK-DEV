@@ -46,7 +46,7 @@ class MusicToolsTest {
         assertEquals("aleatoire_off", MusicTools.modeLecture("ne mélange plus"))
     }
 
-    @Test fun corrigeJ aimePlaceParErreurDansLeNomDeLaBibliotheque() {
+    @Test fun corrigeJaimePlaceParErreurDansLeNomDeLaBibliotheque() {
         assertEquals("jaime", MusicTools.sectionEffective("playlists", "J'aime"))
         assertEquals("jaime", MusicTools.sectionEffective("playlists", "mes titres aimés"))
         assertEquals("playlists", MusicTools.sectionEffective("playlists", "Sport"))
