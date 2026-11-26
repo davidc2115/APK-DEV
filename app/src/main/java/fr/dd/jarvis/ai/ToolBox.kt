@@ -1401,7 +1401,9 @@ class ToolBox(
             if (confirmationRequise) {
                 val id = a.optString("id").trim()
                 if (id.isBlank()) ToolResult("Validation impossible : identifiant d'apprentissage manquant.", direct = true)
-                else if (!confirm("Confirmer explicitement le passage de l'apprentissage $id à l'état « $etat » ? Cette décision modifiera la mémoire partagée Jarvis/Hermès.", true))
+                // Ne pas utiliser confirm() ici : l'autorisation permanente d'un outil ne doit jamais
+                // remplacer le consentement ponctuel pour activer une habitude ou un skill.
+                else if (!confirmBrut("Confirmer explicitement le passage de l'apprentissage $id à l'état « $etat » ? Cette décision modifiera la mémoire partagée Jarvis/Hermès.", true))
                     ToolResult("Validation refusée : l'apprentissage reste inchangé.", direct = true)
                 else {
                     val autorise = JSONObject(a.toString()).put("confirmation_explicite", true)
