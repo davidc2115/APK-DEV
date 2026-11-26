@@ -23,8 +23,8 @@ class ShizukuShellTest {
 
     @Test
     fun codeRetourAdbDistingueSuccesEtEchec() {
-        assertEquals("(commande exécutée)", ShellResult.fromAdbOutput("__JARVIS_EXIT_CODE__=0\\n"))
-        assertEquals("Erreur shell (code 1) : Permission denied", ShellResult.fromAdbOutput("Permission denied\\n__JARVIS_EXIT_CODE__=1\\n"))
+        assertEquals("(commande exécutée)", ShellResult.fromAdbOutput("__JARVIS_EXIT_CODE__=0\n"))
+        assertEquals("Erreur shell (code 1) : Permission denied", ShellResult.fromAdbOutput("Permission denied\n__JARVIS_EXIT_CODE__=1\n"))
     }
 
     @Test
@@ -35,11 +35,7 @@ class ShizukuShellTest {
     @Test
     fun enveloppeShellCaptureLeCodeRetour() {
         val command = ShellResult.withExitCode("settings put global low_power 1")
-        assertTrue(command.contains("__jarvis_status=" + ')
-        assertTrue(command.contains("__JARVIS_EXIT_CODE__=%s"))
-    }
-}
- + "?"))
+        assertTrue(command.contains("__jarvis_status=" + '$' + "?"))
         assertTrue(command.contains("__JARVIS_EXIT_CODE__=%s"))
     }
 }
