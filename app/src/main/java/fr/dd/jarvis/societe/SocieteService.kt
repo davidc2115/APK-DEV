@@ -19,6 +19,59 @@ class SocieteService(
 
     fun newId() = UUID.randomUUID().toString().take(8)
 
+    /** Enregistre un brouillon sans toucher à l'historique ni à Obsidian/PDF. SocieteRepo écrit atomiquement sur disque. */
+    @Synchronized
+    fun enregistrerBrouillonIntervention(brouillon: BrouillonIntervention): BrouillonIntervention {
+        require(data.client(brouillon.clientId)?.sites?.any { it.id == brouillon.siteId } == true) {
+            "Client ou installation introuvable."
+        }
+        require(brouillon.description.isNotBlank()) { "La description du rapport est obligatoire." }
+        require(runCatching { LocalDate.parse(brouillon.date) }.isSuccess) { "Date invalide : utilise yyyy-MM-dd." }
+        val existant = data.brouillonsInterventions.firstOrNull { it.id == brouillon.id }
+        val sauvegarde = brouillon.copy(creeLe = existant?.creeLe ?: brouillon.creeLe, modifieLe = System.currentTimeMillis())
+        repo.update { courant -> courant.copy(brouillonsInterventions =
+            (courant.brouillonsInterventions.filterNot { it.id == sauvegarde.id } + sauvegarde).sortedByDescending { it.modifieLe }) }
+        return repo.data.brouillonsInterventions.first { it.id == sauvegarde.id }
+    }
+
+    fun supprimerBrouillonIntervention(id: String): Boolean {
+        if (data.brouillonsInterventions.none { it.id == id }) return false
+        repo.update { it.copy(brouillonsInterventions = it.brouillonsInterventions.filterNot { b -> b.id == id }) }
+        return data.brouillonsInterventions.none { it.id == id }
+    }
+
+    /** Validation explicite : transfert atomique du brouillon vers l'historique, puis génération des livrables. */
+    @Synchronized
+    fun validerBrouillonIntervention(id: String): Pair<Intervention, Pair<String, String>> {
+        val brouillon = data.brouillonsInterventions.firstOrNull { it.id == id }
+            ?: throw IllegalArgumentException("Brouillon introuvable.")
+        val client = data.client(brouillon.clientId) ?: throw IllegalStateException("Client introuvable.")
+        val site = client.sites.firstOrNull { it.id == brouillon.siteId } ?: throw IllegalStateException("Installation introuvable.")
+        require(brouillon.description.isNotBlank()) { "La description du rapport est obligatoire avant validation." }
+        val deja = site.interventions.firstOrNull { it.id == brouillon.id }
+        if (deja != null) {
+            supprimerBrouillonIntervention(id)
+            return deja to ecrireRapport(client, site, deja)
+        }
+        val intervention = Intervention(
+            id = brouillon.id, date = brouillon.date, categorie = brouillon.categorie,
+            description = brouillon.description, diagnostic = brouillon.diagnostic, actions = brouillon.actions,
+            pieces = brouillon.pieces, mesures = brouillon.mesures, statut = brouillon.statut,
+            prochaineMaintenance = brouillon.prochaineMaintenance, notes = brouillon.notes,
+            photosAvant = brouillon.photosAvant, photosApres = brouillon.photosApres, onduleurs = brouillon.onduleurs
+        )
+        repo.update { courant -> courant.copy(
+            clients = courant.clients.map { c -> if (c.id != client.id) c else c.copy(sites = c.sites.map { st ->
+                if (st.id != site.id) st else st.copy(interventions = (st.interventions.filterNot { it.id == intervention.id } + intervention).sortedByDescending { it.date })
+            }) },
+            brouillonsInterventions = courant.brouillonsInterventions.filterNot { it.id == id }
+        ) }
+        val clientMaj = data.client(client.id) ?: client
+        val siteMaj = clientMaj.sites.firstOrNull { it.id == site.id } ?: site
+        return intervention to ecrireRapport(clientMaj, siteMaj, intervention)
+    }
+
+
     /** Supprime une intervention précise et ses pièces jointes, après confirmation demandée par SocieteTools. */
     fun supprimerIntervention(clientId: String, siteId: String, interventionId: String): String {
         val client = data.client(clientId) ?: return "Client introuvable."
