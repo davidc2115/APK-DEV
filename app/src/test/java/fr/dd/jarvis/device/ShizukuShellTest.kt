@@ -20,4 +20,22 @@ class ShizukuShellTest {
         assertTrue(texte.contains("sortie tronquée"))
         assertTrue(texte.length < 150)
     }
+
+    @Test
+    fun codeRetourAdbDistingueSuccesEtEchec() {
+        assertEquals("(commande exécutée)", ShellResult.fromAdbOutput("__JARVIS_EXIT_CODE__=0\\n"))
+        assertEquals("Erreur shell (code 1) : Permission denied", ShellResult.fromAdbOutput("Permission denied\\n__JARVIS_EXIT_CODE__=1\\n"))
+    }
+
+    @Test
+    fun sortieAdbSansCodeRetourNonVerifiable() {
+        assertEquals(null, ShellResult.fromAdbOutput("sortie sans marqueur"))
+    }
+
+    @Test
+    fun enveloppeShellCaptureLeCodeRetour() {
+        val command = ShellResult.withExitCode("settings put global low_power 1")
+        assertTrue(command.contains("__jarvis_status=\\$?"))
+        assertTrue(command.contains("__JARVIS_EXIT_CODE__=%s"))
+    }
 }
