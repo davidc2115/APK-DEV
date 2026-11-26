@@ -62,7 +62,8 @@ class MailRepo(private val ctx: Context, private val store: Store) {
         if (resultats.isEmpty() && gmailActifs.isEmpty() && !store.mailActive("imap")) {
             throw IllegalStateException("Aucun compte mail actif (Réglages › Comptes › Mails).")
         }
-        return resultats.sortedByDescending { it.date }.distinctBy { it.id.ifBlank { "${it.account}|${it.from}|${it.subject}|${it.date?.time}" } }.take(count)
+        val limite = count * (gmailActifs.size + if (store.mailActive("imap") && store.mailHost.value.isNotBlank()) 1 else 0).coerceAtLeast(1)
+        return resultats.sortedByDescending { it.date }.distinctBy { it.id.ifBlank { "${it.account}|${it.from}|${it.subject}|${it.date?.time}" } }.take(limite)
     }
 
     private suspend fun fetchImap(count: Int, unreadOnly: Boolean): List<MailItem> = withContext(Dispatchers.IO) {
