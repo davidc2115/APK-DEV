@@ -6,7 +6,6 @@ import java.io.FileOutputStream
 import java.io.IOException
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.MessageDigest
 
 /**
  * Mémoire des consignes de l'utilisateur (présentation des fiches, contenu du point du matin…).
