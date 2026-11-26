@@ -1394,7 +1394,24 @@ class ToolBox(
             runCatching { fr.dd.jarvis.device.Faits.apprendre(app, a.optString("sujet") + " : " + a.optString("texte")) }.getOrDefault(emptyList()).let { r -> if (r.isEmpty()) "" else "\nMémoire fiable : " + r.joinToString(" ; ") })
         "memoire_apprendre" -> ToolResult(app.memo.apprendre(a.optString("sujet"), a.optString("preference"), a.optString("preuve")))
         "memoire_apprentissages" -> ToolResult(app.memo.apprentissagesEnCours(), direct = true)
-        "apprentissage_durable" -> ToolResult(app.memo.registreApprentissage().executer(a), direct = true)
+        "apprentissage_durable" -> {
+            val action = a.optString("action").trim().lowercase()
+            val etat = a.optString("etat").trim().lowercase()
+            val confirmationRequise = action == "state" && etat in setOf("approved", "testing", "active")
+            if (confirmationRequise) {
+                val id = a.optString("id").trim()
+                if (id.isBlank()) ToolResult("Validation impossible : identifiant d'apprentissage manquant.", direct = true)
+                else if (!confirm("Confirmer explicitement le passage de l'apprentissage $id à l'état « $etat » ? Cette décision modifiera la mémoire partagée Jarvis/Hermès.", true))
+                    ToolResult("Validation refusée : l'apprentissage reste inchangé.", direct = true)
+                else {
+                    val autorise = JSONObject(a.toString()).put("confirmation_explicite", true)
+                    ToolResult(app.memo.registreApprentissage().executer(autorise), direct = true)
+                }
+            } else {
+                val sansConfirmation = JSONObject(a.toString()).put("confirmation_explicite", false)
+                ToolResult(app.memo.registreApprentissage().executer(sansConfirmation), direct = true)
+            }
+        }
         "agents_centre" -> agentsCentre(a)
         "graphe_suggere_lien" -> ToolResult(app.knowledgeRepository.suggestRelation(a.optString("source"), a.optString("cible"), a.optString("type", "RELATED_TO")))
         "routine_contextuelle" -> routineContextuelle(a)
