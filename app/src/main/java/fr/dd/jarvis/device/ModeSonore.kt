@@ -55,27 +55,36 @@ object ModeSonore {
         }
     }
 
-    private fun shell(ctx: Context, cmd: String): Boolean =
-        PhoneShell.ready(ctx) && runCatching { PhoneShell.exec(ctx, cmd); true }.getOrDefault(false)
+    private fun shell(ctx: Context, cmd: String): Boolean {
+        if (!PhoneShell.ready(ctx)) return false
+        val resultat = runCatching { PhoneShell.exec(ctx, cmd) }.getOrElse { "Erreur shell : ${it.message}" }
+        return !ShellResult.isFailure(resultat)
+    }
 
     private fun npd(ctx: Context, actif: Boolean): Boolean {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (nm.isNotificationPolicyAccessGranted) return runCatching {
             nm.setInterruptionFilter(if (actif) NotificationManager.INTERRUPTION_FILTER_PRIORITY else NotificationManager.INTERRUPTION_FILTER_ALL); true
         }.getOrDefault(false)
-        return shell(ctx, "cmd notification set_dnd " + if (actif) "priority" else "off")
+        val envoye = shell(ctx, "cmd notification set_dnd " + if (actif) "priority" else "off")
+        return envoye && nm.currentInterruptionFilter.let {
+            if (actif) it == NotificationManager.INTERRUPTION_FILTER_PRIORITY
+            else it == NotificationManager.INTERRUPTION_FILTER_ALL
+        }
     }
 
     private fun sonnerie(ctx: Context, mode: Int): Boolean {
         val am = ctx.getSystemService(AudioManager::class.java)
         if (runCatching { am.ringerMode = mode; am.ringerMode == mode }.getOrDefault(false)) return true
-        return shell(ctx, "cmd audio set-ringer-mode " + when (mode) { AudioManager.RINGER_MODE_VIBRATE -> "VIBRATE"; AudioManager.RINGER_MODE_SILENT -> "SILENT"; else -> "NORMAL" })
+        val envoye = shell(ctx, "cmd audio set-ringer-mode " + when (mode) { AudioManager.RINGER_MODE_VIBRATE -> "VIBRATE"; AudioManager.RINGER_MODE_SILENT -> "SILENT"; else -> "NORMAL" })
+        return envoye && am.ringerMode == mode
     }
 
     /** « Vibrer pendant la sonnerie » (sonnerie + vibreur). */
     private fun vibrerAvecSonnerie(ctx: Context): Boolean =
         (Settings.System.canWrite(ctx) && runCatching { Settings.System.putInt(ctx.contentResolver, Settings.System.VIBRATE_WHEN_RINGING, 1) }.getOrDefault(false)) ||
-            shell(ctx, "settings put system vibrate_when_ringing 1")
+            (shell(ctx, "settings put system vibrate_when_ringing 1") &&
+                runCatching { Settings.System.getInt(ctx.contentResolver, Settings.System.VIBRATE_WHEN_RINGING, 0) == 1 }.getOrDefault(false))
 
     private fun demanderAcces(ctx: Context): String {
         runCatching { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
