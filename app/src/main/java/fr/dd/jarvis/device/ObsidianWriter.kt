@@ -158,11 +158,8 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
                 if (cur?.listFiles()?.any { it.uri == cible.uri } == true) return false
                 supprime = true
             }
-            // Certaines écritures ont été basculées localement lorsque le fournisseur SAF était indisponible.
-            if (localFile.exists()) {
-                if (!runCatching { localFile.delete() && !localFile.exists() }.getOrDefault(false)) return false
-                supprime = true
-            }
+            // Le coffre configuré est la seule source de référence : ne jamais supprimer une copie locale
+            // homonyme à la place d'un fichier absent du coffre. Une copie privée de travail n'est pas la note source.
             supprime
         } catch (_: Exception) {
             false
@@ -539,6 +536,17 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
 
     private fun withMd(path: String) = path.trim().trim('/').let { if (it.endsWith(".md", true)) it else "$it.md" }
 
+    /** Lecture stricte : null signifie uniquement « note absente » ; une panne du coffre lève IOException. */
+    fun readNoteStrict(path: String): String? {
+        val p = withMd(path)
+        val folder = p.substringBeforeLast('/', "")
+        val name = p.substringAfterLast('/')
+        return lireAvecDateStrict(folder, name)?.first
+    }
+
+    /** Vrai si le coffre configuré est actuellement lisible ; le mode local reste valide sans coffre choisi. */
+    fun coffreLisible(): Boolean = !coffreConfigure() || vaultRoot() != null
+
     fun readNote(path: String): String? {
         signalerFilPrincipal("readNote")
         val p = withMd(path)
@@ -563,7 +571,9 @@ class ObsidianWriter(private val ctx: Context, private val store: Store) {
         val p = withMd(path)
         val folder = p.substringBeforeLast('/', "")
         val name = p.substringAfterLast('/')
-        val body = if (append) (readNote(p)?.trimEnd()?.plus("\n\n") ?: "") + content else content
+        // En mode ajout, une erreur de lecture ne doit jamais être interprétée comme une note absente,
+        // sinon une panne SAF pourrait écraser le contenu existant.
+        val body = if (append) (readNoteStrict(p)?.trimEnd()?.plus("\n\n") ?: "") + content else content
         return saveBytes(folder, name, body.toByteArray(), "text/markdown")
     }
 
