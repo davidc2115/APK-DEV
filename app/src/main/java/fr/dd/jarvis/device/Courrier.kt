@@ -42,6 +42,10 @@ object Courrier {
 
     // ------------------------------------------------------------------ analyse (pure)
 
+    /** Pour les notifications de messagerie, le dernier message réel prime sur le résumé tronqué de la notification. */
+    internal fun contenuNotification(texteNotification: String, dernierMessage: String): String =
+        dernierMessage.trim().takeIf { it.isNotBlank() } ?: texteNotification.trim()
+
     /** Messages de sécurité (code de connexion, double authentification) : jamais analysés ni gardés. */
     private val SECURITE = Regex("\\b(code de (verification|confirmation|securite|connexion|validation|authentification)|mot de passe|ne (le )?communiquez|ne partagez|one[- ]time|otp|3d ?secure|double authentification)\\b")
 
@@ -55,9 +59,11 @@ object Courrier {
         Transporteur("GLS", Regex("\\bgls\\b"), Regex("\\b(\\d{11,12}|[A-Z0-9]{8})\\b")) { "https://gls-group.com/FR/fr/suivi-colis?match=$it" },
         Transporteur("Mondial Relay", Regex("\\bmondial ?relay\\b"), Regex("\\b(\\d{8}|\\d{10,12})\\b")) { "https://www.mondialrelay.fr/suivi-de-colis/?NumeroExpedition=$it" },
         Transporteur("Relais Colis", Regex("\\brelais ?colis\\b"), Regex("\\b(\\d{10,16})\\b")) { "https://www.relaiscolis.com/suivi-de-colis/?reference=$it" },
-        Transporteur("Amazon", Regex("\\bamazon\\b"), Regex("\\b(TBA\\d{9,12}|\\d{3}-\\d{7}-\\d{7})\\b")) { "https://www.amazon.fr/gp/your-account/order-history" },
+        Transporteur("Amazon", Regex("\\bamazon\\b"), Regex("\\b(TBA\\d{9,12})\\b")) { "https://www.amazon.fr/gp/your-account/order-history" },
     )
-    private val MOTS_COLIS = Regex("\\b(colis|livraison|livre|livree|expedie|expediee|expedition|point relais|relais|consigne|locker|avis de passage|suivi|tracking|envoi|commande)\\b")
+    private val MOTS_COLIS = Regex("\\b(colis|livraison|livre|livree|expedie|expediee|expedition|point relais|relais|consigne|locker|avis de passage|suivi|tracking|envoi|transporteur)\\b")
+    /** Une commande ou un numéro de commande Amazon ne prouvent jamais qu'un colis est expédié. */
+    private val INDICES_EXPEDITION = Regex("\\b(votre colis|colis (?:a ete |est |sera )?(?:expedie|livre|en route|en transit)|commande (?:a ete |est )?expediee?|vient d etre expedie|a ete expedie|en cours d acheminement|pris en charge par|numero de suivi|suivre votre colis|suivi de (?:votre )?(?:colis|commande)|livraison (?:est |sera )?(?:prevue|confirmee|en cours|effectuee)|sera livre|est en transit|est en cours de livraison|avis de passage|disponible au point relais)\\b")
     private val NUMERO_GENERIQUE = Regex("\\b([A-Z]{2}\\d{9}[A-Z]{2}|\\d[A-Z]\\d{11}|1Z[0-9A-Z]{16}|\\d{13,15})\\b")
     private val CODE_RETRAIT = Regex("(?i)code (?:de retrait|de collecte|d'ouverture|d’ouverture|de deverrouillage|de déverrouillage|pin|de livraison|de recuperation|de récupération|a presenter|à présenter)\\s*[:=]?\\s*([A-Z0-9]{4,10})")
 
@@ -86,8 +92,12 @@ object Courrier {
 
         // Colis
         val t = TRANSPORTEURS.firstOrNull { it.mots.containsMatchIn(n) }
-        val numero = (t?.numero?.find(brut) ?: if (MOTS_COLIS.containsMatchIn(n)) NUMERO_GENERIQUE.find(brut) else null)?.groupValues?.get(1)
-        if (MOTS_COLIS.containsMatchIn(n) && (numero != null || t != null) && !FACTURE_RE.containsMatchIn(n.replace(Regex("\\bfacture (jointe|disponible)\\b"), ""))) {
+        val indicateurColis = MOTS_COLIS.containsMatchIn(n)
+        val numero = (t?.numero?.find(brut) ?: if (indicateurColis) NUMERO_GENERIQUE.find(brut) else null)?.groupValues?.get(1)
+        // Un expéditeur marchand (notamment Amazon) ou le mot « commande » ne suffisent pas :
+        // il faut un numéro de suivi réel ou une formulation explicite d'expédition/livraison.
+        val preuveExpedition = numero != null || INDICES_EXPEDITION.containsMatchIn(n)
+        if (indicateurColis && preuveExpedition && !FACTURE_RE.containsMatchIn(n.replace(Regex("\\bfacture (jointe|disponible)\\b"), ""))) {
             val statut = when {
                 Regex("\\b(a ete livre|a ete livree|est livre|est livree|livre aujourd hui a|depose dans (votre|la) boite|remis en main propre|livraison effectuee)\\b").containsMatchIn(n) -> "livré"
                 Regex("\\b(disponible (dans|en|au)|a retirer|pret a etre retire|vous attend|en attente de retrait)\\b").containsMatchIn(n) -> "à retirer"
