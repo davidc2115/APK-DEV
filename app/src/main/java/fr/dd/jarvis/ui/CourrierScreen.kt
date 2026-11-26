@@ -55,7 +55,11 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     }
     val scope = rememberCoroutineScope()
     LaunchedEffect(app) {
-        val ajoutes = withContext(Dispatchers.IO) { Courrier.importerSmsRecents(app) }
+        val ajoutes = withContext(Dispatchers.IO) {
+            val sms = Courrier.importerSmsRecents(app)
+            val mails = runCatching { Courrier.importerMailsRecents(app, 200) }.getOrDefault(0)
+            sms + mails
+        }
         if (ajoutes > 0) version++
     }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
