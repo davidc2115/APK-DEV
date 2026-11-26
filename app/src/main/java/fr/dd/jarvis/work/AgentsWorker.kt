@@ -1,9 +1,5 @@
 package fr.dd.jarvis.work
 
-/** Politique de déclenchement du rangement : indépendant de l'analyse des nouveaux mails. */
-internal fun gmailOrganizerEnabled(agentRanger: Boolean, only: String?): Boolean =
-    agentRanger && (only == null || only == "mails")
-
 import android.Manifest
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -30,6 +26,11 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
+
+/** Politique de déclenchement du rangement : indépendant de l'analyse des nouveaux mails. */
+internal fun gmailOrganizerEnabled(agentRanger: Boolean, only: String?): Boolean =
+    agentRanger && (only == null || only == "mails")
+
 
 object AgentsScheduler {
     private const val NAME = "agents"
