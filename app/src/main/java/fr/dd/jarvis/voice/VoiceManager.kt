@@ -1095,13 +1095,15 @@ class VoiceManager(private val ctx: Context) {
 
     // ------------------------------------------------------------------ micro Bluetooth (casque, voiture sans Android Auto)
 
-    /** Appareil qui joue le son des médias en ce moment (casque, autoradio…), null si inconnu. */
-    private fun sortieMedia(): AudioDeviceInfo? = runCatching {
-        if (Build.VERSION.SDK_INT >= 33) am.getAudioDevicesForAttributes(attrBluetooth).firstOrNull()
-        else am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull {
-            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET || it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
-        }
-    }.getOrNull()
+    /** Appareil qui joue le son des médias (casque, autoradio…). Le repli couvre les ROM qui ne publient pas
+     * encore la route de sortie via getAudioDevicesForAttributes tant qu'aucun flux média n'est actif. */
+    private fun sortieMedia(): AudioDeviceInfo? {
+        val types = setOf(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER)
+        val routee = if (Build.VERSION.SDK_INT >= 33) runCatching {
+            am.getAudioDevicesForAttributes(attrBluetooth).firstOrNull { it.type in types }
+        }.getOrNull() else null
+        return routee ?: runCatching { am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type in types } }.getOrNull()
+    }
 
     /**
      * Micro Bluetooth à utiliser, par le profil mains-libres :
@@ -1115,29 +1117,52 @@ class VoiceManager(private val ctx: Context) {
     private fun appareilMicroBluetooth(): AudioDeviceInfo? {
         if (Build.VERSION.SDK_INT < 31) return null
         val app = appli() ?: return null
-        if (!app.store.microBluetooth.value) return null
-        if (am.mode != AudioManager.MODE_NORMAL) return null                    // appel en cours : on n'y touche pas
+        if (!app.store.microBluetooth.value) {
+            JournalVoix.noter(nom, "micro Bluetooth désactivé dans les réglages")
+            return null
+        }
+        if (am.mode != AudioManager.MODE_NORMAL) {
+            JournalVoix.noter(nom, "micro Bluetooth non ouvert : Android est déjà en mode communication/appel")
+            return null
+        }
         val comm = runCatching { am.availableCommunicationDevices }.getOrNull() ?: return null
+        val montre = Regex("(?i)watch|montre|\\bband\\b|\\bgear\\b")
+        val candidats = comm.filter {
+            it.type in setOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET) &&
+                !montre.containsMatchIn(it.productName.toString())
+        }
         if (app.enVoiture) {
-            // Essai (réglage, désactivé par défaut) : la voiture passe en mode « appel » pendant la conversation, et
-            // certains autoradios remplacent alors le lecteur JARVIS par leur écran d'appel.
-            if (!app.store.microVoitureBt.value) return null
-            // JARVIS ouvert sur l'écran de la voiture : vrai micro de la voiture par Android Auto (MicroJarvis).
+            // En projection Android Auto, on n'active jamais HFP par défaut : certains autoradios passent en écran d'appel.
+            if (!app.store.microVoitureBt.value) {
+                JournalVoix.noter(nom, "Android Auto : micro Bluetooth voiture désactivé, canal média conservé")
+                return null
+            }
             if (fr.dd.jarvis.car.NavigationVoiture.microVoiture() != null) return null
-            val montre = Regex("(?i)watch|montre|\\bband\\b|\\bgear\\b")
-            val voiture = comm.filter { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && !montre.containsMatchIn(it.productName.toString()) }
-            if (voiture.isEmpty()) JournalVoix.noter(nom, "Android Auto : aucune liaison mains-libres Bluetooth avec la voiture " +
-                "(appareils : ${comm.joinToString { "${it.productName}/${it.type}" }}) → micro du téléphone")
-            return voiture.firstOrNull()
+            val voiture = candidats.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            if (voiture == null) JournalVoix.noter(nom, "Android Auto : aucun micro mains-libres voiture disponible")
+            return voiture
         }
-        val sortie = sortieMedia() ?: return null
-        fun meme(d: AudioDeviceInfo) = (sortie.address.isNotBlank() && d.address == sortie.address) ||
+        val sortie = sortieMedia()
+        fun meme(d: AudioDeviceInfo) = sortie != null && (
+            (sortie.address.isNotBlank() && d.address.isNotBlank() && d.address == sortie.address) ||
             (d.productName.toString().isNotBlank() && d.productName.toString() == sortie.productName.toString())
-        return when (sortie.type) {
-            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> comm.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && meme(it) }
-            AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER -> comm.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLE_HEADSET && meme(it) }
-            else -> null
+        )
+        val typeAttendu = when (sortie?.type) {
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER -> AudioDeviceInfo.TYPE_BLE_HEADSET
+            else -> 0
         }
+        val correspond = candidats.firstOrNull { it.type == typeAttendu && meme(it) }
+        if (correspond != null) return correspond
+        // Certains téléphones publient des noms différents pour A2DP et HFP. Si un seul micro mains-libres
+        // Bluetooth est connecté, il est sans ambiguïté : on peut l'utiliser pour la conversation, sans le garder après.
+        val unique = candidats.singleOrNull()
+        if (unique != null) {
+            JournalVoix.noter(nom, "micro Bluetooth choisi (seul appareil mains-libres disponible : ${unique.productName}) ; sortie média=${sortie?.productName ?: "non publiée"}")
+            return unique
+        }
+        JournalVoix.noter(nom, "micro Bluetooth introuvable : sortie=${sortie?.let { "${it.productName}/${it.type}" } ?: "aucune"} ; entrées=${candidats.joinToString { "${it.productName}/${it.type}" }.ifBlank { "aucune" }}")
+        return null
     }
 
     private val verifMicroBt = object : Runnable {
