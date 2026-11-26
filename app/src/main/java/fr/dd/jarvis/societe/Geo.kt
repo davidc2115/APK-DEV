@@ -217,13 +217,34 @@ object Geo {
      * « Venarey » pour « Venarey-les-Laumes ») doit figurer dans l'adresse ; une adresse sans nom de commune se
      * contente du code postal. Plusieurs communes partagent souvent le même code postal (21150 : Venarey, Alise, Grignon…).
      */
-    private fun communeOk(villes: List<String?>, pc: String?, r: Requete): Boolean {
-        for (v in villes) {
-            if (v.isNullOrBlank()) continue
-            if (correspond(v, r.mots)) return true
-            val distinctif = significatifs(v).firstOrNull { it !in GENERIQUES && it.length >= 3 }
-            if (distinctif != null && r.mots.any { proche(it, distinctif) }) return true
+    /**
+     * Vérifie la commune dans le morceau qui la désigne, sans mélanger les mots de la rue et ceux de la ville.
+     * Exemple dicté sans ponctuation : « 21 rue de Massingy Vitteaux ». Le résultat « Massingy-lès-Vitteaux »
+     * ne doit pas être accepté en assemblant « Massingy » (nom de rue) et « Vitteaux » (commune réelle).
+     */
+    internal fun communePresente(ville: String?, r: Requete): Boolean {
+        if (ville.isNullOrBlank()) return false
+        val explicite = !r.commune.isNullOrBlank()
+        val segment = r.commune ?: r.texte
+        val cible = jetons(ville)
+        val disponibles = jetons(segment)
+        // Le nom complet doit apparaître dans le même ordre et sans trou. On conserve « les », « la », etc. :
+        // ces petits mots distinguent parfois deux communes différentes.
+        val complet = cible.isNotEmpty() && disponibles.windowed(cible.size).any { fenetre ->
+            fenetre.indices.all { i -> proche(fenetre[i], cible[i]) }
         }
+        if (complet) return true
+        // Tolère un nom abrégé (« Venarey » pour « Venarey-les-Laumes ») uniquement dans un segment
+        // explicitement réservé à la commune (après une virgule ou un code postal), jamais dans le nom de rue.
+        if (explicite) {
+            val distinctif = significatifs(ville).firstOrNull { it !in GENERIQUES && it.length >= 3 }
+            if (distinctif != null && significatifs(segment).any { proche(it, distinctif) }) return true
+        }
+        return false
+    }
+
+    private fun communeOk(villes: List<String?>, pc: String?, r: Requete): Boolean {
+        if (villes.any { communePresente(it, r) }) return true
         return r.cp != null && pc == r.cp && r.sansCommune
     }
 
