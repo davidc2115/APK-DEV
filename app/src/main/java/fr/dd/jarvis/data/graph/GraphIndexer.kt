@@ -16,9 +16,11 @@ class GraphIndexer(
     private val database: GraphDatabase,
     private val obsidian: ObsidianWriter
 ) {
-    suspend fun rebuild(maxNotes: Int = 400): GraphIndexReport = withContext(Dispatchers.IO) {
+    suspend fun rebuild(maxNotes: Int = 3000): GraphIndexReport = withContext(Dispatchers.IO) {
         val indexedAt = System.currentTimeMillis()
-        val graph = obsidian.graph(limiteNotes = maxNotes)
+        // Indexe jusqu'à 3 000 notes, mais borne la lecture du contenu à 1 200 notes pour
+        // extraire les liens sans rendre le parcours SAF interminable.
+        val graph = obsidian.graph(limiteNotes = maxNotes, limiteLecture = minOf(maxNotes, 1200))
         val realNotes = graph.nodes.filterNot { it.ghost }
 
         val entities = realNotes.map { node ->
