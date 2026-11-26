@@ -101,6 +101,18 @@ class ServeurDiagnosticBilanTest {
     @Test fun nettoyageRendu() {
         assertEquals("🧹 Disque nettoyé : 850 Mo libérés, 3,0 Go libres sur /.", ServeurDiagnostic.resultatRemede(ServeurDiagnostic.Remede.NETTOYER_DISQUE, "Vacuuming done\n@LIBERE 850 3072"))
     }
+    @Test fun sortieSansReleveNePeutPasDireQueToutVaBien() {
+        val retour = ServeurDiagnostic.rapportExecution("permission denied", 1)
+        assertTrue(retour.contains("Diagnostic incomplet"))
+        assertFalse(retour.contains("tout va bien"))
+    }
+
+    @Test fun codeSshNonNulSignaleUnBilanPartiel() {
+        val retour = ServeurDiagnostic.rapportExecution("== Hôte Debian ==\\n@CHARGE 0.2 0.3 0.2 4", 1)
+        assertTrue(retour.contains("Diagnostic partiel"))
+        assertTrue(retour.contains("code 1"))
+    }
+
 }
 
 /** Les scripts envoyés au serveur sont du shell valide (bash et sh). */
