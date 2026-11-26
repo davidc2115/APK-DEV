@@ -27,7 +27,7 @@ class SocieteTools(
         )
         private val KEYWORDS = Regex(
             "devis|factur|client|soci[ée]t[ée]|sauvegard|restaur|e-reporting|dossier jarvis soci|tarif|remise|d[ée]placement|paie|salaire|bulletin|r[ée]serve|dividende|b[ée]n[ée]fice|r[ée]sultat|tr[ée]sorerie|charges fixes|imp[ôo]t sur les soci[ée]t[ée]s|capital social|bar[èe]mes?|urssaf|cotisations|s[ée]curit[ée] sociale|smic|plafond|" +
-                "installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
+                "rapport|brouillon|installation|photovolta|kwc|fiche|pr[ée]sentation|mise en forme|mise en page|si[èe]ge|employ[ée]|prix|onduleur|maintenance|" +
                 "entretien|intervention|historique photovolta[ïi]que|bilan maintenance|panne|diagnostic|pi[èe]ce remplac[ée]e|planning|agenda|pdf|obsidian|distance|itin[ée]raire|km|fid[ée]lit[ée]|kml|google earth|carte des clients|" +
                 "gps|coordonn[ée]es|g[ée]oloc|localis|latitude|longitude|google maps",
             RegexOption.IGNORE_CASE
@@ -952,12 +952,12 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     private fun rapportBrouillonsListe(): ToolResult {
         val brouillons = svc.data.brouillonsRapport
         if (brouillons.isEmpty()) return ok("Aucun brouillon de rapport en cours.")
-        return ok(brouillons.sortedByDescending { it.modifieLe }.joinToString("\\n\\n") { b ->
+        return ok(brouillons.sortedByDescending { it.modifieLe }.joinToString("\n\n") { b ->
             val client = svc.data.client(b.clientId)
             val site = client?.sites?.firstOrNull { it.id == b.siteId }
             "Brouillon #" + b.id + " — " + (client?.nom ?: "client supprimé") + " / " + (site?.nom ?: "installation supprimée") +
-                "\\nDate : " + b.date + " · " + b.categorie + "\\nRésumé : " + b.description.ifBlank { "(vide)" } +
-                "\\nDernière sauvegarde : " + b.modifieLe
+                "\nDate : " + b.date + " · " + b.categorie + "\nRésumé : " + b.description.ifBlank { "(vide)" } +
+                "\nDernière sauvegarde : " + b.modifieLe
         })
     }
 
