@@ -62,13 +62,6 @@ class Memo(private val ctx: Context, private val obsidian: ObsidianWriter) {
         }
     }
 
-    /** Restaure le journal local des preuves si le miroir Obsidian échoue après l'écriture locale. */
-    private fun restaurerPreuvesLocales() {
-        val json = JSONObject()
-        candidates.forEach { (key, values) -> json.put(key, JSONArray(values.toList())) }
-        persisterCopieHermes(habitsFile, json.toString(2))
-    }
-
     private fun persistCandidates() {
         val json = JSONObject()
         candidates.forEach { (key, values) -> json.put(key, JSONArray(values.toList())) }
