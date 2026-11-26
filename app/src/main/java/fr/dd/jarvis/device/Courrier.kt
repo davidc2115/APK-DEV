@@ -218,10 +218,16 @@ object Courrier {
         val anciens = liste(c)
         val valides = anciens.mapNotNull { ancien ->
             val actuel = analyser(ancien.emetteur, ancien.resume, ancien.source, ancien.ts)
-                .firstOrNull { it.type == ancien.type } ?: return@mapNotNull null
-            actuel.copy(id = ancien.id, traite = ancien.traite, domaine = ancien.domaine, auto = ancien.auto,
-                dateRdv = actuel.dateRdv ?: ancien.dateRdv, lieu = actuel.lieu.ifBlank { ancien.lieu },
-                statut = if (actuel.dateRdv == null && ancien.dateRdv != null) ancien.statut else actuel.statut)
+                .firstOrNull { it.type == ancien.type }
+            when {
+                actuel != null -> actuel.copy(id = ancien.id, traite = ancien.traite, domaine = ancien.domaine, auto = ancien.auto,
+                    dateRdv = actuel.dateRdv ?: ancien.dateRdv, lieu = actuel.lieu.ifBlank { ancien.lieu },
+                    statut = if (actuel.dateRdv == null && ancien.dateRdv != null) ancien.statut else actuel.statut)
+                PROMOTION_RE.containsMatchIn(normaliser(ancien.emetteur + " " + ancien.resume)) -> null
+                // Le résumé stocké est tronqué à 220 caractères : on conserve donc tout élément qu'on ne peut pas
+                // revalider avec certitude, plutôt que de supprimer un vrai rendez-vous dont le détail est plus loin.
+                else -> ancien
+            }
         }
         val retires = anciens.size - valides.size
         if (retires > 0 || valides.size != anciens.size) sauver(c, valides)
