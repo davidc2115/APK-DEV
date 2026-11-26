@@ -102,7 +102,7 @@ class PhoneControl(private val ctx: Context) {
                 extras.forEach { (k, v) -> append(" --es ").append(k).append(' ').append(q(v)) }
             }
             val r = PhoneShell.exec(ctx, cmd)
-            if (!r.contains("Error", true) && !r.contains("Exception", true) && !r.startsWith("ADB non") && !r.startsWith("Erreur ADB")) {
+            if (!isError(r) && !r.contains("Error", true) && !r.contains("Exception", true)) {
                 fr.dd.jarvis.voice.JournalVoix.noter("lancement", "${pkg ?: data?.substringBefore(':') ?: "appli"} : lancé par l'ADB intégré")
                 return ""
             }
@@ -133,7 +133,7 @@ class PhoneControl(private val ctx: Context) {
                 ints2.forEach { (k, v) -> append(" --eial ").append(k).append(' ').append(v.joinToString(",")) }
             }
             val r = PhoneShell.exec(ctx, cmd)
-            if (!r.contains("Error", true) && !r.contains("Exception", true) && !r.startsWith("ADB non") && !r.startsWith("Erreur ADB")) return true
+            if (!isError(r) && !r.contains("Error", true) && !r.contains("Exception", true)) return true
         }
         return try {
             val i = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -675,8 +675,13 @@ class PhoneControl(private val ctx: Context) {
     private fun sh(cmd: String): String {
         if (!PhoneShell.ready(ctx) && !AdbShell.hasKey(ctx)) return "Aucun accès adb : appairer l'ADB intégré dans Réglages › Téléphone › Contrôle."
         var out = ""
-        val t = Thread { out = PhoneShell.exec(ctx, cmd) }
-        t.start(); t.join(25_000)
+        val t = Thread { out = PhoneShell.exec(ctx, cmd) }.apply { isDaemon = true }
+        t.start()
+        t.join(25_000)
+        if (t.isAlive) {
+            t.interrupt()
+            return "⏱️ Commande shell interrompue après 25 secondes : résultat non vérifiable."
+        }
         return out
     }
 
