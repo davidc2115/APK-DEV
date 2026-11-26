@@ -35,7 +35,11 @@ class ShizukuShellTest {
     @Test
     fun enveloppeShellCaptureLeCodeRetour() {
         val command = ShellResult.withExitCode("settings put global low_power 1")
-        assertTrue(command.contains("__jarvis_status=\\$?"))
+        assertTrue(command.contains("__jarvis_status=" + ')
+        assertTrue(command.contains("__JARVIS_EXIT_CODE__=%s"))
+    }
+}
+ + "?"))
         assertTrue(command.contains("__JARVIS_EXIT_CODE__=%s"))
     }
 }
