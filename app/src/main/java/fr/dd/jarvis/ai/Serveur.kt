@@ -106,8 +106,8 @@ object Serveur {
             if (connu.isBlank()) st.sshFp.set(fp)
             else if (connu != fp) {
                 s.disconnect()
-                val mismatch = IllegalStateException("Empreinte SSH inattendue sur $\{cibleAdr.first}:$\{cibleAdr.second} ($fp au lieu de $connu).")
-                essais += "$\{cibleAdr.first}:$\{cibleAdr.second} → hôte SSH différent (empreinte non reconnue)"
+                val mismatch = IllegalStateException("Empreinte SSH inattendue sur ${cibleAdr.first}:${cibleAdr.second} ($fp au lieu de $connu).")
+                essais += "${cibleAdr.first}:${cibleAdr.second} → hôte SSH différent (empreinte non reconnue)"
                 erreur = mismatch
                 // Un Wi-Fi tiers peut réutiliser le même sous-réseau privé : on essaie l'adresse distante,
                 // mais elle devra présenter exactement la même empreinte connue.
