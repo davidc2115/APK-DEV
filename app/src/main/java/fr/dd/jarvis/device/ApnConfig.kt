@@ -92,7 +92,7 @@ object ApnConfig {
 
     internal fun executer(app: JarvisApp, cmd: String, delaiMs: Long = 10_000): String {
         var out = ""
-        val t = Thread { out = runCatching { PhoneShell.exec(app, cmd) }.getOrElse { "Erreur : ${it.message}" } }.apply { isDaemon = true }
+        val t = Thread { out = runCatching { PhoneShell.exec(app, cmd) }.getOrElse { "Erreur : \${it.message}" } }.apply { isDaemon = true }
         t.start()
         t.join(delaiMs)
         if (t.isAlive) {
@@ -111,9 +111,14 @@ object ApnConfig {
     /** APN de la SIM des données et APN en service (null si pas de Shizuku / ADB). */
     fun lire(app: JarvisApp, mccMnc: String): Lecture? {
         if (!PhoneShell.ready(app)) return null
-        val tous = executer(app, "content query --uri content://telephony/carriers --where ${q("numeric='$mccMnc'")}")
-        val pref = executer(app, "content query --uri ${uriPrefere()}").let { if (lignes(it).isEmpty()) executer(app, "content query --uri content://telephony/carriers/preferapn") else it }
-        return Lecture(lignes(pref).firstOrNull(), lignes(tous), refuse(tous) && lignes(tous).isEmpty())
+        val tous = executer(app, "content query --uri content://telephony/carriers --where \${q("numeric='$mccMnc'")}")
+        if (refuse(tous)) return Lecture(null, emptyList(), true)
+        val pref = executer(app, "content query --uri \${uriPrefere()}").let {
+            if (refuse(it)) return Lecture(null, lignes(tous), true)
+            if (lignes(it).isEmpty()) executer(app, "content query --uri content://telephony/carriers/preferapn") else it
+        }
+        if (refuse(pref)) return Lecture(null, lignes(tous), true)
+        return Lecture(lignes(pref).firstOrNull(), lignes(tous), false)
     }
 
     /** Bilan lisible de l'APN, avec ce qui peut l'améliorer. */
