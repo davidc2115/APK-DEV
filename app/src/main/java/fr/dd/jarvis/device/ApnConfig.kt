@@ -22,7 +22,7 @@ object ApnConfig {
         .mapNotNull { ReseauMobile.interpreterApn(it) }
         .toList()
 
-    internal fun refuse(sortie: String) = Regex("(?i)(securityexception|no permission|permission denial|not allowed|unknown command)").containsMatchIn(sortie)
+    internal fun refuse(sortie: String) = ShellResult.isFailure(sortie) || Regex("(?i)(securityexception|no permission|permission denial|not allowed|unknown command|failure \\[)").containsMatchIn(sortie)
 
     private fun types(a: Map<String, String>) = a["type"].orEmpty().lowercase().split(',').map { it.trim() }.filter { it.isNotBlank() }
     internal fun estDonnees(a: Map<String, String>) = types(a).let { it.isEmpty() || "default" in it || "*" in it }
@@ -92,8 +92,13 @@ object ApnConfig {
 
     internal fun executer(app: JarvisApp, cmd: String, delaiMs: Long = 10_000): String {
         var out = ""
-        val t = Thread { out = runCatching { PhoneShell.exec(app, cmd) }.getOrElse { "Erreur : ${it.message}" } }
-        t.isDaemon = true; t.start(); t.join(delaiMs)
+        val t = Thread { out = runCatching { PhoneShell.exec(app, cmd) }.getOrElse { "Erreur : ${it.message}" } }.apply { isDaemon = true }
+        t.start()
+        t.join(delaiMs)
+        if (t.isAlive) {
+            t.interrupt()
+            return "⏱️ Commande APN interrompue après $delaiMs ms : résultat non vérifiable."
+        }
         return out
     }
 
