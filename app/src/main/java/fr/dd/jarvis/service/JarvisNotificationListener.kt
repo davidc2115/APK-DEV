@@ -64,7 +64,7 @@ class JarvisNotificationListener : NotificationListenerService() {
             val actives = runCatching { s.activeNotifications }.getOrNull() ?: return null
             return actives.any { sbn ->
                 sbn.packageName in paquets && sbn.postTime >= depuis && sbn.notification?.let { n ->
-                    n.category == Notification.CATEGORY_NAVIGATION || (n.flags and Notification.FLAG_ONGOING_EVENT) != 0
+                    n.category == Notification.CATEGORY_NAVIGATION
                 } == true
             }
         }
