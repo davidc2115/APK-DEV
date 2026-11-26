@@ -30,6 +30,14 @@ class MusicToolsTest {
         assertEquals("repeter_playlist", MusicTools.modeLecture("repeat entire playlist"))
     }
 
+    @Test fun peutDesactiverRepetitionEtAleatoireIndependamment() {
+        assertEquals("repeter_aucune", MusicTools.modeLecture("désactive la répétition"))
+        assertEquals("repeter_aucune", MusicTools.modeLecture("retire la répétition"))
+        assertEquals("repeter_aucune", MusicTools.modeLecture("sans répétition"))
+        assertEquals("aleatoire_off", MusicTools.modeLecture("désactive le mode aléatoire"))
+        assertEquals("aleatoire_off", MusicTools.modeLecture("retire le mélange aléatoire"))
+    }
+
     @Test fun reconnaitLesAutresSectionsDeBibliotheque() {
         assertEquals("playlists", MusicTools.sectionBibliotheque("mes playlists"))
         assertEquals("titres", MusicTools.sectionBibliotheque("mes titres"))
