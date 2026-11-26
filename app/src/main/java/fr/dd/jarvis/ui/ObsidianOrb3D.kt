@@ -237,7 +237,7 @@ private fun Orbe3DContenu(
                     detectTransformGestures { _, pan, zoom, _ ->
                         dernierGeste = temps
                         zoomUser = (zoomUser * zoom).coerceIn(0.6f, 3.2f)
-                        lacetUser = (lacetUser + pan.x * 0.25f).coerceIn(-75f, 75f)
+                        lacetUser = ((lacetUser + pan.x * 0.25f + 540f) % 360f) - 180f
                         tangageUser = (tangageUser + pan.y * 0.2f).coerceIn(-60f, 60f)
                     }
                 }
