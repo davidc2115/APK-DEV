@@ -5,6 +5,7 @@ import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import fr.dd.jarvis.JarvisApp
+import okhttp3.Dns
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -32,7 +33,7 @@ object Serveur {
     /** Client HTTP dont sockets ET résolution DNS restent liés au même Wi-Fi/VPN que la route vérifiée. */
     private fun httpSurReseau(reseau: android.net.Network): OkHttpClient = http.newBuilder()
         .socketFactory(reseau.socketFactory)
-        .dns { hote -> reseau.getAllByName(hote).toList() }
+        .dns(Dns { hote -> reseau.getAllByName(hote).toList() })
         .build()
 
     // ------------------------------------------------------------------ SSH
