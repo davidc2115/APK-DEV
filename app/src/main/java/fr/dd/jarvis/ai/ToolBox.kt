@@ -337,7 +337,7 @@ class ToolBox(
             mapOf("requete" to prop("Titre, artiste ou style à écouter."), "appli" to prop("Nom exact d'une application RENVOYÉE PAR applis_musique ou déjà mémorisée (jamais une application supposée sans l'avoir vérifiée)."), "toujours" to prop("« true » pour toujours utiliser cette application pour la musique."))))
         put(tool("controle_media", "Contrôle la lecture en cours : play, pause, next, previous, stop.", mapOf("action" to prop("play | pause | next | previous | stop")), listOf("action")))
         put(tool("mode_sonore", "Mode sonore du téléphone : ne pas déranger (NPD / silencieux), vibreur, sonnerie (sonnerie + vibreur), ou l'état actuel.", mapOf("mode" to prop("npd | npd_off | vibreur | sonnerie | etat")), listOf("mode")))
-        put(tool("naviguer", "OBLIGATOIRE pour toute demande de lancement/démarrage d’un itinéraire GPS vers une adresse ou un lieu : transmet la destination à Waze, Google Maps ou l’application choisie afin de démarrer le guidage, pas seulement d’ouvrir sa page d’accueil. Appelle-le DIRECTEMENT, sans demander de confirmation (« oui ou non »). Si l’utilisateur dit « chez moi », « à la maison », « au travail », « à l’école », « chez le médecin » ou un autre lieu déjà mémorisé, utilise exactement ce nom de lieu comme destination : la mémoire partagée remplacera le nom par son adresse enregistrée, ne l’invente jamais et ne demande pas de la répéter. Pour une adresse dictée, conserve le numéro, le nom de rue et la commune dans la destination ; ne remplace jamais l’adresse par une commune ressemblante. Le géocodeur ne fournit des coordonnées au GPS que si la rue ou le numéro est reconnu, sinon laisse l’application GPS rechercher l’adresse textuelle. N’utilise jamais phone_action ni pilote_ecran pour ouvrir Waze / Maps ou appuyer sur « Y aller » : cet outil démarre et vérifie lui-même le guidage. Si l’application n’est pas précisée et qu’aucune n’est mémorisée, demande laquelle (Waze / Google Maps…) et si le choix doit être conservé (« toujours ») ou ponctuel (« une seule fois »), puis rappelle l’outil.",
+        put(tool("naviguer", "OBLIGATOIRE pour toute demande de lancement/démarrage d’un itinéraire GPS vers une adresse ou un lieu : transmet la destination à Waze, Google Maps ou l’application choisie afin de démarrer le guidage, pas seulement d’ouvrir sa page d’accueil. Appelle-le DIRECTEMENT, sans demander de confirmation (« oui ou non ») ; n’utilise jamais phone_action ni pilote_ecran pour ouvrir Waze / Maps ou appuyer sur « Y aller » : cet outil démarre et vérifie lui-même le guidage. Si l’application n’est pas précisée et qu’aucune n’est mémorisée, demande laquelle (Waze / Google Maps…) et si le choix doit être conservé (« toujours ») ou ponctuel (« une seule fois »), puis rappelle l’outil.",
             mapOf("destination" to prop("Adresse ou lieu."), "mode" to prop("voiture (défaut), marche ou velo"),
                 "appli" to prop("Application : Waze, Google Maps, ou autre (optionnel)."),
                 "toujours" to prop("« true » si l'utilisateur veut toujours utiliser cette application pour ce type de demande ; « false » pour cette fois seulement.")), listOf("destination")))
@@ -1069,13 +1069,7 @@ class ToolBox(
             // En voiture : Android Auto lance son propre GPS (Waze / Maps de la voiture), sans question ni écran du téléphone.
             // Vérifié : « guidage lancé » seulement si Waze / Maps l'a vraiment démarré (sinon réponse honnête + notification).
             if (app.enVoiture && a.optString("destination").isNotBlank()) {
-                val pt = try {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        fr.dd.jarvis.societe.Geo.localiser(a.optString("destination"))
-                            ?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.RUE.rang }?.point
-                    }
-                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                catch (_: Exception) { null }
+                val pt = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) } }.getOrNull()
                 // Réponse directe : le modèle ne « termine » pas le guidage en pilotant l'écran de Waze (appuis à confirmer).
                 return ToolResult(fr.dd.jarvis.car.GuidageVoiture.lancer(app, a.optString("destination"), pt?.let { it.lat to it.lon }, a.optString("appli").trim()), direct = true)
             }
@@ -1090,13 +1084,7 @@ class ToolBox(
             else {
                 if (appli.isBlank()) appli = dispo.firstOrNull().orEmpty()
                 if (toujours && a.optString("appli").isNotBlank()) app.store.setAppPref("navigation", a.optString("appli").trim())
-                val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) {
-                    try {
-                        fr.dd.jarvis.societe.Geo.localiser(a.optString("destination"))
-                            ?.takeIf { it.precision.rang >= fr.dd.jarvis.societe.Geo.Precision.RUE.rang }?.point
-                    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                    catch (_: Exception) { null }
-                } else null
+                val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) runCatching { fr.dd.jarvis.societe.Geo.geocode(a.optString("destination")) }.getOrNull() else null
                 ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     app.phone.navigate(a.optString("destination"), a.optString("mode"), appli, pt?.let { it.lat to it.lon }) +
                         (if (toujours && a.optString("appli").isNotBlank()) " (${a.optString("appli")} mémorisé pour les itinéraires)" else "")
