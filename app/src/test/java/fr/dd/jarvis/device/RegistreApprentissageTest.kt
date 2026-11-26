@@ -50,6 +50,28 @@ class RegistreApprentissageTest {
     }
 
     @Test
+    fun seulesLesHabitudesExplicitementActivesSontExposeesAuxPrompts() {
+        val dir = Files.createTempDirectory("registre-habitudes-actives").toFile()
+        try {
+            val r = registre(dir)
+            val candidate = r.creer("habit", "Préférence candidate", "Ne doit pas être appliquée", "conversation")
+            r.changerEtat(candidate, RegistreApprentissage.ETAT_CANDIDATE, false)
+            val approved = r.creer("habit", "Préférence approuvée", "Pas encore active", "conversation")
+            r.changerEtat(approved, RegistreApprentissage.ETAT_CANDIDATE, false)
+            r.changerEtat(approved, RegistreApprentissage.ETAT_APPROVED, true)
+            val active = r.creer("habit", "Préférence active", "À appliquer dans les réponses", "conversation")
+            r.changerEtat(active, RegistreApprentissage.ETAT_CANDIDATE, false)
+            r.changerEtat(active, RegistreApprentissage.ETAT_APPROVED, true)
+            r.changerEtat(active, RegistreApprentissage.ETAT_TESTING, true)
+            r.changerEtat(active, RegistreApprentissage.ETAT_ACTIVE, true)
+
+            assertEquals(listOf("Préférence active" to "À appliquer dans les réponses"), r.habitudesActives())
+            r.changerEtat(active, RegistreApprentissage.ETAT_PAUSED, false)
+            assertTrue(r.habitudesActives().isEmpty())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
     fun transitionDirecteVersActiveEstRefusee() {
         val dir = Files.createTempDirectory("registre-transition").toFile()
         try {
