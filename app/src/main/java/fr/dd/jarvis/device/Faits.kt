@@ -23,15 +23,31 @@ object Faits {
     data class Surnom(val surnom: String, val cible: String, val domaine: String)
 
     private fun f(app: JarvisApp) = File(app.filesDir, "faits.json")
-    @Synchronized private fun lire(app: JarvisApp): JSONObject = runCatching { JSONObject(f(app).readText()) }.getOrDefault(JSONObject())
+    private const val FICHIER_COFFRE = "Mémoire faits source.json"
+
+    @Synchronized private fun lire(app: JarvisApp): JSONObject {
+        // Une erreur SAF n'est pas une mémoire vide : les écritures doivent s'arrêter plutôt
+        // que de remplacer les faits du coffre par un objet JSON vide.
+        val source = app.obsidian.lireOuMigrer(
+            "JARVIS", FICHIER_COFFRE, f(app).takeIf { it.isFile }?.readText(), "application/json"
+        )
+        return JSONObject(source ?: "{}")
+    }
+
     @Synchronized private fun ecrire(app: JarvisApp, o: JSONObject) {
-        runCatching { f(app).writeText(o.toString(2)) }
-        // Copie lisible dans Obsidian (JARVIS/Mémoire — faits.md).
+        val json = o.toString(2)
+        // Le JSON du coffre est la source de référence : en cas d'échec, l'erreur remonte
+        // et l'appelant ne confirme pas une modification seulement locale.
+        app.obsidian.saveBytes("JARVIS", FICHIER_COFFRE, json.toByteArray(), "application/json")
+        runCatching { f(app).writeText(json) } // cache de secours, jamais source prioritaire avec un coffre configuré
         runCatching { app.obsidian.saveIn("JARVIS", "Mémoire — faits", markdown(o)) }
+            .onFailure { fr.dd.jarvis.voice.JournalVoix.noter("diagnostic", "⚠️ Miroir Markdown des faits non synchronisé : ${it.message ?: it.javaClass.simpleName}") }
     }
 
     private fun cle(s: String) = normaliser(s).replace(Regex("^(le|la|les|l|mon|ma|mes|notre|nos|un|une|du|des|au|aux|a la|a l)\\s+"), "").trim()
 
+    // Ne jamais convertir une panne de lecture en collections vides : les appelants
+    // peuvent alors distinguer « aucun fait » de « mémoire momentanément indisponible ».
     fun lieux(app: JarvisApp): Map<String, String> = lire(app).optJSONObject("lieux")?.let { o -> o.keys().asSequence().associateWith { o.optString(it) } }.orEmpty()
     fun surnoms(app: JarvisApp): List<Surnom> = lire(app).optJSONArray("surnoms")?.let { a ->
         (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Surnom(it.optString("surnom"), it.optString("cible"), it.optString("domaine", "autre")) }
@@ -101,7 +117,11 @@ object Faits {
 
     /** Bloc donné à Jarvis et à Hermès à CHAQUE demande (vide s'il n'y a rien). */
     fun bloc(app: JarvisApp): String {
-        val l = lieux(app); val s = surnoms(app); val fa = faits(app)
+        val donnees = try { Triple(lieux(app), surnoms(app), faits(app)) }
+        catch (e: Exception) {
+            return "MÉMOIRE DURABLE TEMPORAIREMENT INACCESSIBLE : le coffre Obsidian n'a pas pu être lu. Ne prétends pas qu'aucun lieu, surnom ou fait n'est enregistré ; n'invente aucune valeur et demande de réessayer après rétablissement de l'accès."
+        }
+        val (l, s, fa) = donnees
         if (l.isEmpty() && s.isEmpty() && fa.isEmpty()) return ""
         return buildString {
             append("MÉMOIRE FIABLE de l'utilisateur (à utiliser sans la redemander ; les outils remplacent déjà eux-mêmes un surnom par sa cible) :")
@@ -111,7 +131,14 @@ object Faits {
         }.take(1600)
     }
 
-    fun texte(app: JarvisApp): String = markdown(lire(app)).let { if (lieux(app).isEmpty() && surnoms(app).isEmpty() && faits(app).isEmpty()) "Aucun fait mémorisé pour l'instant." else it }
+    fun texte(app: JarvisApp): String {
+        val o = runCatching { lire(app) }.getOrElse { return "⚠️ Mémoire des faits inaccessible dans le coffre Obsidian ; aucune donnée locale de remplacement n'a été utilisée." }
+        val nbLieux = o.optJSONObject("lieux")?.length() ?: 0
+        val nbSurnoms = o.optJSONArray("surnoms")?.length() ?: 0
+        val nbFaits = o.optJSONObject("faits")?.length() ?: 0
+        return if (nbLieux == 0 && nbSurnoms == 0 && nbFaits == 0)
+            "Aucun fait mémorisé pour l'instant." else markdown(o)
+    }
 
     // ------------------------------------------------------------------ application aux outils
 
@@ -122,7 +149,10 @@ object Faits {
     fun appliquer(app: JarvisApp, outil: String, a: JSONObject): JSONObject {
         // Outils qui manipulent la mémoire ou les noms eux-mêmes : jamais de remplacement.
         if (outil.startsWith("memoire") || outil.startsWith("note") || outil.contains("nommer") || outil.startsWith("carnet") || outil == "modes_jarvis") return a
-        val l by lazy { lieux(app) }; val s by lazy { surnoms(app) }
+        // Si le coffre est indisponible, ne bloque pas l'outil demandé : on laisse ses
+        // arguments inchangés. Le bloc mémoire signale séparément l'indisponibilité à l'IA.
+        val l by lazy { runCatching { lieux(app) }.getOrDefault(emptyMap()) }
+        val s by lazy { runCatching { surnoms(app) }.getOrDefault(emptyList()) }
         var copie: JSONObject? = null
         for (k in a.keys().asSequence().toList()) {
             val v = a.opt(k) as? String ?: continue
@@ -220,13 +250,13 @@ object Faits {
 
     /** Une fois : les notes déjà prises (carnet, mémoire) sont relues pour en tirer les faits (adresse, surnoms…). */
     fun rattrapage(app: JarvisApp) {
-        if (lire(app).optBoolean("rattrapage_fait")) return
+        if (runCatching { lire(app).optBoolean("rattrapage_fait") }.getOrElse { return }) return
         scope.launch {
             val textes = runCatching { Carnet.toutes(app).map { it.texte } }.getOrDefault(emptyList()) +
                 runCatching { app.memo.all().values.toList() }.getOrDefault(emptyList())
             textes.forEach { runCatching { extraireRapide(app, it) } }
             textes.joinToString("\n---\n").chunked(1800).take(6).forEach { runCatching { extraireIa(app, it) } }
-            synchronized(this@Faits) { val o = lire(app); o.put("rattrapage_fait", true); runCatching { f(app).writeText(o.toString(2)) } }
+            synchronized(this@Faits) { val o = lire(app); o.put("rattrapage_fait", true); ecrire(app, o) }
         }
     }
 }
