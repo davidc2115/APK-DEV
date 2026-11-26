@@ -106,7 +106,12 @@ object Serveur {
             if (connu.isBlank()) st.sshFp.set(fp)
             else if (connu != fp) {
                 s.disconnect()
-                throw IllegalStateException("L'empreinte du serveur SSH a changé ($fp au lieu de $connu). Si c'est normal (réinstallation), efface-la dans Réglages › Maison › Serveur.")
+                val mismatch = IllegalStateException("Empreinte SSH inattendue sur $\{cibleAdr.first}:$\{cibleAdr.second} ($fp au lieu de $connu).")
+                essais += "$\{cibleAdr.first}:$\{cibleAdr.second} → hôte SSH différent (empreinte non reconnue)"
+                erreur = mismatch
+                // Un Wi-Fi tiers peut réutiliser le même sous-réseau privé : on essaie l'adresse distante,
+                // mais elle devra présenter exactement la même empreinte connue.
+                continue
             }
             return s
         }
@@ -193,6 +198,7 @@ object Serveur {
         val reseau = when { vpn -> "VPN actif"; mobile -> "données mobiles"; wifi -> "Wi-Fi"; else -> "réseau inconnu" }
         val ou = when {
             surMaison -> "🏠 accès local confirmé (route Wi-Fi/VPN et SSH joignable) → connexion LOCALE au serveur ($lan)"
+            lan == null && distant.isNotBlank() -> "🌍 réseau du téléphone : $reseau → connexion SSH À DISTANCE par $distant (aucune IP LAN enregistrée)"
             lan == null -> "réseau du téléphone : $reseau (adresse locale du serveur pas encore relevée)"
             else -> "🌍 téléphone hors du réseau de la maison ($reseau) → connexion À DISTANCE" +
                 (if (distant.isNotBlank()) " par $distant" else " : aucune adresse SSH distante configurée")
