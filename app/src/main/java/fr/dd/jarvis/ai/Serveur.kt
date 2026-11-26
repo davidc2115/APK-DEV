@@ -66,7 +66,10 @@ object Serveur {
         val lanIp = st.serveurIpLocale.value.trim().takeIf { ipPrivee(it) }
         // Une adresse locale n'est prioritaire que si Android confirme une route Wi-Fi/VPN et que SSH répond dessus.
         // Les IP privées attribuées par l'opérateur mobile ne sont jamais utilisées pour conclure « même réseau ».
-        val lan = lanIp?.let { listOf(it to local.second, it to 22).distinct() }.orEmpty()
+        val lan = buildList {
+            if (lanIp != null) { add(lanIp to local.second); add(lanIp to 22) }
+            if (ipPrivee(local.first)) { add(local.first to local.second); add(local.first to 22) }
+        }.distinct()
         val surReseauMaison = (lan + listOf(local)).any { (hote, port) ->
             ipPrivee(hote) && telephoneSurReseau(app, hote, port)
         }
@@ -154,8 +157,9 @@ object Serveur {
                 adresse.address is java.net.Inet4Address &&
                     memeSousReseau(ipServeur, adresse.address.hostAddress.orEmpty(), adresse.prefixLength)
             }
+            val routeSpecifique = lp.routes.any { it.destination.prefixLength > 0 && it.matches(cible) }
             val routeVpn = vpn && lp.routes.any { it.matches(cible) }
-            if (!memeLan && !routeVpn) return@any false
+            if (!memeLan && !routeSpecifique && !routeVpn) return@any false
             if (port == null) return@any true
             if (port !in 1..65535) return@any false
             runCatching {
@@ -184,7 +188,8 @@ object Serveur {
         val wifi = caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true ||
             cm?.allNetworks?.any { cm.getNetworkCapabilities(it)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true } == true
         val distant = st.sshHostDistant.value.trim().ifBlank { st.sshHost.value.trim().takeIf { !ipPrivee(it) }.orEmpty() }
-        val surMaison = lan != null && telephoneSurReseau(app, lan, st.sshPort.value.toIntOrNull() ?: 22)
+        val surMaison = lan != null && listOf(st.sshPort.value.toIntOrNull() ?: 22, 22).distinct()
+            .any { telephoneSurReseau(app, lan, it) }
         val reseau = when { vpn -> "VPN actif"; mobile -> "données mobiles"; wifi -> "Wi-Fi"; else -> "réseau inconnu" }
         val ou = when {
             surMaison -> "🏠 accès local confirmé (route Wi-Fi/VPN et SSH joignable) → connexion LOCALE au serveur ($lan)"
