@@ -50,6 +50,36 @@ class RegistreApprentissageTest {
     }
 
     @Test
+    fun listeHabitudesEnApprentissageEstLueDepuisLeRegistreUnique() {
+        val dir = Files.createTempDirectory("registre-habitudes-en-cours").toFile()
+        try {
+            val r = registre(dir)
+            val id = r.enregistrerPreuveHabitude(
+                "Réponses concises", "Préférence", "Memo.apprendre",
+                "Je préfère les réponses courtes", "conversation 1", "memo.apprendre"
+            )
+            val premier = r.habitudeApprentissage(id)
+            assertEquals(RegistreApprentissage.ETAT_OBSERVED, premier?.etat)
+            assertEquals(1, premier?.preuves)
+            assertEquals(1, r.habitudesEnApprentissage().size)
+
+            r.enregistrerPreuveHabitude("Réponses concises", "Préférence", "Memo.apprendre",
+                "Va droit au but dans les explications", "conversation 2", "memo.apprendre")
+            r.enregistrerPreuveHabitude("Réponses concises", "Préférence", "Memo.apprendre",
+                "Privilégie les formulations synthétiques", "conversation 3", "memo.apprendre")
+            val candidate = r.habitudeApprentissage(id)
+            assertEquals(RegistreApprentissage.ETAT_CANDIDATE, candidate?.etat)
+            assertEquals(3, candidate?.preuves)
+
+            r.changerEtat(id, RegistreApprentissage.ETAT_APPROVED, true)
+            r.changerEtat(id, RegistreApprentissage.ETAT_TESTING, true)
+            r.changerEtat(id, RegistreApprentissage.ETAT_ACTIVE, true)
+            assertTrue(r.habitudesEnApprentissage().isEmpty())
+            assertEquals(RegistreApprentissage.ETAT_ACTIVE, r.habitudeApprentissage(id)?.etat)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
     fun transitionDirecteVersActiveEstRefusee() {
         val dir = Files.createTempDirectory("registre-transition").toFile()
         try {
