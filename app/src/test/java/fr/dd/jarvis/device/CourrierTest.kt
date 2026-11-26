@@ -108,4 +108,25 @@ class CourrierTest {
         // Classement retenu pour l'expéditeur.
         assertEquals(Courrier.PERSO to true, Courrier.domaine(el("EDF", "votre facture"), "", data, mapOf(Courrier.cleEmetteur("EDF") to Courrier.PERSO)))
     }
+    @Test fun rendezVousSansDateResteDansLeCourrierPourEtreComplete() {
+        val r = a("M. Dupont", "Bonjour, je vous confirme notre rendez-vous pour votre installation. Je vous rappelle l'horaire.").single()
+        assertEquals(Courrier.RDV, r.type)
+        assertNull(r.dateRdv)
+        assertEquals("date non précisée", r.statut)
+    }
+
+    @Test fun factureEtDevisSansMontantSontConserves() {
+        val f = a("Contact inconnu", "Bonjour, veuillez trouver votre facture en pièce jointe.").single()
+        assertEquals(Courrier.FACTURE, f.type)
+        assertNull(f.montant)
+        val d = a("Artisan Martin", "Votre devis numéro 4587 est prêt, merci de nous confirmer votre accord.").single()
+        assertEquals(Courrier.DEVIS, d.type)
+        assertNull(d.montant)
+    }
+
+    @Test fun expeditionAvecFormulationLibreEstReconnue() {
+        val c = a("Transport", "Votre paquet a été remis au transporteur et est en cours d'expédition.").single()
+        assertEquals(Courrier.COLIS, c.type)
+    }
+
 }
