@@ -99,6 +99,9 @@
         android:theme="@style/Theme.Jarvis"
         android:usesCleartextTraffic="true">
 
+        <!-- Modèle de lecture de texte (OCR) téléchargé par Google Play services dès l'installation. -->
+        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="ocr" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

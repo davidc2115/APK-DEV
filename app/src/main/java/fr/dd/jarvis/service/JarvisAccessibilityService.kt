@@ -289,6 +289,11 @@ class JarvisAccessibilityService : AccessibilityService() {
         return null
     }
 
+    /** Waze / Maps est-il l'appli affichée au premier plan (avant de toucher l'écran à un endroit lu sur une capture) ? */
+    fun guidageAuPremierPlan(paquets: Set<String>): Boolean =
+        activePackageName() in paquets ||
+            runCatching { windows.any { it.isActive && it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION && it.root?.packageName?.toString() in paquets } }.getOrDefault(false)
+
     /** null : Waze / Maps n'est pas affiché ; vrai : l'aperçu attend encore le bouton de départ ; faux : affiché, sans ce bouton. */
     fun apercuGuidage(paquets: Set<String>): Boolean? {
         val r = racinesGuidage(paquets)

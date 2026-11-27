@@ -103,6 +103,9 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:21.2.0")
     // Gemini Nano sur l’appareil via Android AICore.
     implementation("com.google.mlkit:genai-prompt:1.0.0-beta4")
+    // Lecture de texte à l'écran (bouton « Y aller » de Waze, dessiné hors accessibilité). Version Google Play services :
+    // aucun code natif dans l'APK (alignement 16 Ko préservé), modèle téléchargé par le téléphone.
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
 
     // ADB intégré (Débogage sans fil) : droits « adb » sans installer Shizuku
     // Bibliothèques natives alignées sur 16 Ko (Android 15+/16 avec pages de 16 Ko : pas de mode de compatibilité ni

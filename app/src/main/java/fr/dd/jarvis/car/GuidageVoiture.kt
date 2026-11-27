@@ -258,21 +258,22 @@ object GuidageVoiture {
             }
             // Ouverte mais pas partie : JARVIS appuie lui-même sur le bouton de départ (le calcul de l'itinéraire peut
             // prendre plusieurs secondes avant que le bouton n'apparaisse), puis revérifie.
-            val appui = appuyerDepart(journal, nomAppli, 20)
-            if (appui != null) {
+            val appuiFait = appuyerDepart(journal, nomAppli, 12_000)
+            val appui = appuiFait?.libelle
+            if (appuiFait != null) {
                 if (attendre(System.currentTimeMillis() - 500, 6_000, app) == true) {
                     journal.noter("voiture", "guidage démarré par $nomAppli vers $nom après appui sur « $appui »")
                     return "🧭 Itinéraire vers $nom lancé dans $nomAppli."
                 }
                 // Aucun signal système, mais l'aperçu s'est fermé et l'appli reste affichée : elle est passée en guidage.
-                if (apercuFerme()) {
+                if (apercuFerme(appuiFait)) {
                     journal.noter("voiture", "$nomAppli : aperçu fermé après appui sur « $appui » (guidage en cours, sans notification de navigation)")
                     return "🧭 Itinéraire vers $nom lancé dans $nomAppli (j'ai appuyé sur « $appui »)."
                 }
                 // Le bouton est toujours là : l'appui n'a pas été pris, nouvel essai.
-                val second = appuyerDepart(journal, nomAppli, 4)
-                if (second != null && (attendre(System.currentTimeMillis() - 500, 5_000, app) == true || apercuFerme())) {
-                    journal.noter("voiture", "guidage démarré par $nomAppli vers $nom au second appui sur « $second »")
+                val second = appuyerDepart(journal, nomAppli, 4_000)
+                if (second != null && (attendre(System.currentTimeMillis() - 500, 5_000, app) == true || apercuFerme(second))) {
+                    journal.noter("voiture", "guidage démarré par $nomAppli vers $nom au second appui sur « ${second.libelle} »")
                     return "🧭 Itinéraire vers $nom lancé dans $nomAppli."
                 }
             } else {
@@ -307,25 +308,60 @@ object GuidageVoiture {
     private fun diagnosticEcran(): String =
         fr.dd.jarvis.service.JarvisAccessibilityService.instance?.let { acc -> runCatching { acc.resumeGuidage(PAQUETS) }.getOrNull() } ?: "accessibilité inactive"
 
-    /** L'aperçu de l'itinéraire a disparu (plus de bouton de départ) alors que Waze / Maps est toujours affiché. */
-    private suspend fun apercuFerme(): Boolean {
+    /**
+     * L'aperçu de l'itinéraire a disparu (plus de bouton de départ) alors que Waze / Maps est toujours affiché. Bouton
+     * trouvé par lecture de l'écran : on relit l'écran (l'accessibilité ne le voyait pas, son silence ne prouve rien).
+     */
+    private suspend fun apercuFerme(appui: Appui): Boolean {
         val acc = fr.dd.jarvis.service.JarvisAccessibilityService.instance ?: return false
         delay(1_500)
-        return runCatching { acc.apercuGuidage(PAQUETS) }.getOrNull() == false
+        if (!appui.parLecture) return runCatching { acc.apercuGuidage(PAQUETS) }.getOrNull() == false
+        if (!acc.guidageAuPremierPlan(PAQUETS)) return false
+        val l = lireEcran(acc) ?: return false
+        return l.cible == null && l.lignes.isNotEmpty()
+    }
+
+    /** Capture de l'écran lue par reconnaissance de texte, seulement quand Waze / Maps est au premier plan. */
+    private suspend fun lireEcran(acc: fr.dd.jarvis.service.JarvisAccessibilityService): OcrDepart.Lecture? {
+        if (!runCatching { acc.guidageAuPremierPlan(PAQUETS) }.getOrDefault(false)) return null
+        val image = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { acc.capture(3_000) }.getOrNull() } ?: return null
+        return try { OcrDepart.lire(image) } finally { runCatching { image.recycle() } }
     }
 
     private fun phraseSecours(voiture: Boolean): String =
         if (voiture) "Touche la notification « 🧭 Itinéraire » sur l'écran de la voiture (ou sur le téléphone) : Android Auto démarre alors le guidage."
         else "Touche la notification « 🧭 Itinéraire » sur le téléphone, ou le bouton « Y aller » dans l'application."
 
-    /** Bouton de départ de Waze / Maps touché par le service d'accessibilité ([essais] × 0,5 s d'attente de son affichage). */
-    private suspend fun appuyerDepart(journal: fr.dd.jarvis.voice.JournalVoix, nomAppli: String, essais: Int = 8): String? {
+    private class Appui(val libelle: String, val parLecture: Boolean)
+
+    /**
+     * Bouton de départ de Waze / Maps touché, en l'attendant jusqu'à [ms] (le calcul de l'itinéraire précède son
+     * affichage). D'abord par l'accessibilité ; si Waze ne décrit pas son bouton, par lecture de l'écran puis appui au
+     * doigt à l'endroit lu.
+     */
+    private suspend fun appuyerDepart(journal: fr.dd.jarvis.voice.JournalVoix, nomAppli: String, ms: Long): Appui? {
         val acc = fr.dd.jarvis.service.JarvisAccessibilityService.instance ?: return null
-        repeat(essais) {
-            val l = runCatching { acc.cliquerDepartGuidage(PAQUETS) }.getOrNull()
-            if (l != null) { journal.noter("voiture", "$nomAppli : bouton « $l » appuyé pour démarrer le guidage"); return l }
+        val debut = System.currentTimeMillis()
+        var derniereLecture = 0L
+        var lu: List<String> = emptyList()
+        while (System.currentTimeMillis() - debut < ms) {
+            runCatching { acc.cliquerDepartGuidage(PAQUETS) }.getOrNull()?.let { l ->
+                journal.noter("voiture", "$nomAppli : bouton « $l » appuyé pour démarrer le guidage"); return Appui(l, false)
+            }
+            if (System.currentTimeMillis() - debut >= 1_500 && System.currentTimeMillis() - derniereLecture >= 2_000) {
+                derniereLecture = System.currentTimeMillis()
+                val l = lireEcran(acc)
+                if (l != null) lu = l.lignes
+                val c = l?.cible
+                if (c != null && acc.guidageAuPremierPlan(PAQUETS) && acc.tap(c.x, c.y)) {
+                    journal.noter("voiture", "$nomAppli : « ${c.libelle} » lu à l'écran et touché (${c.x.toInt()}, ${c.y.toInt()})")
+                    return Appui(c.libelle, true)
+                }
+            }
             delay(500)
         }
+        journal.noter("voiture", "$nomAppli : bouton de départ introuvable · lu à l'écran : " +
+            (if (lu.isEmpty()) "rien (Waze pas au premier plan, capture refusée ou modèle de lecture pas encore téléchargé)" else lu.take(20).joinToString(" | ") { it.replace('\n', ' ').take(40) }))
         return null
     }
 
