@@ -2463,6 +2463,9 @@ private fun PlansLibresPanel(store: fr.dd.jarvis.data.Store) {
 @Composable
 private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val hfScope = rememberCoroutineScope()
+    var hfTest by remember { mutableStateOf("") }
+    var hfTestEnCours by remember { mutableStateOf(false) }
     HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — fournisseurs") {
         Text("Clés conservées dans le stockage chiffré Android. Les générations peuvent consommer des crédits ou l'abonnement du fournisseur.", color = HudDim, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
@@ -2477,10 +2480,24 @@ private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
         }
         Spacer(Modifier.height(12.dp))
         Text("Hugging Face — service gratuit avec quota limité", color = HudText, fontSize = 13.sp)
-        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()) }, Modifier.fillMaxWidth(), label = "Token Hugging Face", password = true)
-        Text("Créer un token Hugging Face", color = HudDim, fontSize = 12.sp, modifier = Modifier.clickable {
-            ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://huggingface.co/settings/tokens")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-        })
+        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()); hfTest = "" }, Modifier.fillMaxWidth(), label = "Token Hugging Face", password = true)
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton(if (hfTestEnCours) "Test…" else "Tester le jeton", enabled = store.huggingFaceToken.value.isNotBlank() && !hfTestEnCours) {
+                hfTestEnCours = true
+                hfScope.launch {
+                    hfTest = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        runCatching { "✅ Jeton valide — compte " + fr.dd.jarvis.ai.HfImage.compte(store.huggingFaceToken.value) +
+                            ". Quota GPU gratuit : quelques minutes par jour (images et animations), rechargé au fil des heures." }
+                            .getOrElse { "❌ " + (it.message ?: "vérification impossible") }
+                    }
+                    hfTestEnCours = false
+                }
+            }
+            HudButton("Créer un token") {
+                ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://huggingface.co/settings/tokens")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        }
+        if (hfTest.isNotBlank()) Text(hfTest, color = if (hfTest.startsWith("✅")) HudText else HudDim, fontSize = 12.sp)
         Text("Ordre vidéo : Hugging Face (quota gratuit limité), puis Gemini Omni si le projet dispose d’un quota vidéo, puis Dreamina. Dreamina peut facturer les générations. fal.ai reste disponible pour l’animation d’image.", color = HudDim, fontSize = 11.sp)
     }
 }

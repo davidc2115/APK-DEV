@@ -250,4 +250,32 @@ class TikTokStudioTest {
             "animation IA de l'image 1 : x", "animation IA de l'image 2 : x"))
         assertEquals(listOf("images 1, 2 : quota épuisé", "image 3 : autre", "montage complet : codec", "animation IA des images 1, 2 : x"), r)
     }
+
+    // ------------------------------------------------------------------ vidéo saine, voix off, jeton Hugging Face
+
+    /** Images abîmées par l'encodeur matériel (blocs remis à zéro) détectées ; une image H.264 normale passe. */
+    @Test fun imagesAbimeesDetectees() {
+        val saine = byteArrayOf(0, 0, 0, 1, 0x41, 0x9a.toByte(), 0x00, 0x37, 0xf2.toByte(), 0x57) + ByteArray(300) { ((it * 7 + 3) % 251 + 1).toByte() }
+        assertFalse(Montage.echantillonAbime(saine))
+        val abimee = byteArrayOf(0, 0, 0x5b, 0x03) + ByteArray(64) + byteArrayOf(0xa1.toByte(), 0x78, 0x08)
+        assertTrue(Montage.echantillonAbime(abimee))
+        assertFalse(Montage.echantillonAbime(abimee, 12))   // seuls les octets lus comptent
+        assertTrue(Montage.encodeurLogiciel("c2.android.avc.encoder"))
+        assertTrue(Montage.encodeurLogiciel("OMX.google.h264.encoder"))
+        assertFalse(Montage.encodeurLogiciel("c2.mtk.avc.encoder"))
+    }
+
+    /** Chanson seulement si TA phrase la demande : jamais à cause du champ « paroles » des arguments de l'IA. */
+    @Test fun chansonSeulementSiDemandee() {
+        assertFalse(TikTokTools.chansonDemandee("Crée une vidéo TikTok sur ma niche avec Pixabay"))
+        assertTrue(TikTokTools.chansonDemandee("Fais une vidéo avec une chanson sur le phénix"))
+        assertTrue(TikTokTools.chansonDemandee("une vidéo chantée en français"))
+        assertFalse(TikTokTools.chansonDemandee("une vidéo sans chanson, juste la voix off"))
+    }
+
+    /** Compte Hugging Face lu dans la réponse de whoami-v2. */
+    @Test fun compteHuggingFace() {
+        assertEquals("« David2135 » (compte gratuit)", HfImage.descriptionCompte(JSONObject("""{"type":"user","name":"David2135","isPro":false}""")))
+        assertEquals("« x » (compte PRO)", HfImage.descriptionCompte(JSONObject("""{"name":"x","isPro":true}""")))
+    }
 }

@@ -136,7 +136,7 @@ object VideoGen {
                         val donnee = ligne.removePrefix("data:").trim()
                         when (typeEvenement) {
                             "complete" -> return telechargerClip(token, donnee)
-                            "error" -> throw ApiException(500, erreurGeneration(donnee))
+                            "error" -> throw ApiException(500, erreurGeneration(token, donnee))
                             else -> { /* "generating" / heartbeat : on continue d'attendre */ }
                         }
                     }
@@ -165,9 +165,14 @@ object VideoGen {
         else -> "génération refusée ($code) : ${brut.take(200)}"
     }
 
-    private fun erreurGeneration(donnee: String): String = when {
-        donnee.contains("quota", true) || donnee.contains("GPU", true) -> "quota GPU gratuit du jour épuisé sur Hugging Face (revient demain, ou passe en compte PRO pour plus de quota)"
-        else -> "génération refusée par Hugging Face : ${donnee.take(250)}"
+    private fun erreurGeneration(token: String, donnee: String): String {
+        val detail = runCatching { JSONObject(donnee).let { it.optString("error").ifBlank { it.optString("title") } } }.getOrDefault(donnee).trim()
+        return when {
+            HfImage.quota(detail) -> "quota GPU gratuit du jour épuisé sur Hugging Face (il se recharge au fil des heures)"
+            // Refus sans explication (« null ») : jeton refusé ou quota épuisé, vérifié auprès de Hugging Face.
+            detail.isBlank() || detail == "null" -> HfImage.diagnosticRefus(token)
+            else -> "génération refusée par Hugging Face : ${detail.take(250)}"
+        }
     }
 
     /** La réponse SSE « complete » est un tableau JSON dont le 1er élément décrit le fichier vidéo généré (objet

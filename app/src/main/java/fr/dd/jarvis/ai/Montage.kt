@@ -240,7 +240,7 @@ object Montage {
             ImageGen.generate(app, prompt, "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768).first
         }.onFailure {
             echecs += "image ${rang + 1} : ${it.message?.take(220)}"
-            if (Regex("(?i)quota|épuisé|allocation|aucun compte").containsMatchIn(it.message.orEmpty())) imagesIaEpuisees = true
+            if (Regex("(?i)quota|épuisé|allocation|aucun compte|jeton").containsMatchIn(it.message.orEmpty())) imagesIaEpuisees = true
         }.getOrNull()?.also { imagesParPlan[rang] = it }
         // Photo ou illustration libre de droits (Pexels / Pixabay) : le secours gratuit des images IA.
         suspend fun photo(i: Int, p: Plan): File? {
@@ -411,7 +411,8 @@ object Montage {
         if (fin != null) segments += Segment(fin.first, fin.second, dureeSignature, if (d.textes) sb.plans.lastOrNull()?.texte.orEmpty() else "")
 
         // 4. Voix off (synthèse vocale du téléphone) et musique.
-        val avecParoles = d.paroles.isNotBlank()
+        // Une chanson n'est possible qu'avec un générateur de musique (fal.ai) : sinon, voix off (jamais une vidéo muette).
+        val avecParoles = d.paroles.isNotBlank() && ImageToVideoGen.disponible(app)
         val texteVoix = when (d.voixOff.trim().lowercase()) {
             "aucune", "non", "false", "sans", "" -> ""
             // Scénario sans voix off : les textes des plans sont dits (jamais une vidéo muette sans raison).
@@ -468,29 +469,52 @@ object Montage {
         }
 
         // 5. Montage (avec repli progressif si le téléphone refuse un effet).
-        progres("🎞️ Montage…")
         val nom = (if (d.tiktok) "tiktok_" else "video_") + System.currentTimeMillis() + ".mp4"
         val sortie = File(dossier(app), nom)
-        data class Essai(val avecTexte: Boolean, val avecSon: Boolean, val l: Int, val h: Int, val libelle: String)
+        // Encodeur LOGICIEL d'Android d'abord : l'encodeur matériel de certains téléphones (Xiaomi / HyperOS notamment) rend
+        // des images abîmées (blocs remis à zéro → bandes et images figées sur TikTok). Chaque export est vérifié image par
+        // image ; un export abîmé est refait autrement, et le moins abîmé n'est gardé qu'en dernier recours.
+        data class Essai(val avecTexte: Boolean, val avecSon: Boolean, val l: Int, val h: Int, val libelle: String, val logiciel: Boolean = true)
         val (l720, h720) = if (vertical) 720 to 1280 else 1280 to 720
         val essais = listOfNotNull(
             Essai(true, true, largeur, hauteur, "complet"),
             if (largeur != l720) Essai(true, true, l720, h720, "en 720p") else null,
+            Essai(true, true, largeur, hauteur, "encodeur matériel", logiciel = false),
             Essai(false, true, l720, h720, "sans texte à l'écran"),
             Essai(false, false, l720, h720, "sans texte ni son")
         )
+        val complets = setOf("complet", "en 720p", "encodeur matériel")
         var abandons = ""
         var ok = false
-        for ((avecTexte, avecSon, l, h, libelle) in essais) {
+        var secours: File? = null
+        var secoursAbimees = Int.MAX_VALUE
+        var secoursLibelle = ""
+        for ((avecTexte, avecSon, l, h, libelle, logiciel) in essais) {
+            progres("🎞️ Montage" + (if (libelle != "complet") " ($libelle)" else "") + "…")
             val r = runCatching {
                 exporter(app, segments, if (avecSon) voix else emptyList(), if (avecSon) musique else null, avecTexte, d.garderSon && avecSon, l, h, avecParoles, sortie,
-                    if (avecTexte && avecSon) reperes else emptyList(), tiktok = d.tiktok, bandeau = if (avecTexte && d.tiktok) sb.bandeau else "")
+                    if (avecTexte && avecSon) reperes else emptyList(), tiktok = d.tiktok, bandeau = if (avecTexte && d.tiktok) sb.bandeau else "", logiciel = logiciel)
             }
-            if (r.isSuccess) { ok = true; if (libelle != "complet" && libelle != "en 720p") abandons = libelle; break }
-            echecs += "montage $libelle : ${r.exceptionOrNull()?.message?.take(140)}"
+            if (r.isFailure) { echecs += "montage $libelle : ${r.exceptionOrNull()?.message?.take(140)}"; continue }
+            progres("🔎 Vérification de la vidéo…")
+            val abimees = withContext(Dispatchers.IO) { imagesAbimees(sortie) }
+            if (abimees == 0) { ok = true; if (libelle !in complets) abandons = libelle; break }
+            echecs += "montage $libelle : $abimees images abîmées par l'encodeur du téléphone, refait autrement"
+            if (abimees < secoursAbimees) {
+                secours = File(travail, "secours.mp4").also { sortie.copyTo(it, overwrite = true) }
+                secoursAbimees = abimees; secoursLibelle = libelle
+            }
+        }
+        if (!ok && secours != null) {
+            secours.copyTo(sortie, overwrite = true)
+            ok = true
+            if (secoursLibelle !in complets) abandons = secoursLibelle
+            echecs += "aucun export sans défaut : vidéo gardée avec $secoursAbimees images abîmées (encodeur vidéo du téléphone défaillant)"
         }
         travail.deleteRecursively()
         if (!ok) return "❌ Le montage a échoué sur ce téléphone :\n- " + regrouper(echecs).joinToString("\n- ")
+        // Export réussi : les essais ratés en chemin ne sont plus des échecs à signaler.
+        echecs.removeAll { it.startsWith("montage ") }
 
         val dossierCoffre = if (d.tiktok) "JARVIS/Vidéos TikTok" else "JARVIS/Vidéos"
         val loc = runCatching { app.obsidian.saveBytes(dossierCoffre, nom, sortie.readBytes(), "video/mp4") }.getOrDefault("")
@@ -645,6 +669,45 @@ object Montage {
         }
         return out.distinctBy { it.absolutePath }.map { it to (it.extension.lowercase() in IMAGE) }
     }
+
+    /** Encodeurs logiciels d'Android (Google) : fiables partout, à la différence de certains encodeurs matériels. */
+    internal fun encodeurLogiciel(nom: String) = nom.startsWith("c2.android.") || nom.startsWith("OMX.google.")
+
+    /**
+     * Image vidéo abîmée : au moins 16 octets nuls d'affilée, impossible dans une image H.264 / H.265 valide (le format
+     * interdit plus de deux zéros de suite dans une image) mais typique d'un encodeur matériel défaillant.
+     */
+    internal fun echantillonAbime(octets: ByteArray, taille: Int = octets.size): Boolean {
+        var suite = 0
+        for (i in 0 until minOf(taille, octets.size)) {
+            if (octets[i].toInt() == 0) { if (++suite >= 16) return true } else suite = 0
+        }
+        return false
+    }
+
+    /** Nombre d'images abîmées dans la vidéo [f] (lecture de chaque image compressée) ; 0 si la vérification échoue. */
+    private fun imagesAbimees(f: File): Int = runCatching {
+        val ex = android.media.MediaExtractor()
+        try {
+            ex.setDataSource(f.absolutePath)
+            val piste = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(android.media.MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+                ?: return@runCatching 0
+            ex.selectTrack(piste)
+            val tampon = java.nio.ByteBuffer.allocate(8 * 1024 * 1024)
+            val octets = ByteArray(tampon.capacity())
+            var n = 0
+            while (true) {
+                tampon.clear()
+                val t = ex.readSampleData(tampon, 0)
+                if (t < 0) break
+                tampon.position(0)
+                tampon.get(octets, 0, t)
+                if (echantillonAbime(octets, t)) n++
+                if (!ex.advance()) break
+            }
+            n
+        } finally { ex.release() }
+    }.getOrDefault(0)
 
     private fun dureeMs(f: File): Long? = runCatching {
         MediaMetadataRetriever().run {
@@ -838,7 +901,7 @@ object Montage {
     private suspend fun exporter(
         app: JarvisApp, segments: List<Segment>, voix: List<File>, musique: File?, avecTexte: Boolean, garderSon: Boolean,
         largeur: Int, hauteur: Int, chanson: Boolean, sortie: File, reperes: List<SousTitres.Repere> = emptyList(),
-        tiktok: Boolean = false, bandeau: String = ""
+        tiktok: Boolean = false, bandeau: String = "", logiciel: Boolean = true
     ) {
         val presentation = Presentation.createForWidthAndHeight(largeur, hauteur, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP)
         var debutMs = 0L
@@ -911,7 +974,16 @@ object Montage {
         withContext(Dispatchers.Main) {
             suspendCancellableCoroutine<Unit> { cont ->
                 // Vrai portrait (pas une vidéo couchée + rotation, mal lue par TikTok), H.264, débit élevé (qualité TikTok).
+                // Encodeur logiciel (Google) ou, en second essai, celui du téléphone.
+                val selecteur = androidx.media3.transformer.EncoderSelector { mime ->
+                    val tous = androidx.media3.transformer.EncoderUtil.getSupportedEncoders(mime)
+                    if (!logiciel) tous
+                    else com.google.common.collect.ImmutableList.copyOf(tous.filter { info ->
+                        encodeurLogiciel(info.name) || (android.os.Build.VERSION.SDK_INT >= 29 && info.isSoftwareOnly)
+                    })
+                }
                 val encodeur = androidx.media3.transformer.DefaultEncoderFactory.Builder(app)
+                    .setVideoEncoderSelector(selecteur)
                     .setRequestedVideoEncoderSettings(androidx.media3.transformer.VideoEncoderSettings.Builder()
                         .setBitrate(if (largeur * hauteur >= 1080 * 1920) 12_000_000 else 8_000_000).build())
                     .setEnableFallback(true).build()

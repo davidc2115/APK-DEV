@@ -16,6 +16,10 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
         // succès au lieu d'appeler quoi que ce soit.
         val KEYWORDS = Regex("tiktok|tik tok|vid[ée]o|montage|clip|reels?|shorts?|niches?|concurren\\w*|hashtags?|tendances?|brouillons? tiktok|id[ée]es? de (vid[ée]os?|contenus?)", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
+        /** Ta phrase demande-t-elle une chanson chantée (avec paroles) plutôt qu'une voix off ? « sans chanson » : non. */
+        internal fun chansonDemandee(phrase: String): Boolean =
+            Regex("(?i)chanson|paroles|chant[ée]e|qui chante|lyrics").containsMatchIn(phrase) &&
+                !Regex("(?i)(sans|pas de|aucune) (chanson|paroles)").containsMatchIn(phrase)
         val NAMES = setOf("tiktok_connexion", "tiktok_deconnexion", "tiktok_profil", "tiktok_mes_videos", "tiktok_analyse", "tiktok_script", "tiktok_video", "video_montage",
             "tiktok_tendances", "tiktok_niche", "tiktok_concurrents", "tiktok_propositions", "tiktok_brouillon")
     }
@@ -209,9 +213,9 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                     format = if (name == "tiktok_video") "vertical" else a.optString("format").ifBlank { "vertical" },
                     nombre = a.optString("nombre").filter { it.isDigit() }.toIntOrNull() ?: 1,
                     musique = a.optString("musique").ifBlank { "auto" },
-                    // TikTok : voix off + musique SANS paroles ; une chanson seulement si TU la demandes (sinon elle remplaçait la voix).
-                    paroles = a.optString("paroles").trim().takeIf { name != "tiktok_video" ||
-                        Regex("(?i)chanson|paroles|chant[ée]e?|qui chante|lyrics").containsMatchIn(derniereDemande() + " " + brut) }.orEmpty(),
+                    // TikTok : voix off + musique SANS paroles ; une chanson seulement si TA phrase la demande (sinon elle remplaçait
+                    // la voix). Jamais d'après les arguments de l'IA : ils contiennent le champ « paroles » lui-même.
+                    paroles = a.optString("paroles").trim().takeIf { name != "tiktok_video" || chansonDemandee(derniereDemande()) }.orEmpty(),
                     // TikTok : toujours une voix off, sauf si TU as dit « sans voix » (l'IA la retirait parfois d'elle-même).
                     voixOff = a.optString("voix_off").ifBlank { "auto" }.let { v ->
                         if (name == "tiktok_video" && v.trim().lowercase() in setOf("aucune", "non", "false", "sans") &&
