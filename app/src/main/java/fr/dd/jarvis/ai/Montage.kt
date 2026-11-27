@@ -82,10 +82,16 @@ object Montage {
         /** Vidéos / images existantes à monter (séparées par « ; »). */
         val sources: String = "",
         val garderSon: Boolean = false,
-        val tiktok: Boolean = true
+        val tiktok: Boolean = true,
+        /** auto (plans libres de droits Pexels/Pixabay d'abord, IA pour le reste) | stock | ia */
+        val plans: String = "auto",
+        /** Sous-titres synchronisés avec la voix off. */
+        val sousTitres: Boolean = true,
+        /** Envoyer la vidéo terminée dans les brouillons TikTok du compte. */
+        val brouillon: Boolean = false
     )
 
-    private data class Plan(val visuel: String, val texte: String)
+    private data class Plan(val visuel: String, val texte: String, val recherche: String = "")
     private data class Storyboard(val titre: String, val analyse: String, val plans: List<Plan>, val voixOff: String, val musique: String, val paroles: String, val legende: String)
     /** Un morceau de la timeline : vidéo (rognée à [dureeMs]) ou image affichée [dureeMs]. */
     private data class Segment(val fichier: File, val image: Boolean, val dureeMs: Long, val texte: String)
@@ -121,7 +127,7 @@ object Montage {
     /** Lance le(s) montage(s) en arrière-plan ; le résultat arrive dans le chat. Renvoie le message immédiat. */
     fun lancer(app: JarvisApp, d: Demande): String {
         val sansIa = !ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank() && !VideoProviderGen.disponible(app)
-        if (sansIa && d.sources.isBlank())
+        if (sansIa && d.sources.isBlank() && !Stock.disponible(app))
             return "❌ Pour créer des plans vidéo, configure Hugging Face, Gemini (si quota vidéo disponible) ou Dreamina dans Réglages › IA › Images & vidéo — ou donne-moi des vidéos/images existantes à monter (paramètre sources)."
         val duree = d.dureeS.coerceIn(5, 180)
         val n = d.nombre.coerceIn(1, 5)
@@ -188,14 +194,32 @@ object Montage {
 
         // 2. Plans IA pour compléter la durée (en parallèle, 3 à la fois).
         val dureeExistants = existants.sumOf { (f, image) -> if (image) 3500L else dureeMs(f) ?: 0L }
-        val manque = (ms - dureeExistants).coerceAtLeast(0)
-        val iaPossible = ImageToVideoGen.disponible(app) || app.store.huggingFaceToken.value.isNotBlank() || VideoProviderGen.disponible(app)
+        val manqueTotal = (ms - dureeExistants).coerceAtLeast(0)
         val echecs = mutableListOf<String>()
+        // 2a. Plans libres de droits (Pexels / Pixabay, gratuits) : un par plan du scénario, avant toute génération IA.
+        val modePlans = d.plans.trim().lowercase()
+        val credits = mutableListOf<Stock.Clip>()
+        val clipsStock = if (manqueTotal > 0 && Stock.disponible(app) && modePlans != "ia") {
+            val nb = max(1, ceil(manqueTotal / 4000.0).toInt())
+            progres("🎞️ Recherche de $nb plans libres de droits (Pexels / Pixabay)…")
+            val pris = mutableSetOf<String>()
+            (0 until nb).mapNotNull { i ->
+                verifierAnnulation()
+                val p = sb.plans[(existants.size + i) % sb.plans.size]
+                val requetes = listOf(p.recherche, Stock.motsCles(p.visuel), Stock.motsCles(p.visuel, 2)).filter { it.isNotBlank() }.distinct()
+                val clip = requetes.firstNotNullOfOrNull { q -> Stock.chercher(app, q, vertical, pris) }
+                val f = clip?.let { Stock.telecharger(it, File(travail, "stock_$i.mp4")) }
+                if (clip != null && f != null) { credits += clip; Triple(i, f, p.texte) } else null
+            }.also { if (it.isEmpty()) echecs += "aucun plan libre de droits trouvé (Pexels / Pixabay)" }
+        } else emptyList()
+        val dureeStock = clipsStock.sumOf { (_, f, _) -> min(dureeMs(f) ?: 0L, 4000L) }
+        val manque = if (modePlans == "stock") 0L else (manqueTotal - dureeStock).coerceAtLeast(0)
+        val iaPossible = ImageToVideoGen.disponible(app) || app.store.huggingFaceToken.value.isNotBlank() || VideoProviderGen.disponible(app)
         val clipsIa = if (manque > 0 && iaPossible) {
             val nb = max(1, ceil(manque / 5000.0).toInt())
             val dureeClip = (manque / 1000.0 / nb).coerceIn(2.0, 5.0)
-            // Les plans IA prennent la suite des médias existants dans le scénario (texte et visuel).
-            val decalage = existants.size
+            // Les plans IA prennent la suite des médias existants et des plans libres de droits dans le scénario.
+            val decalage = existants.size + clipsStock.size
             val plans = List(nb) { i -> sb.plans[(decalage + i) % sb.plans.size].let { p -> if (decalage + i >= sb.plans.size) p.copy(visuel = p.visuel + ", different camera angle") else p } }
             progres("✅ Scénario prêt : « ${sb.titre.take(50)} » — génération de $nb plans…")
             // Suivi par plan (file d'attente / en cours / terminé), résumé dans la notification au plus une fois par seconde.
@@ -259,7 +283,7 @@ object Montage {
 
         // 3. Timeline exacte : existants puis plans IA, en boucle si besoin, dernier morceau rogné pour tomber juste.
         val briques = existants.mapIndexed { i, (f, image) -> Triple(f, image, sb.plans.getOrNull(i)?.texte.orEmpty()) } +
-            clipsIa.map { (_, f, t) -> Triple(f, false, t) }
+            clipsStock.map { (_, f, t) -> Triple(f, false, t) } + clipsIa.map { (_, f, t) -> Triple(f, false, t) }
         if (briques.isEmpty()) return "❌ Aucun plan n'a pu être créé" + (if (echecs.isNotEmpty()) " :\n- " + echecs.joinToString("\n- ") else ".")
         val segments = mutableListOf<Segment>()
         var total = 0L; var i = 0
@@ -279,7 +303,14 @@ object Montage {
             "auto", "oui", "true" -> if (avecParoles) "" else sb.voixOff
             else -> d.voixOff
         }
-        val voix = if (texteVoix.isNotBlank()) { progres("🗣️ Voix off…"); synthese(app, texteVoix, File(travail, "voix.wav")) } else null
+        // Voix dite phrase par phrase : la durée de chaque phrase cale les sous-titres sur la voix.
+        val phrases = SousTitres.phrases(texteVoix)
+        val voixPhrases = if (phrases.isNotEmpty()) { progres("🗣️ Voix off…"); synthesePhrases(app, phrases, travail) } else emptyList()
+        val voix: List<File> = voixPhrases.map { it.first }.ifEmpty {
+            if (texteVoix.isNotBlank()) listOfNotNull(synthese(app, texteVoix, File(travail, "voix.wav"))) else emptyList()
+        }
+        val reperes = if (d.sousTitres && voixPhrases.size == phrases.size && phrases.isNotEmpty())
+            SousTitres.reperes(phrases, voixPhrases.map { it.second }) else emptyList()
         val musique: File? = when (d.musique.trim().lowercase()) {
             "aucune", "non", "false", "sans" -> null
             else -> {
@@ -310,7 +341,8 @@ object Montage {
         var ok = false
         for ((avecTexte, avecSon, libelle) in essais) {
             val r = runCatching {
-                exporter(app, segments, if (avecSon) voix else null, if (avecSon) musique else null, avecTexte, d.garderSon && avecSon, largeur, hauteur, avecParoles, sortie)
+                exporter(app, segments, if (avecSon) voix else emptyList(), if (avecSon) musique else null, avecTexte, d.garderSon && avecSon, largeur, hauteur, avecParoles, sortie,
+                    if (avecTexte && avecSon) reperes else emptyList())
             }
             if (r.isSuccess) { ok = true; if (libelle != "complet") abandons = libelle; break }
             echecs += "montage $libelle : ${r.exceptionOrNull()?.message?.take(140)}"
@@ -325,11 +357,15 @@ object Montage {
                 "# ${sb.titre}\n\n**Durée** : ${d.dureeS} s\n\n## Analyse préalable\n${sb.analyse.ifBlank { "Analyse non disponible ; storyboard construit à partir du brief original." }}\n\n## Plans\n" + sb.plans.joinToString("\n") { "- ${it.texte.ifBlank { "—" }} _(${it.visuel})_" } +
                     (if (sb.voixOff.isNotBlank()) "\n\n## Voix off\n${sb.voixOff}" else "") +
                     (if (sb.paroles.isNotBlank()) "\n\n## Paroles\n${sb.paroles}" else "") +
-                    (if (sb.legende.isNotBlank()) "\n\n## Légende\n${sb.legende}" else ""))
+                    (if (sb.legende.isNotBlank()) "\n\n## Légende\n${sb.legende}" else "") +
+                    (if (credits.isNotEmpty()) "\n\n## Crédits des plans libres de droits\n" + credits.joinToString("\n") { "- ${it.source} · ${it.auteur.ifBlank { "auteur inconnu" }} · ${it.page}" } else ""))
         }
+        // Brouillon TikTok : la vidéo part dans la boîte de réception TikTok (son tendance et publication dans l'appli).
+        val envoi = if (d.tiktok && d.brouillon) runCatching { TikTok.envoyerBrouillon(app, sortie) }.getOrElse { "❌ Envoi en brouillon TikTok impossible : ${it.message}" } else ""
         return buildString {
             append("🎬 « ${sb.titre} » — ${d.dureeS} s, ${segments.size} plans")
-            val pistes = listOfNotNull(if (voix != null && abandons.isBlank()) "voix off" else null,
+            val pistes = listOfNotNull(if (voix.isNotEmpty() && abandons.isBlank()) "voix off" else null,
+                if (reperes.isNotEmpty() && abandons.isBlank()) "sous-titres" else null,
                 if (musique != null && abandons != "sans texte ni son") (if (avecParoles) "chanson avec paroles" else "musique") else null,
                 if (d.textes && abandons.isBlank()) "texte à l'écran" else null)
             if (pistes.isNotEmpty()) append(" · " + pistes.joinToString(", "))
@@ -337,6 +373,8 @@ object Montage {
             if (loc.isNotBlank()) append("\n📁 $loc")
             if (sb.analyse.isNotBlank()) append("\n✍️ Scénario et prompts des plans enregistrés dans la note « ${nom.removeSuffix(".mp4")} » du coffre.")
             if (sb.legende.isNotBlank()) append("\n\n📝 Légende : ${sb.legende}")
+            if (credits.isNotEmpty()) append("\n🎞️ Plans libres de droits : " + credits.map { it.source }.distinct().joinToString(" et ") + " (auteurs crédités dans la note)")
+            if (envoi.isNotBlank()) append("\n\n$envoi")
             if (abandons.isNotBlank()) append("\n⚠️ Montage fait $abandons (effet refusé par le téléphone).")
             if (echecs.isNotEmpty()) append("\n⚠️ " + echecs.joinToString("\n⚠️ "))
         }
@@ -389,7 +427,7 @@ object Montage {
         val j = runCatching { JSONObject(brut.substring(brut.indexOf('{'), brut.lastIndexOf('}') + 1)) }.getOrNull()
         val plans = j?.optJSONArray("plans")?.let { a ->
             (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map {
-                Plan(it.optString("visuel").ifBlank { d.sujet }, it.optString("texte").trim())
+                Plan(it.optString("visuel").ifBlank { d.sujet }, it.optString("texte").trim(), it.optString("recherche").trim())
             }
         }.orEmpty().ifEmpty {
             runCatching { app.llm.agent(Prompts.TIKTOK_PLANS, contexte) }.getOrDefault(d.sujet)
@@ -470,16 +508,82 @@ object Montage {
         }
     }
 
+    /**
+     * Voix off phrase par phrase (un fichier WAV par phrase, même moteur et même voix) : renvoie chaque fichier et sa
+     * durée, ou une liste vide si la synthèse échoue (repli : une seule piste, sans sous-titres).
+     */
+    private suspend fun synthesePhrases(app: JarvisApp, phrases: List<String>, dossier: File): List<Pair<File, Long>> {
+        val tts = withTimeoutOrNull(20_000) {
+            withContext(Dispatchers.Main) {
+                suspendCancellableCoroutine<TextToSpeech?> { cont ->
+                    var t: TextToSpeech? = null
+                    t = TextToSpeech(app) { st -> if (cont.isActive) cont.resume(if (st == TextToSpeech.SUCCESS) t else null) }
+                }
+            }
+        } ?: return emptyList()
+        return try {
+            tts.language = Locale.FRANCE
+            tts.setSpeechRate(1.05f)
+            val out = mutableListOf<Pair<File, Long>>()
+            for ((i, p) in phrases.withIndex()) {
+                val f = File(dossier, "voix_$i.wav")
+                val ok = withTimeoutOrNull(30_000) {
+                    suspendCancellableCoroutine<Boolean> { cont ->
+                        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                            override fun onStart(id: String?) {}
+                            override fun onDone(id: String?) { if (cont.isActive) cont.resume(true) }
+                            @Deprecated("Deprecated in Java")
+                            override fun onError(id: String?) { if (cont.isActive) cont.resume(false) }
+                        })
+                        if (tts.synthesizeToFile(p.take(3900), Bundle(), f, "voix_$i") != TextToSpeech.SUCCESS && cont.isActive) cont.resume(false)
+                    }
+                } == true
+                val duree = if (ok && f.length() > 1000) dureeMs(f) else null
+                if (duree == null || duree <= 0) return emptyList()
+                out += f to duree
+            }
+            out
+        } finally { runCatching { tts.shutdown() } }
+    }
+
+    /**
+     * Temps d'une incrustation : selon les versions d'Android/Media3, l'horodatage reçu par un effet est celui de la
+     * vidéo finale ou celui du plan. Le premier horodatage reçu tranche ; renvoie le temps dans la vidéo finale (µs).
+     */
+    private class Horloge(private val debutUs: Long) {
+        private var premier: Long? = null
+        fun global(t: Long): Long {
+            val p = premier ?: t.also { premier = it }
+            return if (debutUs > 0 && p >= debutUs - 100_000) t else t + debutUs
+        }
+        fun local(t: Long): Long = global(t) - debutUs
+    }
+
+    /** Sous-titres d'un plan : le morceau de phrase dit à cet instant (aucun entre deux phrases). */
+    @OptIn(UnstableApi::class)
+    private class OverlaySousTitres(private val reperes: List<SousTitres.Repere>, private val debutUs: Long, private val largeur: Int) : BitmapOverlay() {
+        private val horloge = Horloge(debutUs)
+        private val vide = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        private val cache = HashMap<SousTitres.Repere, Bitmap>()
+        private val reglages = OverlaySettings.Builder().setBackgroundFrameAnchor(0f, -0.42f).build()
+        override fun getBitmap(presentationTimeUs: Long): Bitmap {
+            val r = SousTitres.a(reperes, horloge.global(presentationTimeUs) / 1000) ?: return vide
+            return cache.getOrPut(r) { bandeau(r.texte, largeur, sousTitre = true) }
+        }
+        override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings = reglages
+    }
+
     // ------------------------------------------------------------------ rendu
 
     /** Bandeau de texte (blanc, contour noir, centré, sur plusieurs lignes) pour l'incrustation. */
-    private fun bandeau(texte: String, largeur: Int): Bitmap {
-        val taille = largeur * 0.07f
+    private fun bandeau(texte: String, largeur: Int, sousTitre: Boolean = false): Bitmap {
+        val taille = largeur * (if (sousTitre) 0.075f else 0.07f)
         val fond = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = taille; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             style = Paint.Style.STROKE; strokeWidth = taille * 0.16f; color = Color.BLACK; strokeJoin = Paint.Join.ROUND
         }
-        val plein = TextPaint(fond).apply { style = Paint.Style.FILL; color = Color.WHITE }
+        // Sous-titres en jaune (style TikTok) pour les distinguer du texte du plan.
+        val plein = TextPaint(fond).apply { style = Paint.Style.FILL; color = if (sousTitre) Color.rgb(255, 221, 51) else Color.WHITE }
         val utile = (largeur * 0.88f).toInt()
         fun layout(p: TextPaint) = StaticLayout.Builder.obtain(texte, 0, texte.length, p, utile).setAlignment(Layout.Alignment.ALIGN_CENTER).setLineSpacing(0f, 1.05f).build()
         val lf = layout(fond); val lp = layout(plein)
@@ -501,42 +605,58 @@ object Montage {
 
     @OptIn(UnstableApi::class)
     private suspend fun exporter(
-        app: JarvisApp, segments: List<Segment>, voix: File?, musique: File?, avecTexte: Boolean, garderSon: Boolean,
-        largeur: Int, hauteur: Int, chanson: Boolean, sortie: File
+        app: JarvisApp, segments: List<Segment>, voix: List<File>, musique: File?, avecTexte: Boolean, garderSon: Boolean,
+        largeur: Int, hauteur: Int, chanson: Boolean, sortie: File, reperes: List<SousTitres.Repere> = emptyList()
     ) {
         val presentation = Presentation.createForWidthAndHeight(largeur, hauteur, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP)
+        var debutMs = 0L
         val video = segments.map { s ->
+            val debutUs = debutMs * 1000
+            debutMs += s.dureeMs
             val effets = mutableListOf<Effect>(presentation)
             if (s.image) {
-                // Léger zoom avant sur les images fixes (effet « Ken Burns »).
+                // Léger zoom avant sur les images fixes (effet « Ken Burns »), compté depuis le début de CE plan.
                 val dureeUs = s.dureeMs * 1000f
-                effets += MatrixTransformation { t -> Matrix().apply { val z = 1f + 0.08f * (t / dureeUs).coerceIn(0f, 1f); setScale(z, z) } }
+                val horloge = Horloge(debutUs)
+                effets += MatrixTransformation { t -> Matrix().apply { val z = 1f + 0.08f * (horloge.local(t) / dureeUs).coerceIn(0f, 1f); setScale(z, z) } }
             }
+            val overlays = mutableListOf<androidx.media3.effect.TextureOverlay>()
             if (avecTexte && s.texte.isNotBlank()) {
-                val reglages = OverlaySettings.Builder().setBackgroundFrameAnchor(0f, -0.58f).build()
-                effets += OverlayEffect(ImmutableList.of(BitmapOverlay.createStaticBitmapOverlay(bandeau(s.texte, largeur), reglages)))
+                // Avec des sous-titres, le texte du plan passe en haut de l'image pour ne pas les recouvrir.
+                val reglages = OverlaySettings.Builder().setBackgroundFrameAnchor(0f, if (reperes.isNotEmpty()) 0.62f else -0.58f).build()
+                overlays += BitmapOverlay.createStaticBitmapOverlay(bandeau(s.texte, largeur), reglages)
             }
+            if (reperes.isNotEmpty()) overlays += OverlaySousTitres(reperes, debutUs, largeur)
+            if (overlays.isNotEmpty()) effets += OverlayEffect(ImmutableList.copyOf(overlays))
             val item = if (s.image) MediaItem.Builder().setUri(Uri.fromFile(s.fichier)).setImageDurationMs(s.dureeMs).build()
             else MediaItem.Builder().setUri(Uri.fromFile(s.fichier))
                 .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setEndPositionMs(s.dureeMs).build()).build()
             EditedMediaItem.Builder(item).apply {
                 if (s.image) { setDurationUs(s.dureeMs * 1000); setFrameRate(30) }
                 setRemoveAudio(s.image || !garderSon)
-                setEffects(Effects(if (garderSon && !s.image) listOf(volume(if (musique != null || voix != null) 0.5f else 1f)) else emptyList(), effets))
+                setEffects(Effects(if (garderSon && !s.image) listOf(volume(if (musique != null || voix.isNotEmpty()) 0.5f else 1f)) else emptyList(), effets))
             }.build()
         }
         val totalMs = segments.sumOf { it.dureeMs }
         val sequences = mutableListOf(EditedMediaItemSequence(video))
         if (musique != null) {
-            val niveau = if (voix != null) 0.28f else if (chanson) 1f else 0.8f
+            val niveau = if (voix.isNotEmpty()) 0.28f else if (chanson) 1f else 0.8f
             sequences += EditedMediaItemSequence(listOf(EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(musique)))
                 .setRemoveVideo(true).setEffects(Effects(listOf(volume(niveau)), emptyList())).build()), true)
         }
-        if (voix != null) {
-            val item = MediaItem.Builder().setUri(Uri.fromFile(voix))
-                .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setEndPositionMs(totalMs).build()).build()
-            sequences += EditedMediaItemSequence(listOf(EditedMediaItem.Builder(item).setRemoveVideo(true)
-                .setEffects(Effects(listOf(volume(1f)), emptyList())).build()))
+        if (voix.isNotEmpty()) {
+            // Phrases enchaînées ; celle qui dépasserait la fin de la vidéo est coupée.
+            var cumul = 0L
+            val pistes = voix.mapNotNull { f ->
+                val reste = totalMs - cumul
+                if (reste < 200) return@mapNotNull null
+                val d = dureeMs(f) ?: reste
+                cumul += min(d, reste)
+                val item = MediaItem.Builder().setUri(Uri.fromFile(f))
+                    .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setEndPositionMs(min(d, reste)).build()).build()
+                EditedMediaItem.Builder(item).setRemoveVideo(true).setEffects(Effects(listOf(volume(1f)), emptyList())).build()
+            }
+            if (pistes.isNotEmpty()) sequences += EditedMediaItemSequence(pistes)
         }
         val composition = Composition.Builder(sequences).experimentalSetForceAudioTrack(true).build()
         if (sortie.exists()) sortie.delete()

@@ -550,6 +550,19 @@ class Store(context: Context) {
     val imageVideoWorkerToken = SecretPref("imageVideoWorkerToken")
     val tiktokTokenExpiry = SPref("tiktokTokenExpiry", "0")   // epoch secondes
     val tiktokOAuthState = SPref("tiktokOAuthState", "")      // anti-CSRF, vérifié au retour
+    val tiktokScopes = SPref("tiktokScopes", "")              // autorisations accordées (user.info.basic,video.list,video.upload)
+    /** Demander video.upload à la connexion : les montages TikTok partent dans les brouillons du compte. */
+    val tiktokPublication = BPref("tiktokPublication", false)
+    /** Mots-clés de la niche (« maintenance photovoltaïque, panneaux solaires »). */
+    val tiktokNiche = SPref("tiktokNiche", "")
+    /** Comptes concurrents suivis (@pseudo séparés par des virgules). */
+    val tiktokConcurrents = SPref("tiktokConcurrents", "")
+    /** Propositions de vidéos chaque lundi matin, et la dernière semaine traitée (« 2026-W48 »). */
+    val tiktokHebdo = BPref("tiktokHebdo", true)
+    val tiktokHebdoFait = SPref("tiktokHebdoFait", "")
+    // ---- Images et vidéos libres de droits (gratuites) pour le montage
+    val pexelsKey = SecretPref("pexelsKey")
+    val pixabayKey = SecretPref("pixabayKey")
 
     // ---- Annonces vocales (SMS, mails, notifications) : mode par catégorie (off | annonce | lecture) et sonnerie (URI, « default » ou vide = aucune)
     val annOn = BPref("annOn", false)

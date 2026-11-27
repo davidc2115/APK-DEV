@@ -127,6 +127,22 @@ Comment conclure (question, incitation à commenter/s'abonner/partager).
 Une légende courte prête à copier-coller + 4 à 8 hashtags pertinents (mélange populaires/niche).
 """.trimIndent()
 
+    val TIKTOK_PROPOSITIONS = """
+Tu es stratège de contenu TikTok pour un créateur français. Tu reçois des DONNÉES RÉELLES : statistiques de SON compte, tendances France du moment, sa niche et ses concurrents (chiffres calculés par JARVIS).
+Propose le nombre d'idées demandé, à poster cette semaine. Chaque idée s'appuie EXPLICITEMENT sur une donnée (cite le chiffre ou l'observation : « tes vidéos de 15-30 s font 2× plus de vues », « #xxx apparaît 7 fois dans les tendances », « @concurrent fait 80 k vues avec des listes »). Jamais de généralités ni de chiffre inventé ; si une source manque, fais avec le reste.
+Pour CHAQUE idée, en français, exactement :
+## 💡 Idée N — titre court
+- **Pourquoi** : la donnée qui la justifie
+- **Format** : durée conseillée et type (face caméra, tuto, avant/après, liste, coulisses…)
+- **Accroche (0-3 s)** : la phrase exacte à dire ou afficher
+- **Script minuté** : 0-3 s …, 3-8 s …, jusqu'à la fin (ce qui est dit ET montré)
+- **Texte à l'écran** : les incrustations clés
+- **Son** : un son des tendances listées, ou « son original » (voix)
+- **Légende + hashtags** : prêts à copier (4 à 8 hashtags, populaires + niche)
+- **Quand publier** : jour et créneau d'après les statistiques de son compte (sinon en soirée 18 h-22 h, à dire comme une habitude générale)
+Termine par une ligne « 🎯 Priorité de la semaine : … ».
+""".trimIndent()
+
     val TIKTOK_PLANS = """
 Tu es directeur de la photo et prépares le tournage IA (génération vidéo automatique) d'une vidéo TikTok verticale courte.
 À partir du sujet ou du script fourni, découpe la vidéo en 3 à 6 plans visuels distincts et courts (quelques secondes chacun) qui s'enchaînent pour raconter la vidéo du début à la fin.
@@ -186,7 +202,8 @@ Réponds UNIQUEMENT par un objet JSON valide, sans Markdown ni texte autour :
   "plans": [
     {
       "visuel": "PROMPT EN ANGLAIS, autonome et précis : sujet exact, apparence constante, action visible, décor, époque, lumière, ambiance, composition, cadrage et mouvement caméra. Aucun texte ni logo.",
-      "texte": "incrustation française courte, 2 à 8 mots, placée dans la zone centrale sûre (vide si inutile)"
+      "texte": "incrustation française courte, 2 à 8 mots, placée dans la zone centrale sûre (vide si inutile)",
+      "recherche": "2 à 4 mots-clés EN ANGLAIS pour trouver ce plan dans une banque de vidéos libres de droits (ex. « solar panels roof », « electrician tools closeup »)"
     }
   ],
   "voix_off": "narration française naturelle, adaptée à la durée totale, accroche dès le début et conclusion pertinente",

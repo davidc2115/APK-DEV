@@ -57,6 +57,7 @@ class VeilleWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         runCatching { Journal.siLHeure(app) }
         runCatching { fr.dd.jarvis.service.Poignet.assurer(app) }
         runCatching { fr.dd.jarvis.widget.DragonWidget.majTous(app) }
+        runCatching { fr.dd.jarvis.ai.TikTokPropositions.hebdo(app) }
         return Result.success()
     }
 
