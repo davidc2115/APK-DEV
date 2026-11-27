@@ -825,14 +825,21 @@ class ToolBox(
             if (nomImage.isBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) &&
                 app.store.huggingFaceToken.value.isBlank() && !fr.dd.jarvis.ai.VideoProviderGen.disponible(app))
                 return ToolResult("❌ Aucun fournisseur vidéo configuré. Ajoute un token Hugging Face, une clé UseAPI Flow ou une clé BytePlus Dreamina dans Réglages › IA › Images & vidéo.")
-            if (nomImage.isNotBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app))
-                return ToolResult("❌ L'animation d'image nécessite actuellement une clé fal.ai configurée dans Réglages › IA › Images & vidéo.")
+            if (nomImage.isNotBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank())
+                return ToolResult("❌ Pour animer une image, ajoute ton jeton Hugging Face gratuit (ou une clé fal.ai) dans Réglages › IA › Images & vidéo.")
             val prompt = fr.dd.jarvis.ai.VideoGen.preparerPrompt(app, brief, duree, format, nomImage.isNotBlank())
             val (video, loc) = when {
                 nomImage.isNotBlank() -> {
                     val image = fr.dd.jarvis.ai.ImageGen.fichier(app, nomImage)
                         ?: return ToolResult("❌ Image introuvable : " + nomImage + ". Utilise fichiers_generes pour retrouver son nom exact.")
-                    fr.dd.jarvis.ai.ImageToVideoGen.generate(app, image, prompt, duree)
+                    if (fr.dd.jarvis.ai.ImageToVideoGen.disponible(app)) fr.dd.jarvis.ai.ImageToVideoGen.generate(app, image, prompt, duree)
+                    else {
+                        // Gratuit : Hugging Face ZeroGPU (Wan 2.2 image → vidéo).
+                        val vertical = !format.trim().lowercase().let { it.startsWith("hori") || it == "16:9" || it.startsWith("pays") }
+                        val bytes = fr.dd.jarvis.ai.VideoGen.genereClip(app, prompt, duree.toInt().coerceIn(2, 5), vertical, image = image)
+                        val file = java.io.File(fr.dd.jarvis.ai.VideoGen.dossier(app), "video_" + System.currentTimeMillis() + ".mp4").apply { writeBytes(bytes) }
+                        file to runCatching { app.obsidian.saveBytes("JARVIS/Vidéos IA", file.name, bytes, "video/mp4") }.getOrDefault("")
+                    }
                 }
                 fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) -> fr.dd.jarvis.ai.ImageToVideoGen.texteVersVideo(app, prompt, duree, format)
                 else -> {

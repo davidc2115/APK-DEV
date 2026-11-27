@@ -209,7 +209,9 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                     format = if (name == "tiktok_video") "vertical" else a.optString("format").ifBlank { "vertical" },
                     nombre = a.optString("nombre").filter { it.isDigit() }.toIntOrNull() ?: 1,
                     musique = a.optString("musique").ifBlank { "auto" },
-                    paroles = a.optString("paroles").trim(),
+                    // TikTok : voix off + musique SANS paroles ; une chanson seulement si TU la demandes (sinon elle remplaçait la voix).
+                    paroles = a.optString("paroles").trim().takeIf { name != "tiktok_video" ||
+                        Regex("(?i)chanson|paroles|chant[ée]e?|qui chante|lyrics").containsMatchIn(derniereDemande() + " " + brut) }.orEmpty(),
                     // TikTok : toujours une voix off, sauf si TU as dit « sans voix » (l'IA la retirait parfois d'elle-même).
                     voixOff = a.optString("voix_off").ifBlank { "auto" }.let { v ->
                         if (name == "tiktok_video" && v.trim().lowercase() in setOf("aucune", "non", "false", "sans") &&

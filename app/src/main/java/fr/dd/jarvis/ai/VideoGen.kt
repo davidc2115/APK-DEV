@@ -27,7 +27,7 @@ import kotlin.coroutines.resumeWithException
 
 /**
  * Génération de courtes vidéos IA (plans individuels) via Hugging Face — un Space officiel « ZeroGPU »
- * (Wan-AI/Wan-2.2-5B), utilisable GRATUITEMENT avec un simple compte Hugging Face (sans carte bancaire), mais avec
+ * (Space ZeroGPU Wan 2.2 image → vidéo), utilisable GRATUITEMENT avec un simple compte Hugging Face (sans carte bancaire), mais avec
  * un vrai quota journalier de calcul GPU limité (≈5 min/jour pour un compte gratuit) : peut être lent (file
  * d'attente partagée) ou refuser une fois le quota du jour épuisé — SANS garantie de service (c'est un service
  * communautaire, pas une offre payante avec SLA). Pollinations.ai, utilisé avant, exige désormais un abonnement
@@ -35,7 +35,15 @@ import kotlin.coroutines.resumeWithException
  * Les plans générés sont ensuite montés bout à bout avec androidx.media3 Transformer (aucun service externe).
  */
 object VideoGen {
-    private const val HF_SPACE = "https://wan-ai-wan-2-2-5b.hf.space"
+    /**
+     * Space ZeroGPU « zerogpu-aoti/wan2-2-fp8da-aoti-faster » (Wan 2.2 14B image → vidéo, Lightning LoRA, maintenu par
+     * l'équipe ZeroGPU de Hugging Face) : GRATUIT avec un compte Hugging Face (5 min de GPU par jour, sans carte), environ
+     * 35 s de GPU par clip de 3,5 s. L'ancien Space officiel « Wan-AI/Wan-2.2-5B » a été supprimé (erreur 404).
+     */
+    private const val HF_SPACE = "https://zerogpu-aoti-wan2-2-fp8da-aoti-faster.hf.space"
+    /** Prompt négatif par défaut du Space (modèle Wan, rédigé en chinois). */
+    private const val NEGATIF = "色调艳丽, 过曝, 静态, 细节模糊不清, 字幕, 风格, 作品, 画作, 画面, 静止, 整体发灰, 最差质量, 低质量, JPEG压缩残留, 丑陋的, 残缺的, 多余的手指, " +
+        "画得不好的手部, 画得不好的脸部, 畸形的, 毁容的, 形态畸形的肢体, 手指融合, 静止不动的画面, 杂乱的背景, 三条腿, 背景人很多, 倒着走"
     private val http = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(320, TimeUnit.SECONDS).callTimeout(360, TimeUnit.SECONDS).build()
 
     fun dossier(app: JarvisApp) = File(app.filesDir, "videos_ia").apply { mkdirs() }
@@ -77,29 +85,28 @@ object VideoGen {
 
     /** Génère un plan (clip) via le Space Hugging Face ; retourne les octets mp4. Erreur explicite si le token
      *  manque/est refusé, si le quota GPU gratuit du jour est épuisé, ou si le service est indisponible. */
-    internal fun genereClip(app: JarvisApp, prompt: String, dureeDemandee: Int, vertical: Boolean, image: File? = null): ByteArray {
+    internal suspend fun genereClip(app: JarvisApp, prompt: String, dureeDemandee: Int, vertical: Boolean, image: File? = null): ByteArray {
         // Génération vidéo gratuite via Hugging Face ZeroGPU. Aucun appel fal.ai n'est effectué.
         val token = app.store.huggingFaceToken.value.trim()
         if (token.isBlank()) throw ApiException(401,
             "Token Hugging Face gratuit manquant : crée-en un sur huggingface.co/settings/tokens puis ajoute-le dans Réglages › IA › Images & vidéo. fal.ai n'est plus utilisé pour la génération vidéo.")
-        val duree = dureeDemandee.coerceIn(2, 5) // le modèle gratuit (Wan 2.2) ne va pas au-delà de 5s par plan
-        val (hauteur, largeur) = if (vertical) 768 to 448 else 448 to 768
-        // Résolution et pas réduits par rapport aux réglages par défaut du Space : on vise un plan générable en
-        // restant largement dans un budget de quelques dizaines de secondes de GPU, pour ménager le quota gratuit
-        // limité (plusieurs plans sont générés par vidéo).
-        // Image de départ (animation d'une image) : envoyée d'abord au Space, puis passée comme fichier Gradio.
-        val depart: Any = if (image != null) JSONObject().put("path", envoyerFichier(token, image)).put("orig_name", image.name)
-            .put("meta", JSONObject().put("_type", "gradio.FileData")) else JSONObject.NULL
-        val data = JSONArray()
-            .put(depart)               // image de départ, ou aucune (texte → vidéo pur)
-            .put(prompt)
-            .put(duree.toDouble())
-            .put(hauteur)
-            .put(largeur)
-            .put(22)                    // sampling_steps (par défaut 38 sur le Space, réduit pour aller plus vite)
-            .put(5.0)                   // guide_scale
-            .put(5.0)                   // shift
-            .put(-1)                    // seed (aléatoire)
+        // Le service anime une IMAGE : sans image fournie, JARVIS en crée une d'abord (Cloudflare, gratuit), au bon format.
+        val depart = image ?: runCatching {
+            ImageGen.generate(app, "$prompt, ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, cinematic, highly detailed, no text",
+                "flux-2-klein", if (vertical) 768 else 1344, if (vertical) 1344 else 768).first
+        }.recoverCatching { ImageGen.generate(app, prompt).first }
+            .getOrElse { throw ApiException(0, "pas d'image de départ à animer (génération d'image Cloudflare impossible : ${it.message?.take(120)})") }
+        return withContext(Dispatchers.IO) { animer(token, depart, prompt, dureeDemandee) }
+    }
+
+    /** Anime [image] sur le Space ZeroGPU (API Gradio : envoi de l'image, appel, suivi en flux) ; octets mp4. */
+    private fun animer(token: String, image: File, prompt: String, dureeDemandee: Int): ByteArray {
+        val duree = dureeDemandee.coerceIn(2, 5).toDouble()   // 0,5 à 5 s possibles (8 à 80 images à 16 i/s)
+        val fichier = JSONObject().put("path", envoyerFichier(token, image)).put("orig_name", image.name)
+            .put("meta", JSONObject().put("_type", "gradio.FileData"))
+        // Paramètres de generate_video : image, prompt, étapes (4 : rapide, ménage le quota gratuit), prompt négatif,
+        // durée, guidances (1 et 1 avec la LoRA Lightning), graine, graine aléatoire.
+        val data = JSONArray().put(fichier).put(prompt.take(1500)).put(4).put(NEGATIF).put(duree).put(1.0).put(1.0).put(42).put(true)
         val corps = JSONObject().put("data", data).toString().toRequestBody("application/json".toMediaType())
         val soumission = Request.Builder()
             .url("$HF_SPACE/gradio_api/call/generate_video")
@@ -169,12 +176,12 @@ object VideoGen {
     private fun telechargerClip(token: String, donneeJson: String): ByteArray {
         val valeur = runCatching { JSONArray(donneeJson).opt(0) }.getOrNull()
             ?: throw ApiException(0, "résultat de génération vide")
-        val urlVideo = when (valeur) {
-            is JSONObject -> valeur.optString("url").ifBlank {
-                val chemin = valeur.optString("path")
+        val urlVideo = when (val v = (valeur as? JSONObject)?.optJSONObject("video") ?: valeur) {
+            is JSONObject -> v.optString("url").ifBlank {
+                val chemin = v.optString("path")
                 if (chemin.isNotBlank()) "$HF_SPACE/gradio_api/file=$chemin" else ""
             }
-            is String -> if (valeur.startsWith("http")) valeur else "$HF_SPACE/gradio_api/file=$valeur"
+            is String -> if (v.startsWith("http")) v else "$HF_SPACE/gradio_api/file=$v"
             else -> ""
         }
         if (urlVideo.isBlank()) throw ApiException(0, "réponse de génération inattendue (pas de fichier vidéo) : ${donneeJson.take(200)}")
