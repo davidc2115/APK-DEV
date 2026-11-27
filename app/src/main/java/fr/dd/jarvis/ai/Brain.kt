@@ -488,7 +488,10 @@ class Brain(
                 return reflexe(tools.execute("appareil_acces_distant", args).text)
             }
             // Plex (lancer un film sur la télé, pause, reprise…) : directement par l'API de Plex, sans Home Assistant ni Hermès.
-            if (app.store.plexToken.value.isNotBlank()) PlexTools.intention(texteUser)?.let { (outil, args) ->
+            if (app.store.plexToken.value.isNotBlank()) PlexTools.intention(texteUser)?.let { (outilBrut, argsBruts) ->
+                // Diagnostic du serveur Plex : par SSH s'il est configuré, sinon l'état donné par l'API de Plex.
+                val (outil, args) = if (outilBrut == "serveur_diagnostic" && !Serveur.sshConfigure(app)) "plex_serveur" to JSONObject().put("action", "etat")
+                    else outilBrut to argsBruts
                 // « Lance X sur la télé » sans le mot film / série : seulement si X est bien dans la bibliothèque Plex.
                 // Le média trouvé est passé par son identifiant : pas de seconde recherche.
                 val ok = args.optString("verifier") != "oui" || runCatching {

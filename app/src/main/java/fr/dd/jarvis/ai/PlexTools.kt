@@ -561,8 +561,14 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
             if (Regex("\\bplex\\b").containsMatchIn(brut) && Regex("\\b(abonnement|plex pass|remote watch|a distance|acces distant|lecture locale|pass)\\b").containsMatchIn(brut))
                 return "plex_serveur" to JSONObject().put("action",
                     if (Regex("\\b(repare|reparer|corrige|corriger|regle|regler|resous|resoudre|arrange|arranger)\\b").containsMatchIn(brut)) "reparer_local" else "reseau_local")
+            // « Regarde l'état du serveur Plex sur le serveur SSH », « regarde pour des problèmes de Plex » : un DIAGNOSTIC,
+            // pas un film à lancer (« regarde » voulait dire « regarder un film »). Problème, panne, SSH, logs : diagnostic
+            // complet sur le serveur (conteneur, ressources, journaux, API) ; simple état / version : l'API de Plex.
+            val sansPolitesse = brut.replace(POLI, "").trim()
+            if (Regex("\\bplex\\b").containsMatchIn(brut) && DIAG.containsMatchIn(brut) && !LANCEMENT.containsMatchIn(sansPolitesse))
+                return if (HOTE.containsMatchIn(brut)) "serveur_diagnostic" to JSONObject().put("cible", "plex") else "plex_serveur" to JSONObject().put("action", "etat")
             if (Regex("^(?:jarvis )?(qu est ce qui|qu est ce qu il y a|qu y a t il|quoi|quels?|quelles?|qui|combien|y a t il|liste|montre|est ce qu il y a|est ce que (?!tu |vous ))\\b").containsMatchIn(brut)) return null
-            val n = brut.replace(POLI, "").trim()
+            val n = sansPolitesse
             if (n.isBlank() || n.split(' ').size > 16 || PAS_PLEX.containsMatchIn(n)) return null
             val plex = MOT_PLEX.containsMatchIn(n)
             val appareil = Regex("\\bsur (.+)$").find(n)?.groupValues?.get(1)?.trim().orEmpty().removePrefix("plex").trim()
@@ -598,6 +604,15 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
                 if (!explicite) put("verifier", "oui")
             }
         }
+
+        /** État, problème ou diagnostic du serveur Plex (jamais un titre à lancer). */
+        private val DIAG = Regex("\\b(etat|statut|status|probleme|problemes|soucis?|pannes?|bugs?|erreurs?|plante|plantage|lent|lenteurs?|marche pas|marche plus|fonctionne pas|fonctionne plus|" +
+            "diagnosti\\w*|ssh|debian|docker|conteneur|logs?|journal|journaux|redemarr\\w*|mise a jour|mettre a jour|version|transcod\\w*|espace disque|en ligne|joignable|accessible)\\b")
+        /** Ce qui demande de regarder le serveur lui-même (SSH : conteneur, ressources, journaux), pas seulement l'API de Plex. */
+        private val HOTE = Regex("\\b(probleme|problemes|soucis?|pannes?|bugs?|erreurs?|plante|plantage|lent|lenteurs?|marche pas|marche plus|fonctionne pas|fonctionne plus|" +
+            "diagnosti\\w*|ssh|debian|docker|conteneur|logs?|journal|journaux|joignable|accessible|en ligne)\\b")
+        /** Lancer un média (« mets / lance / joue … ») : jamais un diagnostic, même si le titre contient « erreur ». */
+        private val LANCEMENT = Regex("^(?:(?:je (?:veux|voudrais)|tu peux|peux tu|on)\\s+)?(?:lance[rz]?|mets?|mettre|joue[rz]?|demarre[rz]?|passe[rz]?)\\b")
 
         private val VERBE = Regex("^(?:(?:je (?:veux|voudrais|souhaite|aimerais)|j aimerais|on (?:va|peut|pourrait)|on|tu peux|peux tu|pourrais tu|veux tu|voudrais tu)\\s+)?" +
             "(?:(?:me|nous)\\s+)?(?:lance[rz]?|mets?|mettre|joue[rz]?|regarde[rz]?|demarre[rz]?|passe[rz]?)\\b")

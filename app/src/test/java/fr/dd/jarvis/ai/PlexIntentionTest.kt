@@ -64,4 +64,16 @@ class PlexIntentionTest {
         assertEquals("reparer_local", PlexTools.intention("répare la lecture locale de Plex")!!.second.getString("action"))
         assertEquals("reseau_local", PlexTools.intention("pourquoi Plex me demande un abonnement sur la télé")!!.second.getString("action"))
     }
+
+    /** « Alors regarde l'état du serveur Plex sur le serveur SSH » cherchait un film nommé « l'état du serveur plex ». */
+    @Test fun etatEtProblemesDuServeurPlex() {
+        assertEquals("serveur_diagnostic", PlexTools.intention("alors regarde l'état du serveur plex sur le serveur SSH")?.first)
+        assertEquals("plex", PlexTools.intention("Alors regarde pour des problèmes de plex")?.second?.optString("cible"))
+        assertEquals("serveur_diagnostic", PlexTools.intention("plex ne marche plus, regarde les logs")?.first)
+        assertEquals("plex_serveur", PlexTools.intention("donne-moi l'état de Plex")?.first)
+        assertEquals("etat", PlexTools.intention("quelle version de plex est installée")?.second?.optString("action"))
+        // Un vrai lancement reste un lancement, même avec « erreur » dans le titre.
+        assertEquals("plex_lancer", PlexTools.intention("lance le film Erreur de calcul sur plex")?.first)
+        assertEquals("plex_lancer", PlexTools.intention("mets Inception sur la télé")?.first)
+    }
 }
