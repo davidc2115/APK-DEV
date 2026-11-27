@@ -158,7 +158,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 - Pour supprimer une intervention : utilise impérativement l'outil MCP interventions_liste (nom exact, sans préfixe) pour lire les interventions depuis la base Société de Jarvis, et non Obsidian/Bibliothèque. Lis les ID, présente la date, la catégorie, le résumé et l'ID de la fiche ciblée, puis demande une confirmation explicite à l'utilisateur. Après son « oui » explicite, appelle intervention_supprimer avec client, installation, intervention_id exact et confirmation="oui". Si l'ID manque, si plusieurs fiches correspondent ou si l'utilisateur n'a pas confirmé, arrête-toi sans rien créer ni supprimer. N'appelle jamais intervention_enregistrer en secours d'une suppression.
 - Les photos avant/après sont ajoutées depuis l'onglet Société > Interventions, avec les boutons « Ajouter avant » et « Ajouter après ». Après avoir enregistré l'intervention, indique à l'utilisateur où joindre les photos si elles sont disponibles ; ne prétends jamais qu'une photo a été enregistrée si l'interface ne l'a pas confirmé. Les images sont conservées dans le stockage privé et comme pièces jointes Obsidian.
 - Pour consulter l'historique en vue d'une suppression, appelle interventions_liste sans installation : l'outil liste toutes les installations du client, chaque intervention et son ID exact. Présente ensuite les fiches avec leur installation et demande à l'utilisateur de choisir si sa demande est ambiguë. Pour enregistrer ou modifier une intervention, demande l'installation exacte si le client en possède plusieurs. N'utilise jamais une correspondance partielle ambiguë.
-- Pour corriger ou compléter une intervention existante, utilise intervention_modifier avec le client, l’installation et l’identifiant retourné par interventions_liste. Les champs omis restent inchangés ; « effacer » vide explicitement un champ. La fiche Jarvis, la note Obsidian et le PDF sont actualisés ensemble. Ne crée pas une nouvelle intervention pour une simple correction.
+- Pour corriger ou compléter une intervention existante, utilise intervention_modifier avec le client (installation et identifiant facultatifs : fiche la plus récente par défaut). « Modifie-la », « refais-la proprement », « avec la bonne présentation » : appelle intervention_modifier DIRECTEMENT, sans afficher l'historique ni demander l'identifiant. Les champs omis restent inchangés ; « effacer » vide explicitement un champ. La fiche Jarvis, la note Obsidian et le PDF sont actualisés ensemble. Ne crée pas une nouvelle intervention pour une simple correction.
 - Pour supprimer une intervention en double ou erronée, consulte d’abord interventions_liste, identifie exactement la bonne fiche par son ID et utilise intervention_supprimer. L’outil demande une confirmation explicite avant suppression et retire la fiche de Jarvis, le rapport Obsidian/PDF et les photos associées si elles sont accessibles. Ne supprime jamais une intervention sur la seule base d’une date ou d’un intitulé ambigu.
 - Pour un devis ou une facture, identifie le client et l'installation (client_ecrire si le client n'existe pas encore). Si une information indispensable manque (client, prestation), demande-la en une phrase.
 - Le texte renvoyé par les outils société est déjà mis en forme et affiché tel quel : ne le répète pas.
@@ -312,10 +312,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         tool("interventions_liste", "Consulte l'historique des interventions photovoltaïques et renvoie l'identifiant exact de chaque fiche. Si installation est vide, liste toutes les installations du client avec leurs interventions.", mapOf(
             "client" to prop("Nom exact du client."), "installation" to prop("Nom de l'installation si le client en possède plusieurs.")
         ), listOf("client")),
-        tool("intervention_modifier", "Modifie le CONTENU d'un rapport d'intervention existant (description, actions, mesures, diagnostic…) et régénère sa note Obsidian et son PDF sans supprimer les photos. Les champs omis restent inchangés ; « effacer » vide explicitement un champ ; pour retirer une ligne (ex. une mesure), renvoie le champ complet SANS cette ligne (jamais de remarque « retiré du rapport »). Pour la MISE EN PAGE des rapports (ordre, titres, emojis, tableaux), utilise presentation_modifier avec cible « rapport ». RÈGLE ABSOLUE : le rapport ne contient QUE ce que l'utilisateur a dit, avec ses mots (reformulés proprement au besoin). N'ajoute JAMAIS d'action, de mesure, de valeur (température, tension, courant…), de constat, d'état (« parfait état », « conforme »), de recommandation ni de date qu'il n'a pas donnés ; un champ non dicté reste vide. Pas de commentaire sur le rapport lui-même. Les éléments non dits sont retirés automatiquement et signalés.", mapOf(
+        tool("intervention_modifier", "Modifie le CONTENU d'un rapport d'intervention existant (description, actions, mesures, diagnostic…) et régénère sa note Obsidian et son PDF sans supprimer les photos. « Modifie-la », « refais-la proprement », « avec la bonne présentation » : APPELLE-LE DIRECTEMENT (sans afficher l'historique), même sans aucun champ — l'identifiant est facultatif (fiche la plus récente), le rapport est régénéré avec la présentation actuelle (onduleurs et séries en tableaux, actions détaillées) et complété par la liste d'actions et les onduleurs écrits dans la conversation. Les champs omis restent inchangés ; « effacer » vide explicitement un champ ; pour retirer une ligne (ex. une mesure), renvoie le champ complet SANS cette ligne (jamais de remarque « retiré du rapport »). Pour la MISE EN PAGE des rapports (ordre, titres, emojis, tableaux), utilise presentation_modifier avec cible « rapport ». RÈGLE ABSOLUE : le rapport ne contient QUE ce que l'utilisateur a dit, avec ses mots (reformulés proprement au besoin). N'ajoute JAMAIS d'action, de mesure, de valeur (température, tension, courant…), de constat, d'état (« parfait état », « conforme »), de recommandation ni de date qu'il n'a pas donnés ; un champ non dicté reste vide. Pas de commentaire sur le rapport lui-même. Les éléments non dits sont retirés automatiquement et signalés.", mapOf(
             "client" to prop("Nom exact du client."),
             "installation" to prop("Nom exact de l'installation."),
-            "intervention_id" to prop("Identifiant exact obtenu via interventions_liste."),
+            "intervention_id" to prop("Identifiant exact (interventions_liste). Facultatif : vide = la fiche la plus récente du client."),
             "date" to prop("Nouvelle date yyyy-MM-dd (optionnel)."),
             "categorie" to prop("Nouvelle catégorie (optionnel)."),
             "description" to prop("Nouveau résumé factuel (optionnel)."),
@@ -327,7 +327,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "statut" to prop("terminee | a_suivre | en_attente (optionnel)."),
             "prochaine_maintenance" to prop("Date yyyy-MM-dd ou « effacer » (optionnel)."),
             "notes" to prop("Notes ou « effacer » (optionnel).")
-        ), listOf("client", "installation", "intervention_id")),
+        ), listOf("client")),
         tool("interventions_synthese", "Produit un bilan intelligent de l'historique photovoltaïque : volume, dernières interventions, catégories, actions en attente et prochaines maintenances. N'infère aucune panne ni mesure absente.", mapOf(
             "client" to prop("Nom du client exact ou partiel ; vide = tous les clients."),
             "installation" to prop("Nom exact ou partiel de l'installation (optionnel).")
@@ -1051,11 +1051,28 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         }
     }
 
-    /** Dernier message de l'utilisateur (4 h) qui contient une liste d'actions structurée (« Coffret AC : … »), ou "". */
-    private fun derniereListeStructuree(): String {
+    /**
+     * Dernier message (4 h) qui contient une liste d'actions structurée (« Coffret AC : … ») : de l'utilisateur, ou —
+     * [assistant] — la fiche que JARVIS lui a présentée et qu'il demande de reprendre. "" sinon.
+     */
+    private fun derniereListeStructuree(assistant: Boolean = false): String {
         val limite = System.currentTimeMillis() - 4 * 3_600_000L
-        val msgs = runCatching { app.chat.toList() }.getOrDefault(emptyList()) + fr.dd.jarvis.service.CarBridge.contexte()
-        return msgs.filter { it.fromUser && it.ts >= limite }.lastOrNull { ActionsDetaillees.extraire(it.text).isNotEmpty() }?.text.orEmpty()
+        val msgs = (runCatching { app.chat.toList() }.getOrDefault(emptyList()) + fr.dd.jarvis.service.CarBridge.contexte()).filter { it.ts >= limite }
+        return msgs.filter { it.fromUser }.lastOrNull { ActionsDetaillees.extraire(it.text).isNotEmpty() }?.text
+            ?: (if (assistant) msgs.filter { !it.fromUser }.lastOrNull { ActionsDetaillees.extraire(it.text).isNotEmpty() }?.text else null)
+            ?: ""
+    }
+
+    /** Mesures complétées des blocs « Onduleur N » de [texte] absents (ou sans séries) dans [mesures]. */
+    private fun completerOnduleurs(mesures: String, texte: String): String {
+        if (texte.isBlank()) return mesures
+        val existants = OnduleursIntervention.blocs(mesures).associateBy { it.numero }
+        val manquants = OnduleursIntervention.blocs(texte).filter { b ->
+            val e = existants[b.numero]
+            MesuresSeries.analyser(b.contenu).series.isNotEmpty() && (e == null || MesuresSeries.analyser(e.contenu).series.isEmpty())
+        }
+        if (manquants.isEmpty()) return mesures
+        return (listOf(mesures) + manquants.map { "Onduleur ${it.numero} : ${it.contenu}" }).filter { it.isNotBlank() }.joinToString("\n")
     }
 
     /** Ce que l'utilisateur a dit récemment (messages de l'appli, de la voiture) : la seule source admise d'un rapport. */
@@ -1123,9 +1140,13 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     private fun interventionModifier(a: JSONObject): ToolResult {
         val (client, erreur) = clientParNom(a.s("client"))
         if (client == null) return err(erreur!!)
-        val site = siteDe(client, a.s("installation"))
+        // Identifiant et installation facultatifs : « modifie-la », « refais-la proprement » visent la fiche la plus récente.
+        val idDemande = a.s("intervention_id").removePrefix("#")
+        val site = (if (a.s("installation").isNotBlank()) siteDe(client, a.s("installation")) else null)
+            ?: client.sites.firstOrNull { s -> idDemande.isNotBlank() && s.interventions.any { it.id == idDemande } }
+            ?: (if (a.s("installation").isBlank()) client.sites.filter { it.interventions.isNotEmpty() }.maxByOrNull { s -> s.interventions.maxOf { it.date } } else null)
             ?: return err("Installation introuvable ou ambiguë pour ${client.nom}.")
-        val id = a.s("intervention_id")
+        val id = idDemande.ifBlank { site.interventions.maxByOrNull { it.date }?.id.orEmpty() }
         val ancienne = site.interventions.firstOrNull { it.id == id }
             ?: return err("Intervention $id introuvable pour ${client.nom} — ${site.nom}. Consulte d'abord interventions_liste pour obtenir son identifiant.")
         fun valeur(cle: String, precedente: String): String {
@@ -1163,7 +1184,20 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             prochaineMaintenance = prochaine,
             notes = champ("notes", ancienne.notes)
         )
-        return ok(svc.modifierIntervention(client.id, site.id, id, maj) + garde.message())
+        // « Refais-la avec la bonne présentation » sans champ : la fiche est complétée par ce qui a été écrit dans la
+        // conversation (liste détaillée des actions, onduleurs manquants) puis son rapport régénéré.
+        val texteChat = derniereListeStructuree(assistant = true)
+        val detail = ActionsDetaillees.extraire(texteChat)
+        val actionsFinales = if (!a.has("actions") && detail.size > ListesRapport.elements(maj.actions).size) detail.joinToString("\n") else maj.actions
+        val mesuresFinales = if (a.has("mesures")) maj.mesures else completerOnduleurs(maj.mesures, texteChat)
+        val complete = maj.copy(actions = actionsFinales, mesures = mesuresFinales)
+        val ajouts = buildList {
+            if (complete.actions != maj.actions) add("liste détaillée des actions reprise de la conversation")
+            if (complete.mesures != maj.mesures) add("onduleur(s) manquant(s) ajouté(s) : " + OnduleursIntervention.blocs(complete.mesures).map { it.numero }
+                .filter { n -> OnduleursIntervention.blocs(maj.mesures).none { it.numero == n } }.joinToString(", "))
+        }
+        return ok(svc.modifierIntervention(client.id, site.id, id, complete) + garde.message() +
+            (if (ajouts.isNotEmpty()) "\n➕ " + ajouts.joinToString(" ; ") else ""))
     }
 
     private suspend fun interventionSupprimer(a: JSONObject): ToolResult {
