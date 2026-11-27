@@ -45,6 +45,22 @@ object Stock {
         return mots.any { m -> d.contains(m.take(5)) }
     }
 
+    /** Équivalences anglais / français des étiquettes (« french » ↔ « france »). */
+    private fun racine(m: String) = when (m) { "french" -> "france"; "francais", "francaise" -> "france"; else -> m }
+
+    /**
+     * Version exigeante pour les IMAGES de secours : le sujet principal (premier mot significatif) doit être dans les
+     * étiquettes, ou au moins deux mots de la recherche. « phoenix fire » ne donne plus une femme aux cheveux de feu.
+     */
+    internal fun pertinentStrict(requete: String, descripteur: String): Boolean {
+        val d = sansAccents(descripteur).split(Regex("[^a-z0-9]+")).filter { it.length >= 3 }.map { racine(it).take(5) }.toSet()
+        if (d.isEmpty()) return false
+        val mots = sansAccents(requete).split(Regex("[^a-z0-9]+")).filter { it.length >= 3 && it !in VIDES && it !in VIDES_FR }.map { racine(it).take(5) }.distinct()
+        if (mots.isEmpty()) return false
+        val trouves = mots.count { it in d }
+        return mots.first() in d || trouves >= 2
+    }
+
     /** Mots-clés de recherche tirés d'un prompt de plan (en anglais) quand le scénario n'en donne pas. */
     fun motsCles(visuel: String, max: Int = 4): String = visuel.lowercase().replace(Regex("[^a-z0-9 ]"), " ").split(' ')
         .filter { it.length > 2 && it !in VIDES }.distinct().take(max).joinToString(" ")
@@ -121,7 +137,9 @@ object Stock {
      * Photo ou illustration libre de droits pour [requete] (anglais, ou français si [francais]) : le secours des images
      * générées quand l'IA d'images n'a plus de quota. Pexels puis Pixabay, orientation voulue, jamais deux fois la même.
      */
-    suspend fun chercherImage(app: JarvisApp, requete: String, vertical: Boolean, pris: MutableSet<String>, francais: Boolean = false): Clip? = withContext(Dispatchers.IO) {
+    /** [illustration] : un symbole (phénix, allégorie) → illustrations ; sinon des photos. Jamais de vecteurs (fond transparent = noir). */
+    suspend fun chercherImage(app: JarvisApp, requete: String, vertical: Boolean, pris: MutableSet<String>, francais: Boolean = false,
+                              illustration: Boolean = false): Clip? = withContext(Dispatchers.IO) {
         val q = java.net.URLEncoder.encode(requete.trim().ifBlank { return@withContext null }, "UTF-8")
         val pexels = app.store.pexelsKey.value.trim()
         if (pexels.isNotBlank()) {
@@ -132,7 +150,7 @@ object Stock {
                 val p = photos.optJSONObject(i) ?: continue
                 val id = "pexels-img:" + p.optLong("id")
                 if (id in pris) continue
-                if (!pertinent(requete, p.optString("alt") + " " + p.optString("url").substringAfter("/photo/").replace('-', ' '))) continue
+                if (!pertinentStrict(requete, p.optString("alt") + " " + p.optString("url").substringAfter("/photo/").replace('-', ' '))) continue
                 val lien = imagePexels(p) ?: continue
                 pris += id
                 return@withContext Clip(id, lien, "Pexels", p.optString("photographer"), p.optString("url"), 0)
@@ -140,14 +158,16 @@ object Stock {
         }
         val pixabay = app.store.pixabayKey.value.trim()
         if (pixabay.isNotBlank()) {
-            val j = get("https://pixabay.com/api/?key=${java.net.URLEncoder.encode(pixabay, "UTF-8")}&q=$q&image_type=all&orientation=${if (vertical) "vertical" else "horizontal"}" +
+            val j = get("https://pixabay.com/api/?key=${java.net.URLEncoder.encode(pixabay, "UTF-8")}&q=$q&image_type=${if (illustration) "illustration" else "photo"}" +
+                "&orientation=${if (vertical) "vertical" else "horizontal"}" +
                 "&per_page=30&safesearch=true&order=popular" + (if (francais) "&lang=fr" else ""))
             val hits = j?.optJSONArray("hits")
             if (hits != null) for (i in 0 until hits.length()) {
                 val h = hits.optJSONObject(i) ?: continue
                 val id = "pixabay-img:" + h.optLong("id")
                 if (id in pris) continue
-                if (!pertinent(requete, h.optString("tags") + " " + h.optString("pageURL").substringAfter(".com/").replace('-', ' ').replace('/', ' '))) continue
+                if (h.optString("type").contains("vector", ignoreCase = true)) continue
+                if (!pertinentStrict(requete, h.optString("tags") + " " + h.optString("pageURL").substringAfter(".com/").replace('-', ' ').replace('/', ' '))) continue
                 val lien = imagePixabay(h) ?: continue
                 pris += id
                 return@withContext Clip(id, lien, "Pixabay", h.optString("user"), h.optString("pageURL"), 0)

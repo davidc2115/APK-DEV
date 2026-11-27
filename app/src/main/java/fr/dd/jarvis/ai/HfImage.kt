@@ -10,16 +10,17 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Images GRATUITES de secours sur Hugging Face (Spaces « ZeroGPU », sans carte bancaire) quand le quota quotidien de
- * Cloudflare est épuisé : FLUX.2 klein 9B (Space officiel de Black Forest Labs, 4 étapes), puis Z-Image-Turbo (Space
- * officiel de Tongyi) si le premier refuse. Chaque image prend quelques secondes du quota GPU gratuit du jour (5 min avec
- * un compte gratuit, partagé avec l'animation des images).
+ * Cloudflare est épuisé : Z-Image-Turbo (Space officiel de Tongyi, puis une copie communautaire). Un compte gratuit n'a
+ * que 5 min de GPU par jour ET quelques utilisations seulement (≈ 3 par jour en 2026), chaque appel réservant au moins
+ * 60 s : réservé aux images demandées une à une, jamais aux montages (le quota sert à animer leurs images).
+ * FLUX.2 klein n'est pas utilisé : son Space réserve 95 s sur un GPU « xlarge » (compté double) et refuse plus de 1024 px.
  */
 object HfImage {
     data class Space(val nom: String, val base: String, val point: String)
 
     val SPACES = listOf(
-        Space("FLUX.2 klein (Hugging Face)", "https://black-forest-labs-flux-2-klein-9b.hf.space", "generate"),
-        Space("Z-Image-Turbo (Hugging Face)", "https://tongyi-mai-z-image-turbo.hf.space", "generate")
+        Space("Z-Image-Turbo (Hugging Face)", "https://tongyi-mai-z-image-turbo.hf.space", "generate"),
+        Space("Z-Image-Turbo bis (Hugging Face)", "https://mrfakename-z-image-turbo.hf.space", "generate_image")
     )
 
     private val http = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(180, TimeUnit.SECONDS).callTimeout(200, TimeUnit.SECONDS).build()
@@ -41,7 +42,12 @@ object HfImage {
 
     /** Paramètres de l'API Gradio de chaque Space (ordre exact des champs de l'interface). */
     internal fun donnees(space: Space, prompt: String, largeur: Int, hauteur: Int): JSONArray = when {
-        space.base.contains("z-image") -> JSONArray().put(prompt.take(1500)).put(resolutionZImage(largeur, hauteur)).put(42).put(8).put(3.0).put(true).put(JSONArray())
+        space.base.contains("tongyi") -> JSONArray().put(prompt.take(1500)).put(resolutionZImage(largeur, hauteur)).put(42).put(8).put(3.0).put(true).put(JSONArray())
+        // Copie communautaire : prompt, hauteur, largeur (1024 px au plus), étapes, graine, graine aléatoire.
+        space.base.contains("mrfakename") -> resolutionZImage(largeur, hauteur).substringBefore(' ').split('x').map { it.toInt() }.let { (l, h) ->
+            val k = 1024.0 / maxOf(l, h)
+            JSONArray().put(prompt.take(1500)).put((h * k).toInt() / 16 * 16).put((l * k).toInt() / 16 * 16).put(9).put(42).put(true)
+        }
         // FLUX.2 klein : prompt, images de référence, mode distillé 4 étapes, graine, graine aléatoire, largeur, hauteur, étapes, guidance, réécriture.
         else -> JSONArray().put(prompt.take(1500)).put(JSONArray()).put("Distilled (4 steps)").put(0).put(true)
             .put(cote(largeur)).put(cote(hauteur)).put(4).put(1.0).put(false)
@@ -93,7 +99,7 @@ object HfImage {
     fun diagnosticRefus(token: String): String {
         dernierDiagnostic.let { (t, m) -> if (m.isNotBlank() && System.currentTimeMillis() - t < 10 * 60_000L) return m }
         val m = try {
-            "quota GPU gratuit épuisé pour le compte Hugging Face ${compte(token)} : il se recharge au fil des heures (réessaie plus tard ou demain)"
+            "quota GPU gratuit épuisé pour le compte Hugging Face ${compte(token)} (≈ 3 utilisations et 5 min de GPU par jour) : il revient 24 h après la première utilisation"
         } catch (e: ApiException) { e.message.orEmpty() }
         catch (e: Exception) { "quota GPU gratuit probablement épuisé (vérification du jeton impossible : ${e.message?.take(60)})" }
         dernierDiagnostic = System.currentTimeMillis() to m

@@ -110,7 +110,8 @@ object ImageGen {
 
     /** Génère une image, la garde dans l'appli et dans Obsidian. Retourne (fichier, emplacement Obsidian). */
     /** [largeur] × [hauteur] : format demandé (modèles FLUX.2 seulement, ex. 768 × 1344 pour un TikTok vertical). */
-    suspend fun generate(app: JarvisApp, prompt: String, modele: String = "", largeur: Int = 0, hauteur: Int = 0): Pair<File, String> = withContext(Dispatchers.IO) {
+    /** [huggingFace] = false : pas de secours sur Hugging Face (son petit quota gratuit est gardé pour animer les images). */
+    suspend fun generate(app: JarvisApp, prompt: String, modele: String = "", largeur: Int = 0, hauteur: Int = 0, huggingFace: Boolean = true): Pair<File, String> = withContext(Dispatchers.IO) {
         val list = comptes(app)
         val hf = app.store.huggingFaceToken.value.trim()
         if (list.isEmpty() && hf.isBlank()) throw IllegalStateException("Aucun compte Cloudflare : ajoute « idCompte:jeton » dans Réglages › IA › Images & vidéo (ou ton jeton Hugging Face gratuit).")
@@ -142,6 +143,7 @@ object ImageGen {
                 java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRENCH).format(java.util.Date(minuitUtc(System.currentTimeMillis()))) + ")"
             else -> last?.message?.take(160) ?: "Cloudflare indisponible"
         }
+        if (!huggingFace) throw IllegalStateException(raisonCf)
         if (hf.isBlank()) throw IllegalStateException("$raisonCf — ajoute ton jeton Hugging Face gratuit (Réglages › IA › Images & vidéo) pour continuer les images sur Hugging Face.")
         val octets = try { HfImage.image(hf, prompt, largeur, hauteur) } catch (e: Exception) {
             throw IllegalStateException("$raisonCf ; Hugging Face : ${e.message?.take(160)}")
@@ -170,6 +172,39 @@ object ImageGen {
         val loc = app.obsidian.saveBytes("JARVIS/Images", name, bytes, "image/png")
         return f to loc
     }
+
+    // ------------------------------------------------------------------ banque des images déjà générées
+
+    private val MOTS_VIDES = setOf("vertical", "portrait", "composition", "cinematic", "lighting", "highly", "detailed", "text", "letters",
+        "watermark", "with", "from", "into", "over", "under", "above", "that", "this", "their", "the", "and", "epic", "style", "quality",
+        "high", "horizontal", "shot", "scene", "view", "background", "very", "dramatic", "image", "photo", "realistic", "ultra", "sharp",
+        "focus", "camera", "angle", "close", "wide", "beautiful", "majestic", "stunning", "glowing", "light", "colors", "colours")
+
+    /** Mots importants d'une description (anglais) : sans accents, sans mots de style, au singulier. */
+    internal fun motsImportants(t: String): Set<String> =
+        java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+            .split(Regex("[^a-z0-9]+")).filter { it.length >= 4 && it !in MOTS_VIDES }
+            .map { if (it.length > 4 && it.endsWith("s") && !it.endsWith("ss")) it.dropLast(1) else it }.toSet()
+
+    /** Mots importants communs entre ce qu'on cherche et la description d'une image déjà faite. */
+    internal fun score(requete: String, description: String): Int = motsImportants(requete).intersect(motsImportants(description)).size
+
+    /**
+     * Images IA déjà générées par JARVIS dont la description ressemble à [requete] (au moins [minimum] mots importants
+     * communs), les plus proches puis les plus récentes d'abord : le secours gratuit et SUR LE SUJET quand le quota du
+     * jour est épuisé (mieux qu'une photo libre de droits au hasard).
+     */
+    fun banque(app: JarvisApp, requete: String, exclues: Set<String>, minimum: Int = 2): List<File> = runCatching {
+        val dossier = File(app.filesDir, "images")
+        val f = File(app.filesDir, "images_descriptions.json")
+        if (!f.isFile) return@runCatching emptyList<File>()
+        val j = JSONObject(f.readText())
+        j.keys().asSequence().filter { !it.startsWith("sha256:") && it !in exclues }
+            .mapNotNull { nom -> File(dossier, nom).takeIf { it.isFile && it.length() > 10_000 }?.let { it to score(requete, j.optString(nom)) } }
+            .filter { it.second >= minimum }
+            .sortedWith(compareByDescending<Pair<File, Int>> { it.second }.thenByDescending { it.first.lastModified() })
+            .map { it.first }.toList()
+    }.getOrDefault(emptyList())
 
     /** Garde la description (prompt) de chaque image générée, pour la retrouver plus tard par son sujet. */
     @Synchronized

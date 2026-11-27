@@ -232,7 +232,7 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                         val images = Regex("(?i)images? (ia|g[ée]n[ée]r[ée]e?s?)|(à partir|depuis|avec) (d['e]s? |de |ces |mes )?images|illustrations?|comme (mon|l'|cet) ?exemple").containsMatchIn(demande)
                         val stock = Regex("(?i)pixabay|pexels|libres? de droits").containsMatchIn(demande)
                         when {
-                            images && stock -> "auto"     // les deux demandés : images pour les symboles, plans réels pour le reste
+                            images && stock -> "mixte"    // les deux demandés : images pour les symboles, plans réels pour le reste (Pixabay accepté)
                             images -> "images"
                             stock -> "stock"
                             else -> a.optString("plans").ifBlank { "auto" }

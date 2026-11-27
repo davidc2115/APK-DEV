@@ -209,18 +209,43 @@ class TikTokStudioTest {
         assertEquals(java.time.Instant.parse("2026-11-28T00:00:00Z").toEpochMilli(), ImageGen.minuitUtc(t))
     }
 
-    /** Hugging Face : paramètres exacts des deux Spaces d'images et format vertical. */
+    /** Hugging Face : paramètres exacts des deux Spaces Z-Image (≤ 1024 px pour la copie communautaire), format vertical. */
     @Test fun parametresImagesHuggingFace() {
-        val klein = HfImage.donnees(HfImage.SPACES[0], "phoenix", 768, 1344)
-        assertEquals(10, klein.length())
-        assertEquals("Distilled (4 steps)", klein.getString(2))
-        assertEquals(768, klein.getInt(5)); assertEquals(1344, klein.getInt(6)); assertEquals(4, klein.getInt(7))
-        val z = HfImage.donnees(HfImage.SPACES[1], "phoenix", 768, 1344)
+        val z = HfImage.donnees(HfImage.SPACES[0], "phoenix", 768, 1344)
         assertEquals(7, z.length())
         assertEquals("720x1280 ( 9:16 )", z.getString(1))
+        val bis = HfImage.donnees(HfImage.SPACES[1], "phoenix", 768, 1344)
+        assertEquals(6, bis.length())
+        assertEquals(1024, bis.getInt(1)); assertEquals(576, bis.getInt(2))   // hauteur puis largeur
+        assertTrue(HfImage.SPACES.none { it.base.contains("klein") })        // 95 s sur GPU xlarge : trop coûteux en quota gratuit
         assertEquals("1280x720 ( 16:9 )", HfImage.resolutionZImage(1344, 768))
         assertEquals("1024x1024 ( 1:1 )", HfImage.resolutionZImage(0, 0))
         assertEquals(1024, HfImage.cote(0)); assertEquals(1536, HfImage.cote(4000)); assertEquals(768, HfImage.cote(770))
+    }
+
+    /** Banque JARVIS : une image déjà faite d'un phénix tricolore est retrouvée pour un plan de phénix, pas pour un tracteur. */
+    @Test fun banqueImagesParSujet() {
+        val desc = "A majestic phoenix with blue, white and red flames rising above the Eiffel Tower, vertical portrait 9:16 composition, cinematic lighting"
+        assertTrue(ImageGen.score("Phoenix of tricolor flames soaring over Paris and the Eiffel tower at dawn", desc) >= 2)
+        assertTrue(ImageGen.score("A farmer driving a tractor in a wheat field", desc) < 2)
+        assertFalse("vertical" in ImageGen.motsImportants(desc))
+        assertTrue("flame" in ImageGen.motsImportants(desc))
+    }
+
+    /** Photos de secours : le sujet principal doit être dans les étiquettes (plus de femme aux cheveux de feu pour un phénix). */
+    @Test fun photosDeSecoursVraimentPertinentes() {
+        assertFalse(Stock.pertinentStrict("phoenix fire", "woman, fire, hair, fantasy, flames"))
+        assertTrue(Stock.pertinentStrict("phoenix fire", "phoenix, bird, fire, mythology"))
+        assertTrue(Stock.pertinentStrict("french flag waving", "flag, france, tricolor, waving"))
+        assertFalse(Stock.pertinentStrict("firefighters fire truck", "horse, eye, animal"))
+        assertFalse(Stock.pertinentStrict("phoenix", ""))
+    }
+
+    /** Vidéo refusée plutôt que hors sujet : la cause et les solutions sont dites. */
+    @Test fun refusHorsSujetExplique() {
+        val m = Montage.horsSujetMessage("quota gratuit Cloudflare du jour épuisé", 7, 9, "patriotisme français, phénix bleu blanc rouge")
+        assertTrue(m, m.startsWith("❌ Vidéo non créée : 7 images sur 9"))
+        assertTrue(m, m.contains("Cloudflare du jour épuisé") && m.contains("avec Pixabay") && m.contains("2e compte Cloudflare"))
     }
 
     /** Réponse Gradio : image simple (FLUX.2 klein), galerie (Z-Image) ou simple chemin. */

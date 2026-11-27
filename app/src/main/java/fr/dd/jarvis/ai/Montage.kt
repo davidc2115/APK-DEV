@@ -212,7 +212,8 @@ object Montage {
             d.style.isNotBlank() && sb.signature.isNotBlank() && ImageGen.disponible(app) -> {
                 progres("🎨 Image de signature (${d.style.take(40)})…")
                 runCatching { listOf(ImageGen.generate(app, sb.signature + ", epic, highly detailed, ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, no text, no letters",
-                    "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768).first to true) }
+                    "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768, huggingFace = false).first to true) }
+                    .recoverCatching { listOfNotNull(ImageGen.banque(app, sb.signature, emptySet()).firstOrNull()?.let { it to true }).ifEmpty { throw it } }
                     .getOrElse { echecs += "image de signature : ${it.message?.take(160)}"; emptyList() }
             }
             d.style.isNotBlank() && sb.signature.isNotBlank() -> { echecs += "image de signature : ajoute un compte Cloudflare ou ton jeton Hugging Face (Réglages › IA › Images & vidéo), ou tes images dans Réglages › TikTok"; emptyList() }
@@ -220,10 +221,14 @@ object Montage {
         }
         // 2a. Un média par plan du scénario, gratuit : image générée (Cloudflare) pour un symbole ou une allégorie (« phénix
         // tricolore au-dessus de Paris »), plan réel libre de droits (Pixabay / Pexels) pour une scène filmable.
-        val modePlans = d.plans.trim().lowercase()
+        // « mixte » : images ET plans libres de droits demandés par toi (Pixabay accepté, pas de garde-fou hors sujet).
+        val mixte = d.plans.trim().lowercase() == "mixte"
+        val modePlans = if (mixte) "auto" else d.plans.trim().lowercase()
         val credits = mutableListOf<Stock.Clip>()
-        // Images : Cloudflare (quota gratuit du jour), puis Hugging Face (gratuit), puis photos libres de droits.
-        val cfOk = ImageGen.disponible(app)
+        // Images : Cloudflare (quota gratuit du jour), puis tes images IA déjà faites sur le même sujet (banque JARVIS),
+        // puis photos libres de droits vraiment pertinentes. Hugging Face n'est pas utilisé ici : son petit quota gratuit
+        // sert à animer les images.
+        val cfOk = app.store.cfAccounts.any { it.contains(':') }
         fun veutImage(p: Plan) = (cfOk || Stock.disponible(app)) && when (modePlans) {
             "images" -> true
             "stock", "ia" -> false
@@ -232,24 +237,34 @@ object Montage {
         val medias = mutableListOf<Media>()
         val pris = mutableSetOf<String>()
         val imagesParPlan = HashMap<Int, File>()
-        // Après un refus pour quota, inutile de redemander une image IA à chaque plan : les photos libres de droits prennent le relais.
+        val banqueUtilisee = mutableSetOf<String>()
+        var depuisBanque = 0
+        // Plans voulus en image (symbole, allégorie) mais remplis par une photo ou un plan libre de droits : hors sujet probable.
+        var imagesVoulues = 0
+        var horsSujet = 0
+        var raisonImages = ""
+        // Après un refus pour quota, inutile de redemander une image IA à chaque plan.
         var imagesIaEpuisees = !cfOk
         suspend fun image(rang: Int, p: Plan): File? = imagesParPlan[rang] ?: if (imagesIaEpuisees) null else runCatching {
             val prompt = p.visuel + ", ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, cinematic lighting, highly detailed, no text, no letters, no watermark"
             // Image directement au bon format et nette (FLUX.2 klein 4B : ≈ 10 fois moins de quota que le 9B).
-            ImageGen.generate(app, prompt, "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768).first
+            ImageGen.generate(app, prompt, "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768, huggingFace = false).first
         }.onFailure {
-            echecs += "image ${rang + 1} : ${it.message?.take(220)}"
+            if (raisonImages.isBlank()) raisonImages = it.message?.take(220).orEmpty()
             if (Regex("(?i)quota|épuisé|allocation|aucun compte|jeton").containsMatchIn(it.message.orEmpty())) imagesIaEpuisees = true
         }.getOrNull()?.also { imagesParPlan[rang] = it }
-        // Photo ou illustration libre de droits (Pexels / Pixabay) : le secours gratuit des images IA.
+        // Image IA déjà faite par JARVIS sur le même sujet (jamais deux fois la même dans une vidéo).
+        fun banque(rang: Int, p: Plan): File? = imagesParPlan[rang] ?: ImageGen.banque(app, p.visuel, banqueUtilisee).firstOrNull()?.also {
+            banqueUtilisee += it.name; imagesParPlan[rang] = it; depuisBanque++
+        }
+        // Photo ou illustration libre de droits (Pexels / Pixabay), seulement si elle montre vraiment le sujet.
         suspend fun photo(i: Int, p: Plan): File? {
             if (!Stock.disponible(app)) return null
             val requetes = listOf(p.recherche, Stock.motsCles(p.visuel), Stock.motsCles(p.visuel, 2)).filter { it.isNotBlank() }.distinct()
-            val clip = requetes.firstNotNullOfOrNull { q -> Stock.chercherImage(app, q, vertical, pris) }
+            val clip = requetes.firstNotNullOfOrNull { q -> Stock.chercherImage(app, q, vertical, pris, illustration = p.source == "image") }
                 ?: Stock.motsClesFr(d.sujet).let { mots -> listOf(mots.joinToString(" "), mots.firstOrNull().orEmpty()) }
-                    .filter { it.isNotBlank() }.distinct().firstNotNullOfOrNull { q -> Stock.chercherImage(app, q, vertical, pris, francais = true) }
-            val f = clip?.let { Stock.telecharger(it, File(travail, "photo_$i.jpg")) }
+                    .filter { it.isNotBlank() }.distinct().firstNotNullOfOrNull { q -> Stock.chercherImage(app, q, vertical, pris, francais = true, illustration = p.source == "image") }
+            val f = clip?.let { Stock.telecharger(it, File(travail, "photo_$i.jpg")) }?.takeIf { imageUtilisable(it) }
             if (clip != null && f != null) credits += clip
             return f
         }
@@ -264,29 +279,34 @@ object Montage {
             return f
         }
         if (manqueTotal > 0 && modePlans != "ia" && (Stock.disponible(app) || cfOk)) {
-            val imagesAvant = echecs.size
             val nb = if (d.tiktok) ceil(manqueTotal / 3000.0).toInt().coerceIn(1, 12) else max(1, ceil(manqueTotal / 4000.0).toInt())
             for (i in 0 until nb) {
                 verifierAnnulation()
                 val rang = (existants.size + i) % sb.plans.size
                 val p = sb.plans[rang]
                 val img = veutImage(p)
-                progres(if (img) "🎨 Image ${i + 1}/$nb" + (if (imagesIaEpuisees) " (photo libre de droits)…" else "…") else "🎞️ Plan ${i + 1}/$nb libre de droits (Pixabay / Pexels)…")
+                progres(if (img) "🎨 Image ${i + 1}/$nb" + (if (imagesIaEpuisees) " (banque JARVIS / photo libre de droits)…" else "…") else "🎞️ Plan ${i + 1}/$nb libre de droits (Pixabay / Pexels)…")
                 // Source préférée, puis les autres si elle ne donne rien (jamais de trou dans la vidéo) :
-                // image IA → photo libre de droits → plan vidéo libre de droits.
-                val m = if (img) (image(rang, p) ?: photo(i, p))?.let { Media(i, it, true, p.texte) }
-                    ?: (if (Stock.disponible(app) && modePlans != "images") reel(i, p)?.let { Media(i, it, false, p.texte) } else null)
-                else (if (Stock.disponible(app)) reel(i, p)?.let { Media(i, it, false, p.texte) } else null)
-                    ?: (if (modePlans != "stock") (image(rang, p) ?: photo(i, p))?.let { Media(i, it, true, p.texte) } else null)
+                // image IA → banque JARVIS → photo libre de droits → plan vidéo libre de droits.
+                val m = if (img) {
+                    imagesVoulues++
+                    (image(rang, p) ?: banque(rang, p))?.let { Media(i, it, true, p.texte) }
+                        ?: (photo(i, p)?.let { Media(i, it, true, p.texte) }
+                            ?: (if (Stock.disponible(app) && modePlans != "images") reel(i, p)?.let { Media(i, it, false, p.texte) } else null))
+                            ?.also { horsSujet++ }
+                } else (if (Stock.disponible(app)) reel(i, p)?.let { Media(i, it, false, p.texte) } else null)
+                    ?: (if (modePlans != "stock") (image(rang, p) ?: banque(rang, p) ?: photo(i, p))?.let { Media(i, it, true, p.texte) } else null)
                 if (m != null) medias += m
             }
-            // Les images manquantes ont été remplacées : leurs refus ne sont plus des échecs, une seule ligne suffit.
-            if (medias.size >= nb && echecs.size > imagesAvant) {
-                val raison = echecs.drop(imagesAvant).firstOrNull { it.startsWith("image ") }?.substringAfter(" : ").orEmpty()
-                while (echecs.size > imagesAvant) echecs.removeAt(echecs.size - 1)
-                if (raison.isNotBlank()) echecs += "images IA remplacées par des photos libres de droits : ${raison.take(200)}"
-            }
+            if (raisonImages.isNotBlank()) echecs += "images IA indisponibles (" + raisonImages + ")" +
+                (if (depuisBanque > 0) " : $depuisBanque reprise${if (depuisBanque > 1) "s" else ""} de ta banque d'images JARVIS sur le même sujet" else "")
             if (medias.isEmpty()) echecs += "aucune image ni aucun plan libre de droits obtenu"
+            // Garde-fou : les images IA étaient prévues mais la plupart ont dû être remplacées par des photos au hasard.
+            // Mieux vaut ne pas livrer une vidéo hors sujet (dis « avec Pixabay » pour l'accepter quand même).
+            if (cfOk && !mixte && modePlans != "stock" && imagesVoulues >= 2 && horsSujet * 2 > imagesVoulues) {
+                travail.deleteRecursively()
+                return horsSujetMessage(raisonImages, horsSujet, imagesVoulues, d.sujet)
+            }
         }
         // 2b. Vraie animation IA des images (Hugging Face Wan 2.2, quota GPU gratuit du jour : 3 images au plus, 10 min
         // en tout) ; une image non animée l'est au montage (zoom / travelling).
@@ -472,44 +492,55 @@ object Montage {
         val nom = (if (d.tiktok) "tiktok_" else "video_") + System.currentTimeMillis() + ".mp4"
         val sortie = File(dossier(app), nom)
         // Encodeur LOGICIEL d'Android d'abord : l'encodeur matériel de certains téléphones (Xiaomi / HyperOS notamment) rend
-        // des images abîmées (blocs remis à zéro → bandes et images figées sur TikTok). Chaque export est vérifié image par
-        // image ; un export abîmé est refait autrement, et le moins abîmé n'est gardé qu'en dernier recours.
-        data class Essai(val avecTexte: Boolean, val avecSon: Boolean, val l: Int, val h: Int, val libelle: String, val logiciel: Boolean = true)
+        // des images abîmées (blocs remis à zéro → bandes et images figées sur TikTok). Le réglage (portrait direct ou
+        // paysage + rotation) est choisi d'après ce que l'encodeur accepte vraiment, pour garder la pleine résolution.
+        // Chaque export est vérifié (images abîmées, résolution) ; sinon il est refait autrement, le meilleur gardé.
+        data class Essai(val avecTexte: Boolean, val avecSon: Boolean, val l: Int, val h: Int, val libelle: String, val logiciel: Boolean = true, val portrait: Boolean = true)
         val (l720, h720) = if (vertical) 720 to 1280 else 1280 to 720
+        val reglagePlein = reglageLogiciel(largeur, hauteur)
+        val reglage720 = reglageLogiciel(l720, h720)
         val essais = listOfNotNull(
-            Essai(true, true, largeur, hauteur, "complet"),
-            if (largeur != l720) Essai(true, true, l720, h720, "en 720p") else null,
+            reglagePlein?.let { Essai(true, true, largeur, hauteur, "complet", portrait = it) },
+            if (reglagePlein == null && largeur != l720 && reglage720 != null) Essai(true, true, l720, h720, "en 720p", portrait = reglage720) else null,
             Essai(true, true, largeur, hauteur, "encodeur matériel", logiciel = false),
-            Essai(false, true, l720, h720, "sans texte à l'écran"),
-            Essai(false, false, l720, h720, "sans texte ni son")
+            if (reglage720 != null && largeur != l720 && reglagePlein != null) Essai(true, true, l720, h720, "en 720p", portrait = reglage720) else null,
+            Essai(false, true, l720, h720, "sans texte à l'écran", logiciel = reglage720 != null, portrait = reglage720 ?: true),
+            Essai(false, false, l720, h720, "sans texte ni son", logiciel = reglage720 != null, portrait = reglage720 ?: true)
         )
         val complets = setOf("complet", "en 720p", "encodeur matériel")
         var abandons = ""
         var ok = false
         var secours: File? = null
-        var secoursAbimees = Int.MAX_VALUE
+        var secoursScore = Long.MIN_VALUE
+        var secoursAbimees = 0
         var secoursLibelle = ""
-        for ((avecTexte, avecSon, l, h, libelle, logiciel) in essais) {
+        var secoursCote = 0
+        for ((avecTexte, avecSon, l, h, libelle, logiciel, portrait) in essais) {
             progres("🎞️ Montage" + (if (libelle != "complet") " ($libelle)" else "") + "…")
             val r = runCatching {
                 exporter(app, segments, if (avecSon) voix else emptyList(), if (avecSon) musique else null, avecTexte, d.garderSon && avecSon, l, h, avecParoles, sortie,
-                    if (avecTexte && avecSon) reperes else emptyList(), tiktok = d.tiktok, bandeau = if (avecTexte && d.tiktok) sb.bandeau else "", logiciel = logiciel)
+                    if (avecTexte && avecSon) reperes else emptyList(), tiktok = d.tiktok, bandeau = if (avecTexte && d.tiktok) sb.bandeau else "",
+                    logiciel = logiciel, portrait = portrait)
             }
             if (r.isFailure) { echecs += "montage $libelle : ${r.exceptionOrNull()?.message?.take(140)}"; continue }
             progres("🔎 Vérification de la vidéo…")
-            val abimees = withContext(Dispatchers.IO) { imagesAbimees(sortie) }
-            if (abimees == 0) { ok = true; if (libelle !in complets) abandons = libelle; break }
-            echecs += "montage $libelle : $abimees images abîmées par l'encodeur du téléphone, refait autrement"
-            if (abimees < secoursAbimees) {
+            val (abimees, cote) = withContext(Dispatchers.IO) { analyser(sortie) }
+            val pleineTaille = cote == 0 || cote >= min(l, h) * 9 / 10
+            if (abimees == 0 && pleineTaille) { ok = true; if (libelle !in complets) abandons = libelle; break }
+            echecs += "montage $libelle : " + (if (abimees > 0) "$abimees images abîmées par l'encodeur du téléphone" else "résolution réduite à ${cote}p par l'encodeur") + ", refait autrement"
+            // Meilleur export de secours : sans défaut d'abord, puis la plus grande résolution, puis le moins d'images abîmées.
+            val score = if (abimees == 0) 1_000_000L + cote else -abimees.toLong()
+            if (score > secoursScore) {
                 secours = File(travail, "secours.mp4").also { sortie.copyTo(it, overwrite = true) }
-                secoursAbimees = abimees; secoursLibelle = libelle
+                secoursScore = score; secoursAbimees = abimees; secoursLibelle = libelle; secoursCote = cote
             }
         }
         if (!ok && secours != null) {
             secours.copyTo(sortie, overwrite = true)
             ok = true
             if (secoursLibelle !in complets) abandons = secoursLibelle
-            echecs += "aucun export sans défaut : vidéo gardée avec $secoursAbimees images abîmées (encodeur vidéo du téléphone défaillant)"
+            echecs += if (secoursAbimees > 0) "aucun export sans défaut : vidéo gardée avec $secoursAbimees images abîmées (encodeur vidéo du téléphone défaillant)"
+                else "vidéo en ${secoursCote}p : le téléphone a refusé de l'encoder en pleine résolution"
         }
         travail.deleteRecursively()
         if (!ok) return "❌ Le montage a échoué sur ce téléphone :\n- " + regrouper(echecs).joinToString("\n- ")
@@ -670,6 +701,29 @@ object Montage {
         return out.distinctBy { it.absolutePath }.map { it to (it.extension.lowercase() in IMAGE) }
     }
 
+    /** Refus d'une vidéo hors sujet : pourquoi, quand ça repartira, et comment forcer. */
+    internal fun horsSujetMessage(raison: String, horsSujet: Int, voulues: Int, sujet: String): String =
+        "❌ Vidéo non créée : $horsSujet image${if (horsSujet > 1) "s" else ""} sur $voulues n'auraient pas montré « ${sujet.take(60)} » " +
+            "(seules des photos libres de droits sans rapport étaient disponibles). Je préfère ne pas te livrer une vidéo hors sujet.\n" +
+            "Cause : " + raison.ifBlank { "images IA indisponibles" } + ".\n" +
+            "➡️ Relance après la remise à zéro du quota (1 h du matin), ajoute un 2e compte Cloudflare gratuit (Réglages › IA › Images & vidéo : " +
+            "chaque compte = ≈ 60 images par jour), ou dis « avec Pixabay » pour accepter des photos libres de droits."
+
+    /** Image téléchargée lisible et pas presque toute noire (une image transparente ou ratée donnait un écran noir). */
+    private fun imageUtilisable(f: File): Boolean = runCatching {
+        val o = android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 }
+        val b = android.graphics.BitmapFactory.decodeFile(f.absolutePath, o) ?: return@runCatching false
+        try {
+            var somme = 0L; var n = 0
+            for (y in 0 until b.height step 4) for (x in 0 until b.width step 4) {
+                val c = b.getPixel(x, y)
+                somme += (((c shr 16) and 0xff) + ((c shr 8) and 0xff) + (c and 0xff)) * (((c ushr 24) and 0xff)) / 255
+                n++
+            }
+            n > 0 && somme / (3L * n) >= 18
+        } finally { b.recycle() }
+    }.getOrDefault(true)
+
     /** Encodeurs logiciels d'Android (Google) : fiables partout, à la différence de certains encodeurs matériels. */
     internal fun encodeurLogiciel(nom: String) = nom.startsWith("c2.android.") || nom.startsWith("OMX.google.")
 
@@ -685,13 +739,31 @@ object Montage {
         return false
     }
 
-    /** Nombre d'images abîmées dans la vidéo [f] (lecture de chaque image compressée) ; 0 si la vérification échoue. */
-    private fun imagesAbimees(f: File): Int = runCatching {
+    /**
+     * Encodeur logiciel H.264 capable de [l] × [h] à 30 i/s : true = en portrait direct, false = en paysage + rotation,
+     * null = aucun (taille refusée, ou pas d'encodeur logiciel sur ce téléphone).
+     */
+    private fun reglageLogiciel(l: Int, h: Int): Boolean? = runCatching {
+        val encodeurs = android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS).codecInfos
+            .filter { it.isEncoder && encodeurLogiciel(it.name) && it.supportedTypes.any { t -> t.equals("video/avc", ignoreCase = true) } }
+        var paysage = false
+        for (e in encodeurs) {
+            val caps = e.getCapabilitiesForType("video/avc").videoCapabilities ?: continue
+            if (caps.areSizeAndRateSupported(l, h, 30.0)) return@runCatching true
+            if (caps.areSizeAndRateSupported(h, l, 30.0)) paysage = true
+        }
+        if (paysage) false else null
+    }.getOrNull()
+
+    /** Vidéo [f] : (images abîmées, côté court de l'image encodée) ; (0, 0) si la vérification échoue. */
+    private fun analyser(f: File): Pair<Int, Int> = runCatching {
         val ex = android.media.MediaExtractor()
         try {
             ex.setDataSource(f.absolutePath)
             val piste = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(android.media.MediaFormat.KEY_MIME)?.startsWith("video/") == true }
-                ?: return@runCatching 0
+                ?: return@runCatching 0 to 0
+            val format = ex.getTrackFormat(piste)
+            val cote = runCatching { min(format.getInteger(android.media.MediaFormat.KEY_WIDTH), format.getInteger(android.media.MediaFormat.KEY_HEIGHT)) }.getOrDefault(0)
             ex.selectTrack(piste)
             val tampon = java.nio.ByteBuffer.allocate(8 * 1024 * 1024)
             val octets = ByteArray(tampon.capacity())
@@ -705,9 +777,9 @@ object Montage {
                 if (echantillonAbime(octets, t)) n++
                 if (!ex.advance()) break
             }
-            n
+            n to cote
         } finally { ex.release() }
-    }.getOrDefault(0)
+    }.getOrDefault(0 to 0)
 
     private fun dureeMs(f: File): Long? = runCatching {
         MediaMetadataRetriever().run {
@@ -901,7 +973,7 @@ object Montage {
     private suspend fun exporter(
         app: JarvisApp, segments: List<Segment>, voix: List<File>, musique: File?, avecTexte: Boolean, garderSon: Boolean,
         largeur: Int, hauteur: Int, chanson: Boolean, sortie: File, reperes: List<SousTitres.Repere> = emptyList(),
-        tiktok: Boolean = false, bandeau: String = "", logiciel: Boolean = true
+        tiktok: Boolean = false, bandeau: String = "", logiciel: Boolean = true, portrait: Boolean = true
     ) {
         val presentation = Presentation.createForWidthAndHeight(largeur, hauteur, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP)
         var debutMs = 0L
@@ -989,7 +1061,8 @@ object Montage {
                     .setEnableFallback(true).build()
                 val transformer = Transformer.Builder(app)
                     .setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264)
-                    .setPortraitEncodingEnabled(true)
+                    // Portrait direct, ou image couchée + rotation (comme les vidéos filmées) si l'encodeur n'accepte que le paysage.
+                    .setPortraitEncodingEnabled(portrait)
                     .setEncoderFactory(encodeur)
                     .addListener(object : Transformer.Listener {
                         override fun onCompleted(c: Composition, r: ExportResult) { if (cont.isActive) cont.resume(Unit) }

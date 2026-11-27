@@ -168,7 +168,7 @@ object VideoGen {
     private fun erreurGeneration(token: String, donnee: String): String {
         val detail = runCatching { JSONObject(donnee).let { it.optString("error").ifBlank { it.optString("title") } } }.getOrDefault(donnee).trim()
         return when {
-            HfImage.quota(detail) -> "quota GPU gratuit du jour épuisé sur Hugging Face (il se recharge au fil des heures)"
+            HfImage.quota(detail) -> "quota GPU gratuit du jour épuisé sur Hugging Face (≈ 3 utilisations par jour : il revient 24 h après la première)"
             // Refus sans explication (« null ») : jeton refusé ou quota épuisé, vérifié auprès de Hugging Face.
             detail.isBlank() || detail == "null" -> HfImage.diagnosticRefus(token)
             else -> "génération refusée par Hugging Face : ${detail.take(250)}"
