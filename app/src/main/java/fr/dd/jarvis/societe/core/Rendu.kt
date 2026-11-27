@@ -331,7 +331,7 @@ object Rendu {
         // d'onduleurs dès que leurs séries sont présentées en tableaux.
         val tableaux = parOnduleur.any { it.second.series.isNotEmpty() } || seriesDansActions
         fun net(l: List<String>) = if (tableaux) OnduleursIntervention.horsBlocs(l) else l
-        val saisies = net(ListesRapport.elements(i.actions))
+        val saisies = net(ActionsDetaillees.nettoyer(ListesRapport.elements(i.actions), i.description, i.categorie, i.statut))
         val detail = net(ActionsDetaillees.extraire(i.mesures))
         val lignesActions = if (detail.size >= 3 && detail.size > saisies.size) detail else saisies
         val actions = lignesActions.map { brute ->
@@ -367,7 +367,10 @@ object Rendu {
             mapOf("onduleur" to titreOnduleur(nom, fiches), "details" to listOf(tableau, observations).filter { it.isNotBlank() }.joinToString("\n\n"))
         }
         // Autres mesures : seulement ce qui ressemble à une mesure (jamais les demandes faites au chat).
-        val autres = (if (parOnduleur.isEmpty()) mes.autres.filter { MesuresSeries.ressembleMesure(it) } else emptyList()).map { mapOf("mesure" to it) }
+        // Avec des tableaux par onduleur : les mesures écrites HORS des blocs d'onduleurs (compteur Linky, isolement…).
+        val autres = (if (parOnduleur.isEmpty()) mes.autres.filter { MesuresSeries.ressembleMesure(it) }
+            else OnduleursIntervention.horsBlocs(ListesRapport.elements(sourceMesures)).filter { MesuresSeries.ressembleMesure(it) })
+            .map { mapOf("mesure" to it) }
         fun image(chemin: String) = "![[${i.id}-${chemin.substringAfterLast('/')}]]"
         val avant = i.photosAvant.map { mapOf("photo" to image(it)) }
         val apres = i.photosApres.map { mapOf("photo" to image(it)) }
@@ -406,7 +409,7 @@ object Rendu {
      */
     private fun groupesSeries(i: Intervention): Pair<List<Pair<String, MesuresSeries.Resultat>>, Boolean> {
         val mesures = MesuresSeries.parOnduleur(i.mesures.ifBlank { i.onduleurs })
-        val actions = MesuresSeries.parOnduleur(i.actions)
+        val actions = MesuresSeries.parOnduleur(ActionsDetaillees.nettoyer(ListesRapport.elements(i.actions), i.description, i.categorie, i.statut).joinToString("\n"))
         // Réunion par numéro d'onduleur : un onduleur absent des mesures (ou sans séries) est pris dans les actions.
         val parNumero = sortedMapOf<Int, Pair<String, MesuresSeries.Resultat>>()
         fun num(nom: String) = Regex("""\d+""").find(nom)?.value?.toIntOrNull() ?: 0

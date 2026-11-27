@@ -37,7 +37,7 @@ object OnduleursIntervention {
         }
         m to n
     }.toList()
-    private val FIN_BLOC = Regex("""(?i)^\s*(?:[•*▪-]\s*)?(?:pdl\b|coffret\b|partie\b|remise en service\b|aucun probl[eè]me\b|nettoyage\b|contr[oô]le\b|diagnostic\b|conclusion\b)""")
+    private val FIN_BLOC = Regex("""(?i)^\s*(?:[•*▪-]\s*)?(?:pdl\b|coffret\b|partie\b|remise en service\b|aucun probl[eè]me\b|nettoyage\b|contr[oô]le\b|diagnostic\b|conclusion\b|compteur\b|linky\b|production\b|v[ée]rification de (?:la )?terre\b)""")
 
     data class Bloc(val numero: Int, val nom: String, val contenu: String)
 
@@ -231,10 +231,42 @@ object ActionsDetaillees {
     private val ENTETE = Regex("""(?i)^\s*actions?(?:\s+r[ée]alis[ée]es?)?\s*:\s*""")
     private val ACTION = Regex("""(?i)(:|\bok\b|effectu|r[ée]alis|contr[oô]l|v[ée]rifi|nettoy|serrage|resserr|remise en service|d[ée]faut|remplac|changement|\btest|mesur|production|conso|disjonct|parafoudre|sectionneur|coffret|onduleur)""")
 
-    /** Lignes d'action d'un texte structuré (au moins 4), sinon vide (texte libre, dictée d'une traite). */
+    /** Fiche ou historique affiché par JARVIS (« # Historique des interventions », « ID #11912fb4 ») : jamais une liste d'actions. */
+    private val SORTIE_JARVIS = Regex("""(?im)^\s*#{1,6}\s|historique des interventions|\bID\s*#[0-9a-f]{6,}""")
+
+    /**
+     * Lignes d'action d'une liste vraiment structurée (rubriques « Coffret AC : » et contrôles « Serrage : OK »), sinon vide
+     * (texte libre, dictée d'une traite, fiche ou historique affichés par JARVIS).
+     */
     fun extraire(texte: String): List<String> {
+        if (SORTIE_JARVIS.containsMatchIn(texte)) return emptyList()
         val lignes = ListesRapport.elements(texte).map { it.replace(ENTETE, "").trim() }.filter { it.isNotBlank() && it.length <= 160 }
-        return if (lignes.count { ACTION.containsMatchIn(it) } >= 4 && lignes.size >= 4) lignes else emptyList()
+        val rubriques = lignes.count { rubrique(it) || Regex("""(?i)^onduleur\s*\d+\s*:?$""").matches(it) }
+        val resultats = lignes.count { Regex("""(?i)\bok\b|:\s*\S""").containsMatchIn(it) }
+        return if (rubriques >= 2 && resultats >= 3 && lignes.size >= 5 && lignes.count { ACTION.containsMatchIn(it) } >= 4) lignes else emptyList()
+    }
+
+    /**
+     * Actions enregistrées remises au propre : retire ce qui n'est pas une action (titres markdown, identifiant, date,
+     * statut, catégorie, description, diagnostic, notes… recopiés d'une fiche affichée) ; « Mesures : Onduleur 1 : … »
+     * redevient « Onduleur 1 : … » (classé ensuite dans les tableaux).
+     */
+    fun nettoyer(lignes: List<String>, description: String, categorie: String, statut: String): List<String> {
+        val desc = normaliser(description).trimEnd('.', ' ')
+        val etiquettes = setOf(normaliser(categorie), normaliser(statut), "terminee", "a suivre", "en attente", "maintenance")
+        return lignes.mapNotNull { brut ->
+            val l = brut.trim()
+            val n = normaliser(l)
+            when {
+                l.startsWith("#") -> null
+                Regex("""(?i)^id\s*#?\s*[0-9a-f]{6,}$""").matches(l) -> null
+                Regex("""^\d{4}-\d{2}-\d{2}$""").matches(l) -> null
+                l.length < 24 && n in etiquettes -> null
+                Regex("""(?i)^(diagnostic|onduleur\(s\)|onduleurs|prochaine maintenance|notes?|installation|statut|cat[ée]gorie|date)\s*:""").containsMatchIn(l) -> null
+                desc.isNotBlank() && n.trimEnd('.', ' ') == desc -> null
+                else -> l.replace(Regex("""(?i)^mesures?\s*:\s*"""), "").trim().ifBlank { null }
+            }
+        }
     }
 
     /** Rubrique (« Coffret AC : », « Nettoyage et maintenance : ») : titre sans contenu après les deux-points. */
@@ -259,7 +291,9 @@ object MesuresSeries {
     private val UNE = Regex("""(?i)(?:\b$SERIE|\bS)\s*(?:n°\s*)?(\d{1,3})\b\s*[:=]?\s*[^\d\n]{0,12}?$VALEUR""")
     private val VALEUR_ORIGINALE = Regex("""(?i)\d+(?:[.,]\d+)?\s*(?:kV|mV|mA|volts?|V|A|W|kW|Ω|MΩ|ohms?)(?![\p{L}])""")
     /** « Séries : 352, 352 V et 377, 358 V » (deux-points obligatoire : « série 7 : 320 V » est une seule série). */
-    private val LISTE = Regex("""(?i)\bs[ée]ries\s*:\s*((?:\d{2,4}(?:,\d{1,2})?\s*(?:v|volts?)?\s*(?:,|;|/|\bet\b)\s*)+\d{2,4}(?:,\d{1,2})?)\s*(?:v|volts?)\b""")
+    // Tensions de 3-4 chiffres (jamais des numéros de séries) séparées par « , », « ; », « / », « - » ou « et » :
+    // « Séries : 352, 352 V et 377, 358 V », « séries 352 V et 377-358 V ».
+    private val LISTE = Regex("""(?i)\bs[ée]ries\s*:?\s*((?:\d{3,4}(?:,\d{1,2})?\s*(?:v|volts?)?\s*(?:,|;|/|-|–|\bet\b)\s*)+\d{3,4}(?:,\d{1,2})?)\s*(?:v|volts?)\b""")
     private val ETIQUETTE = Regex("""(?i)^(?:tensions?|courants?|mesures?|valeurs?)?\s*(?:relev[ée]e?s?|mesur[ée]e?s?)?\s*[:\-–]?\s*""")
 
     private fun unite(u: String): String = when (u.lowercase()) {
@@ -294,7 +328,7 @@ object MesuresSeries {
         for (origine in ListesRapport.elements(texte)) {
             // « Séries : 352, 352 V et 377, 358 V » : une tension par série, dans l'ordre.
             LISTE.find(origine)?.let { m ->
-                val nombres = Regex("""\d{2,4}(?:,\d{1,2})?(?!\d)""").findAll(m.groupValues[1]).map { it.value }.toList()
+                val nombres = Regex("""\d{3,4}(?:,\d{1,2})?(?!\d)""").findAll(m.groupValues[1]).map { it.value }.toList()
                 if (nombres.size >= 2) {
                     nombres.forEach { v -> if (prochaineSerie <= 200) valeurs[prochaineSerie++] = "$v V" }
                     val r = origine.replace(m.value, " ").replace(Regex("""\s+"""), " ").trim(' ', ',', ';', ':', '-', '–', '.')

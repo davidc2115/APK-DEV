@@ -437,4 +437,35 @@ Compteur Linky:
         assertEquals(6, g.series.size)
         assertEquals(listOf("Poignée ESS OK"), g.autres)
     }
+
+    /** Fiche de lapree après « modifie-la » (15 h) : l'historique affiché par JARVIS avait été recopié dans les actions. */
+    @Test fun ficheRecopieeRetireeEtOnduleur6Lu() {
+        val site = Site("s2", "Installation 2", kwc = 100.0)
+        val client = Client("c", "lapree", sites = listOf(site))
+        val dump = listOf("# Historique des interventions — lapree", "## Installation : Installation 2", "### 2026-11-27", "maintenance", "terminee",
+            "ID #11912fb4", "Intervention de maintenance préventive sur l'installation photovoltaïque comprenant le contrôle des coffrets, le nettoyage et la vérification des onduleurs",
+            "Diagnostic : Aucun problème à signaler",
+            "Contrôle des coffrets (AC et Enedis), vérification de la terre, contrôle et mesures des 6 onduleurs, nettoyage des ventilateurs et onduleurs, remise en service",
+            "Mesures : Onduleur 1 : 6 séries de 520 V, poignée ESS OK").joinToString("\n")
+        val mesures = (1..5).joinToString("\n") { n -> "Onduleur $n: ${if (n <= 2) 6 else 5} séries de ${if (n == 2) 500 else if (n == 5) 517 else 520} V, poignée ESS OK" } +
+            "\nOnduleur 6: séries 352 V et 377-358 V, poignée ESS OK\nCompteur Linky - Production: 1021418, Non conso : 0"
+        val inter = Intervention("11912fb4", "2026-11-27", "maintenance",
+            "Intervention de maintenance préventive sur l'installation photovoltaïque comprenant le contrôle des coffrets, le nettoyage et la vérification des onduleurs.",
+            diagnostic = "Aucun problème à signaler.", actions = dump, mesures = mesures, onduleurs = (1..6).joinToString("\n") { "Onduleur $it: SMA" })
+        val r = Rendu.rendreIntervention(SocieteData(clients = listOf(client)), client, site, inter)
+        val actions = r.substring(r.indexOf("## 🛠️"), r.indexOf("## ⚡ Mesures par onduleur"))
+        listOf("Historique", "ID #", "11912fb4", "2026-11-27", "terminee", "Diagnostic", "Mesures :", "6 séries de 520 V").forEach { assertTrue("« $it » dans les actions :\n$actions", !actions.contains(it)) }
+        assertTrue(actions, actions.contains("Contrôle des coffrets (AC et Enedis)"))
+        // Onduleur 6 : tableau des tensions données.
+        assertTrue(r, r.contains("### 🔌 Onduleur 6 · SMA"))
+        assertTrue(r, r.contains("| Série 1 | 352 V | Série 2 | 377 V |") && r.contains("| Série 3 | 358 V |"))
+        assertTrue(r, r.contains("poignée ESS OK"))
+        // Compteur Linky : dans les autres mesures, pas sous l'onduleur 6.
+        assertTrue(r, r.contains("Compteur Linky - Production: 1021418"))
+    }
+
+    @Test fun historiqueAfficheParJarvisNEstPasUneListeDActions() {
+        assertTrue(ActionsDetaillees.extraire("# Historique des interventions — lapree\n## Installation : Installation 2\nmaintenance\nterminee\nID #11912fb4\nDiagnostic : RAS\nMesures : Onduleur 1 : OK").isEmpty())
+        assertEquals(15, ActionsDetaillees.extraire(TEXTE_LAPREE).filter { !it.startsWith("Onduleur") && !it.contains("séries") && !it.startsWith("Poignée") && !it.startsWith("Séries") }.size)
+    }
 }

@@ -1188,7 +1188,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         // conversation (liste détaillée des actions, onduleurs manquants) puis son rapport régénéré.
         val texteChat = derniereListeStructuree(assistant = true)
         val detail = ActionsDetaillees.extraire(texteChat)
-        val actionsFinales = if (!a.has("actions") && detail.size > ListesRapport.elements(maj.actions).size) detail.joinToString("\n") else maj.actions
+        // Actions remises au propre (jamais de fiche / d'historique recopiés), puis la liste détaillée si elle est plus complète.
+        val actionsPropres = ActionsDetaillees.nettoyer(ListesRapport.elements(maj.actions), maj.description, maj.categorie, maj.statut).joinToString("\n")
+        val actionsFinales = if (!a.has("actions") && detail.size > ListesRapport.elements(actionsPropres).size) detail.joinToString("\n") else actionsPropres
         val mesuresFinales = if (a.has("mesures")) maj.mesures else completerOnduleurs(maj.mesures, texteChat)
         val complete = maj.copy(actions = actionsFinales, mesures = mesuresFinales)
         val ajouts = buildList {
