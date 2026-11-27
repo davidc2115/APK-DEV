@@ -231,6 +231,8 @@ object ActionsDetaillees {
     private val ENTETE = Regex("""(?i)^\s*actions?(?:\s+r[ée]alis[ée]es?)?\s*:\s*""")
     private val ACTION = Regex("""(?i)(:|\bok\b|effectu|r[ée]alis|contr[oô]l|v[ée]rifi|nettoy|serrage|resserr|remise en service|d[ée]faut|remplac|changement|\btest|mesur|production|conso|disjonct|parafoudre|sectionneur|coffret|onduleur)""")
 
+    private val DEMANDE = Regex("""(?i)^(?:jarvis[, ]+)?(?:modifi\w*|refai\w*|refais|mets|met|ajoute\w*|corrig\w*|rempla\w*|voici|voil[aà]|compl[eè]t\w*|mise? [aà] jour|reprend\w*|utilise\w*|fais|peux[- ]tu)\b|\bl['’]intervention de\b""")
+
     /** Fiche ou historique affiché par JARVIS (« # Historique des interventions », « ID #11912fb4 ») : jamais une liste d'actions. */
     private val SORTIE_JARVIS = Regex("""(?im)^\s*#{1,6}\s|historique des interventions|\bID\s*#[0-9a-f]{6,}""")
 
@@ -240,7 +242,9 @@ object ActionsDetaillees {
      */
     fun extraire(texte: String): List<String> {
         if (SORTIE_JARVIS.containsMatchIn(texte)) return emptyList()
-        val lignes = ListesRapport.elements(texte).map { it.replace(ENTETE, "").trim() }.filter { it.isNotBlank() && it.length <= 160 }
+        // La demande elle-même (« Modifie l'intervention de lapree : ») n'est pas une action.
+        val lignes = ListesRapport.elements(texte).map { it.replace(ENTETE, "").trim() }
+            .filter { it.isNotBlank() && it.length <= 160 && !DEMANDE.containsMatchIn(it) }
         val rubriques = lignes.count { rubrique(it) || Regex("""(?i)^onduleur\s*\d+\s*:?$""").matches(it) }
         val resultats = lignes.count { Regex("""(?i)\bok\b|:\s*\S""").containsMatchIn(it) }
         return if (rubriques >= 2 && resultats >= 3 && lignes.size >= 5 && lignes.count { ACTION.containsMatchIn(it) } >= 4) lignes else emptyList()

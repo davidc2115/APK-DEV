@@ -468,4 +468,26 @@ Compteur Linky:
         assertTrue(ActionsDetaillees.extraire("# Historique des interventions — lapree\n## Installation : Installation 2\nmaintenance\nterminee\nID #11912fb4\nDiagnostic : RAS\nMesures : Onduleur 1 : OK").isEmpty())
         assertEquals(15, ActionsDetaillees.extraire(TEXTE_LAPREE).filter { !it.startsWith("Onduleur") && !it.contains("séries") && !it.startsWith("Poignée") && !it.startsWith("Séries") }.size)
     }
+
+    /** Liste envoyée SANS les séries (déjà dans les tableaux) : reprise telle quelle comme actions. */
+    @Test fun listeDActionsSansLesSeries() {
+        val liste = """
+            Coffret AC:
+            Serrage: OK
+            Parafoudre: OK
+            Coffret Enedis:
+            Serrage: OK
+            Disjoncteur: OK
+            Vérification de terre:
+            Pas de défaut de terre
+            Nettoyage et maintenance:
+            Nettoyage des ventilateurs : OK
+            Nettoyage des onduleurs: OK
+            Remise en service: OK
+            Compteur Linky:
+            Production: 1021418
+            Non conso: 0
+        """.trimIndent()
+        assertEquals(15, ActionsDetaillees.extraire("Modifie l'intervention de lapree :\n$liste").size)
+    }
 }
