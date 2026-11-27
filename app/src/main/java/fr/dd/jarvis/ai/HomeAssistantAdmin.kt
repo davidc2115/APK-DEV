@@ -207,6 +207,7 @@ class HomeAssistantAdmin(
             }
             "entite_modifier" -> ws { w ->
                 val id = a.optString("entity_id").trim().ifBlank { throw IllegalArgumentException("entity_id requis.") }
+                if (!ok("MODIFIER l'entité $id (nom, identifiant, pièce, icône, activation ou visibilité) ?")) return "Annulé."
                 val m = JSONObject().put("entity_id", id)
                 a.optString("nom").takeIf { it.isNotBlank() }?.let { m.put("name", it) }
                 a.optString("nouvel_id").takeIf { it.isNotBlank() }?.let { m.put("new_entity_id", it) }
@@ -284,6 +285,7 @@ class HomeAssistantAdmin(
                 "- ${it.optString("title")} · ${it.optString("domain")} · ${it.optString("state")} · entry_id ${it.optString("entry_id")}" + (if (!it.isNull("disabled_by")) " · ⛔ désactivée" else "") } }
             "integration_ajouter" -> {
                 val dom = a.optString("domaine").trim().ifBlank { throw IllegalArgumentException("domaine requis (ex. hacs, mqtt, tuya, shelly…).") }
+                if (!ok("AJOUTER et configurer l'intégration « $dom » dans Home Assistant ?")) return "Annulé."
                 val r = rest("POST", "/api/config/config_entries/flow", JSONObject().put("handler", dom).put("show_advanced_options", true)) as? JSONObject
                 val d = json(a, "donnees")
                 if (d != null && r != null && r.optString("type") == "form") etape(rest("POST", "/api/config/config_entries/flow/${r.optString("flow_id")}", d), "intégration $dom")
@@ -351,6 +353,7 @@ class HomeAssistantAdmin(
             "aide_creer", "entite_ajouter" -> ws { w ->
                 val t = a.optString("type").trim().let { if (it in AIDES) it else throw IllegalArgumentException("type parmi : ${AIDES.joinToString()}") }
                 val p = (json(a, "options") ?: JSONObject()).put("name", a.optString("nom").ifBlank { throw IllegalArgumentException("nom requis.") })
+                if (!ok("CRÉER une entité virtuelle de type $t nommée « ${p.optString("name")} » ?")) return "Annulé."
                 val r = w.cmd("$t/create", p) as? JSONObject
                 "✅ Aide créée : $t.${r?.optString("id")} (« ${r?.optString("name")} »)."
             }
