@@ -353,7 +353,7 @@ class HomeAssistantAdmin(
             "aide_creer", "entite_ajouter" -> ws { w ->
                 val t = a.optString("type").trim().let { if (it in AIDES) it else throw IllegalArgumentException("type parmi : ${AIDES.joinToString()}") }
                 val p = (json(a, "options") ?: JSONObject()).put("name", a.optString("nom").ifBlank { throw IllegalArgumentException("nom requis.") })
-                if (!ok("CRÉER une entité virtuelle de type $t nommée « ${p.optString("name")} » ?")) return "Annulé."
+                if (!ok("CRÉER une entité virtuelle de type $t nommée « ${p.optString("name")} » ?")) return@ws "Annulé."
                 val r = w.cmd("$t/create", p) as? JSONObject
                 "✅ Aide créée : $t.${r?.optString("id")} (« ${r?.optString("name")} »)."
             }
