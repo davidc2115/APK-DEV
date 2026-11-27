@@ -203,9 +203,11 @@ Réponds UNIQUEMENT par un objet JSON valide, sans Markdown ni texte autour :
     {
       "visuel": "PROMPT EN ANGLAIS, autonome et précis : sujet exact, apparence constante, action visible, décor, époque, lumière, ambiance, composition, cadrage et mouvement caméra. Aucun texte ni logo.",
       "texte": "incrustation française courte, 2 à 8 mots, placée dans la zone centrale sûre (vide si inutile)",
+      "source": "image (illustration générée : symbole, allégorie, scène épique impossible à filmer — ex. phénix tricolore au-dessus de Paris) ou stock (scène réelle filmable : pompiers en intervention, tracteur dans un champ, drapeau qui flotte)",
       "recherche": "2 à 3 mots EN ANGLAIS désignant ce qu'on VOIT réellement, tel qu'on le chercherait dans une banque de vidéos (noms concrets : « firefighters fire truck », « farmer tractor field », « french flag waving », « notre dame paris »), jamais une idée abstraite (« resilience », « spirit ») ni un être imaginaire"
     }
   ],
+  "bandeau": "pour TikTok : courte devise ou slogan affiché en petit en haut pendant toute la vidéo s'il sert la chaîne (ex. « LIBERTÉ · ÉGALITÉ · FRATERNITÉ »), sinon chaîne vide",
   "signature": "si une signature visuelle de la chaîne est donnée (ex. phénix aux flammes bleu blanc rouge) : PROMPT EN ANGLAIS d'une image fixe épique de cette signature, portrait 9:16, sans texte ; sinon chaîne vide",
   "voix_off": "narration française naturelle, adaptée à la durée totale, accroche dès le début et conclusion pertinente",
   "musique": "description EN ANGLAIS du genre, tempo, ambiance et instruments, cohérente avec la demande",
@@ -228,6 +230,7 @@ Règles de réalisation :
 - Si un détail manque, choisis la solution visuelle la plus simple et la plus proche du brief. Ne transforme jamais une hypothèse en fait.
 - Si une niche ou une signature de chaîne est fournie, CHAQUE plan la sert concrètement (ses métiers, lieux, symboles, couleurs) et la voix off adopte son ton ; aucun plan hors sujet.
 - La voix off est TOUJOURS remplie (sauf si l'utilisateur n'en veut pas) : phrases courtes, à dire en environ 2,5 mots par seconde.
+- Pour TikTok, « texte » est une phrase-choc courte en MAJUSCULES (« LA FRANCE SE RELÈVE », « POUR NOS ENFANTS ») ; pour un plan « image », « visuel » décrit une illustration fixe spectaculaire et cohérente d'un plan à l'autre (même symbole, mêmes couleurs, même lieu).
 """.trimIndent()
 
     val CONTACT_CARD = """

@@ -175,4 +175,16 @@ class TikTokStudioTest {
         assertEquals(1500L, Montage.dureeWav(f))
         f.delete()
     }
+
+    /** Voix naturelle dite d'un seul tenant : sous-titres répartis selon la longueur des phrases, sans trou. */
+    @Test fun voixNaturelleEtSousTitres() {
+        val p = listOf("Le Phénix renaît.", "L'esprit gaulois réfractaire ne s'agenouille jamais.")
+        val d = SousTitres.repartir(p, 6000)
+        assertEquals(6000L, d.sum())
+        assertTrue(d.toString(), d[1] > d[0])
+        val f = java.io.File.createTempFile("voix", ".wav")
+        Montage.ecrireWav(ByteArray(48_000), 24_000, 1, f)   // 1 s en 16 bits mono 24 kHz
+        assertEquals(1000L, Montage.dureeWav(f))
+        f.delete()
+    }
 }

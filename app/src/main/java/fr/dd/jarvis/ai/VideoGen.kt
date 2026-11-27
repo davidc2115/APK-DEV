@@ -77,7 +77,7 @@ object VideoGen {
 
     /** Génère un plan (clip) via le Space Hugging Face ; retourne les octets mp4. Erreur explicite si le token
      *  manque/est refusé, si le quota GPU gratuit du jour est épuisé, ou si le service est indisponible. */
-    internal fun genereClip(app: JarvisApp, prompt: String, dureeDemandee: Int, vertical: Boolean): ByteArray {
+    internal fun genereClip(app: JarvisApp, prompt: String, dureeDemandee: Int, vertical: Boolean, image: File? = null): ByteArray {
         // Génération vidéo gratuite via Hugging Face ZeroGPU. Aucun appel fal.ai n'est effectué.
         val token = app.store.huggingFaceToken.value.trim()
         if (token.isBlank()) throw ApiException(401,
@@ -87,8 +87,11 @@ object VideoGen {
         // Résolution et pas réduits par rapport aux réglages par défaut du Space : on vise un plan générable en
         // restant largement dans un budget de quelques dizaines de secondes de GPU, pour ménager le quota gratuit
         // limité (plusieurs plans sont générés par vidéo).
+        // Image de départ (animation d'une image) : envoyée d'abord au Space, puis passée comme fichier Gradio.
+        val depart: Any = if (image != null) JSONObject().put("path", envoyerFichier(token, image)).put("orig_name", image.name)
+            .put("meta", JSONObject().put("_type", "gradio.FileData")) else JSONObject.NULL
         val data = JSONArray()
-            .put(JSONObject.NULL)      // image de départ : aucune (texte → vidéo pur)
+            .put(depart)               // image de départ, ou aucune (texte → vidéo pur)
             .put(prompt)
             .put(duree.toDouble())
             .put(hauteur)
@@ -135,6 +138,18 @@ object VideoGen {
             }
         }
         throw ApiException(0, "flux de génération interrompu sans résultat (service peut-être surchargé)")
+    }
+
+    /** Envoie un fichier au Space (API Gradio « upload ») ; renvoie son chemin côté serveur. */
+    private fun envoyerFichier(token: String, f: File): String {
+        val corps = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+            .addFormDataPart("files", f.name, f.readBytes().toRequestBody((if (f.extension.lowercase() == "png") "image/png" else "image/jpeg").toMediaType())).build()
+        val req = Request.Builder().url("$HF_SPACE/gradio_api/upload").header("Authorization", "Bearer $token").post(corps).build()
+        http.newCall(req).execute().use { r ->
+            val brut = r.body?.string().orEmpty()
+            if (!r.isSuccessful) throw ApiException(r.code, "envoi de l'image à Hugging Face refusé (${r.code}) : ${brut.take(120)}")
+            return runCatching { JSONArray(brut).getString(0) }.getOrNull() ?: throw ApiException(0, "réponse d'envoi inattendue : ${brut.take(120)}")
+        }
     }
 
     private fun erreurSoumission(code: Int, brut: String): String = when {

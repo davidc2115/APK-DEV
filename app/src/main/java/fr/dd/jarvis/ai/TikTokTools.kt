@@ -71,7 +71,7 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 "textes" to prop("« true » (défaut) pour incruster du texte à l'écran sur chaque plan, « false » sinon."),
                 "sources" to prop("Vidéos/images EXISTANTES à monter, séparées par « ; » : chemins ou dossiers du coffre (ex. « JARVIS/Images/Coloriage pompier »), fichiers du téléphone (« DCIM/Camera/xxx.mp4 »), « dernieres_videos:5 », « dernieres_images:8 », jarvis-video-ia:… Des plans IA complètent si la durée n'est pas atteinte."),
                 "garder_son" to prop("« true » pour garder le son d'origine des vidéos existantes (mixé sous la musique/voix)."),
-                "plans" to prop("« auto » (défaut : plans libres de droits Pexels/Pixabay gratuits d'abord, IA pour le reste), « stock » (seulement libres de droits) ou « ia » (seulement générés)."),
+                "plans" to prop("« auto » (défaut : images générées pour les symboles comme le phénix, plans réels Pixabay/Pexels pour les scènes filmables), « images » (uniquement des images générées puis animées), « stock » (uniquement des plans réels libres de droits) ou « ia » (clips vidéo générés)."),
                 "sous_titres" to prop("« true » (défaut) : sous-titres jaunes synchronisés avec la voix off ; « false » sinon."),
                 "style" to prop("Signature et ton de la chaîne quand l'utilisateur les décrit (ex. « phénix bleu blanc rouge comme mes anciennes vidéos, ton engagé ») : retenu pour ses prochaines vidéos. Vide = signature enregistrée.")
             )),
@@ -218,8 +218,16 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                     // « Avec Pixabay / Pexels / libres de droits » dans la demande : uniquement des plans libres de droits.
                     // « Avec Pixabay / Pexels / libres de droits » dans TA phrase (pas seulement dans le sujet rédigé par l'IA) :
                     // uniquement des plans libres de droits.
-                    plans = if (Regex("(?i)pixabay|pexels|libres? de droits").containsMatchIn(brut + " " + script + " " + derniereDemande())) "stock"
-                        else a.optString("plans").ifBlank { "auto" },
+                    plans = (brut + " " + script + " " + derniereDemande()).let { demande ->
+                        val images = Regex("(?i)images? (ia|g[ée]n[ée]r[ée]e?s?)|(à partir|depuis|avec) (d['e]s? |de |ces |mes )?images|illustrations?|comme (mon|l'|cet) ?exemple").containsMatchIn(demande)
+                        val stock = Regex("(?i)pixabay|pexels|libres? de droits").containsMatchIn(demande)
+                        when {
+                            images && stock -> "auto"     // les deux demandés : images pour les symboles, plans réels pour le reste
+                            images -> "images"
+                            stock -> "stock"
+                            else -> a.optString("plans").ifBlank { "auto" }
+                        }
+                    },
                     sousTitres = vrai("sous_titres", true),
                     // Brouillons TikTok : automatique dès que la publication est activée et autorisée sur le compte.
                     brouillon = name == "tiktok_video" && app.store.tiktokPublication.value && TikTok.envoiAutorise(app),

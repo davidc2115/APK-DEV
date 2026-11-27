@@ -42,6 +42,15 @@ object SousTitres {
         return out
     }
 
+    /** Durée de chaque phrase d'une narration dite d'un seul tenant ([totalMs]) : proportionnelle à sa longueur. */
+    fun repartir(phrases: List<String>, totalMs: Long): List<Long> {
+        val poids = phrases.map { it.length + 6 }   // + une petite pause par phrase
+        val somme = poids.sum().coerceAtLeast(1)
+        val l = poids.map { totalMs * it / somme }.toMutableList()
+        if (l.isNotEmpty()) l[l.size - 1] = totalMs - l.dropLast(1).sum()
+        return l
+    }
+
     /** Repère affiché à l'instant [ms], ou null (entre deux phrases, après la voix). */
     fun a(reperes: List<Repere>, ms: Long): Repere? = reperes.firstOrNull { ms >= it.debutMs && ms < it.finMs }
 }
