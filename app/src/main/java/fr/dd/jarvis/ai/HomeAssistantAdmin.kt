@@ -305,7 +305,13 @@ class HomeAssistantAdmin(
                 val e = integration(a.optString("integration").ifBlank { a.optString("entry_id") })
                 etape(rest("POST", "/api/config/config_entries/options/flow", JSONObject().put("handler", e.optString("entry_id")).put("show_advanced_options", true)), "options de ${e.optString("title")} — continue avec type=options")
             }
-            "integration_recharger" -> { val e = integration(a.optString("integration").ifBlank { a.optString("entry_id") }); rest("POST", "/api/config/config_entries/entry/${e.optString("entry_id")}/reload"); "🔄 « ${e.optString("title")} » rechargée." }
+            "integration_recharger" -> {
+                val e = integration(a.optString("integration").ifBlank { a.optString("entry_id") })
+                if (!ok("RECHARGER uniquement l'intégration « ${e.optString("title")} » (${e.optString("domain")}) ? Ses entités peuvent être indisponibles quelques instants.")) return "Annulé."
+                rest("POST", "/api/config/config_entries/entry/${e.optString("entry_id")}/reload")
+                val apres = integrations().firstOrNull { it.optString("entry_id") == e.optString("entry_id") }
+                "🔄 Rechargement demandé pour « ${e.optString("title")} ». État actuel : ${apres?.optString("state") ?: "non relu"}. Vérifie les entités associées avec action=entites integration=${e.optString("domain")}."
+            }
             "integration_supprimer" -> {
                 val e = integration(a.optString("integration").ifBlank { a.optString("entry_id") })
                 if (!ok("SUPPRIMER l'intégration « ${e.optString("title")} » (${e.optString("domain")}) et ses appareils ?")) return "Annulé."
@@ -313,9 +319,16 @@ class HomeAssistantAdmin(
                 "🗑️ Intégration « ${e.optString("title")} » supprimée." + (if (r?.optBoolean("require_restart") == true) " Redémarrage de Home Assistant nécessaire." else "")
             }
             // ---- automatisations, scripts, scènes (gérés par l'interface)
-            "automatisations", "scripts", "scenes" -> {
-                val dom = mapOf("automatisations" to "automation", "scripts" to "script", "scenes" to "scene").getValue(action)
-                val l = liste(rest("GET", "/api/states")).filter { it.optString("entity_id").startsWith("$dom.") }
+            "automatisations", "scripts", "scenes", "automatisations_rechercher", "scripts_rechercher", "scenes_rechercher" -> {
+                val famille = action.substringBefore("_rechercher")
+                val dom = mapOf("automatisations" to "automation", "scripts" to "script", "scenes" to "scene").getValue(famille)
+                val recherche = normaliser(a.optString("recherche"))
+                val l = liste(rest("GET", "/api/states")).filter { etat ->
+                    if (!etat.optString("entity_id").startsWith("$dom.")) false
+                    else recherche.isBlank() || normaliser(etat.optString("entity_id") + " " +
+                        etat.optJSONObject("attributes")?.optString("friendly_name").orEmpty() + " " +
+                        etat.optJSONObject("attributes")?.optString("id").orEmpty()).contains(recherche)
+                }
                 if (l.isEmpty()) "Aucun(e) $action." else "# ⚙️ ${l.size} $action\n" + l.joinToString("\n") { s ->
                     val at = s.optJSONObject("attributes")
                     "- ${at?.optString("friendly_name")} · `${s.optString("entity_id")}` · ${s.optString("state")}" + (at?.optString("id")?.takeIf { it.isNotBlank() }?.let { " · id $it" } ?: "") +
@@ -335,7 +348,7 @@ class HomeAssistantAdmin(
             // ---- aides (helpers)
             "aides" -> ws { w -> AIDES.flatMap { t -> runCatching { liste(w.cmd("$t/list")).map { "- $t · ${it.optString("name")} · id ${it.optString("id")}" } }.getOrDefault(emptyList()) }
                 .let { if (it.isEmpty()) "Aucune aide créée depuis l'interface." else "# 🧰 Aides\n" + it.joinToString("\n") } }
-            "aide_creer" -> ws { w ->
+            "aide_creer", "entite_ajouter" -> ws { w ->
                 val t = a.optString("type").trim().let { if (it in AIDES) it else throw IllegalArgumentException("type parmi : ${AIDES.joinToString()}") }
                 val p = (json(a, "options") ?: JSONObject()).put("name", a.optString("nom").ifBlank { throw IllegalArgumentException("nom requis.") })
                 val r = w.cmd("$t/create", p) as? JSONObject
@@ -383,6 +396,19 @@ class HomeAssistantAdmin(
                 ws { w -> w.cmd("hacs/repository/remove", JSONObject().put("repository", idHacs(w, a.optString("depot").trim())), 120); "🗑️ Désinstallé. Redémarre Home Assistant si c'était une intégration." }
             }
             // ---- système
+            "diagnostic", "diagnostic_complet", "depanner" -> {
+                val entrees = liste(rest("GET", "/api/config/config_entries/entry"))
+                val etats = liste(rest("GET", "/api/states"))
+                val registre = runCatching { ws { w -> w.cmd("config/entity_registry/list") } }.getOrNull()
+                val journal = runCatching { rest("GET", "/api/error_log")?.toString().orEmpty() }.getOrDefault("")
+                val config = runCatching { rest("POST", "/api/config/core/check_config") as? JSONObject }.getOrNull()
+                    ?.let { if (it.optString("result") == "valid") "valide" else it.optString("errors").ifBlank { it.toString() }.take(1000) }.orEmpty()
+                HomeAssistantDiagnosticAvance.analyser(
+                    JSONArray().apply { entrees.forEach { put(it) } },
+                    JSONArray().apply { etats.forEach { put(it) } },
+                    (registre as? JSONArray) ?: JSONArray(), journal, config
+                )
+            }
             "verifier" -> rest("POST", "/api/config/core/check_config").toString()
             "journal" -> runCatching { rest("GET", "/api/error_log").toString().lines().takeLast(a.optString("lignes").toIntOrNull() ?: 60).joinToString("\n").takeLast(6000) }.getOrElse { "API Home Assistant indisponible : ${it.message?.take(180)}.\n\n" + (diagnosticSecours?.invoke() ?: "Diagnostic hôte indisponible : profil SSH Debian non configuré.") }
             "modele" -> rest("POST", "/api/template", JSONObject().put("template", a.optString("modele"))).toString().take(4000)
