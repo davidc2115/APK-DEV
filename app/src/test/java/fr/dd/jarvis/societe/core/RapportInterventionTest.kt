@@ -167,7 +167,7 @@ class RapportInterventionTest {
         assertTrue(rapport.contains("805 V"))
         assertTrue(rapport.contains("≈ 810 V"))
         assertTrue(rapport.contains("≈ 770 V"))
-        assertTrue(rapport.contains("| 18 |"))
+        assertTrue(rapport.contains("| Série 18 |"))
         assertTrue(!rapport.contains("Sungrow 125cx',"))
     }
 
@@ -206,19 +206,19 @@ class RapportInterventionTest {
             mesures = dict, onduleurs = "Onduleur 1 : Sungrow\nOnduleur 2 : Sungrow"
         )
         val rapport = Rendu.rendreIntervention(SocieteData(clients = listOf(client)), client, site, intervention)
-        val enteteCompacte = "| Série | Tension relevée | Série | Tension relevée | Série | Tension relevée |"
-        assertTrue("Le tableau doit afficher trois paires de colonnes", rapport.contains(enteteCompacte))
-        assertEquals("Les 18 séries de chaque onduleur doivent tenir sur 6 lignes", 6,
-            rapport.lines().count { it.startsWith("|") && it.contains("775 V") })
-        assertEquals("Le second onduleur doit également tenir sur 6 lignes", 6,
+        val entete = "| Série | Valeur | Série | Valeur |"
+        assertTrue("Le tableau doit afficher deux paires de colonnes", rapport.contains(entete))
+        assertEquals("Les 18 séries de chaque onduleur tiennent sur 9 lignes", 9,
+            rapport.lines().count { it.startsWith("|") && (it.contains("775 V") || it.contains("805 V")) })
+        assertEquals("Le second onduleur tient également sur 9 lignes", 9,
             rapport.lines().count { it.startsWith("|") && (it.contains("810 V") || it.contains("770 V")) })
         assertTrue("Le tableau de secours ne doit pas être ajouté en double",
             !rapport.contains("Détail individuel des séries par onduleur"))
-        for (n in 1..16) assertTrue("Série $n de l'onduleur 1 absente", rapport.contains("| $n | 775 V |"))
-        assertTrue(rapport.contains("| 17 | 805 V |"))
-        assertTrue(rapport.contains("| 18 | 805 V |"))
-        for (n in 1..4) assertTrue("Série $n de l'onduleur 2 absente", rapport.contains("| $n | ≈ 810 V |"))
-        for (n in 5..18) assertTrue("Série $n de l'onduleur 2 absente", rapport.contains("| $n | ≈ 770 V |"))
+        for (n in 1..16) assertTrue("Série $n de l'onduleur 1 absente", rapport.contains("| Série $n | 775 V |"))
+        assertTrue(rapport.contains("| Série 17 | 805 V |"))
+        assertTrue(rapport.contains("| Série 18 | 805 V |"))
+        for (n in 1..4) assertTrue("Série $n de l'onduleur 2 absente", rapport.contains("| Série $n | ≈ 810 V |"))
+        for (n in 5..18) assertTrue("Série $n de l'onduleur 2 absente", rapport.contains("| Série $n | ≈ 770 V |"))
     }
 
 
@@ -277,7 +277,7 @@ class RapportInterventionTest {
         // Séries classées par onduleur (même dictées « numéro deux » / « quatre »), avant la prochaine maintenance.
         assertTrue(rapport, rapport.contains("### 🔌 Onduleur 1 · SMA"))
         assertTrue(rapport, rapport.contains("### 🔌 Onduleur 2 · SMA"))
-        assertTrue(rapport, rapport.contains("| 1 | 750 V |") && rapport.contains("| 4 | ≈ 760 V |") && rapport.contains("| 3 | 745 V |"))
+        assertTrue(rapport, rapport.contains("| Série 1 | 750 V |") && rapport.contains("| Série 4 | ≈ 760 V |") && rapport.contains("| Série 3 | 745 V |"))
         assertTrue(rapport.indexOf("Mesures par onduleur") < rapport.indexOf("Prochaine maintenance"))
         // Prochaine maintenance : un an après, pas le jour même.
         assertTrue(rapport, rapport.contains("27/11/2027"))
@@ -307,5 +307,46 @@ class RapportInterventionTest {
         assertEquals("2027-11-27", ProchaineMaintenance.effective("2026-11-27", "2026-11-27"))
         assertEquals("", ProchaineMaintenance.effective("2025-01-10", ""))
         assertEquals("2027-06-01", ProchaineMaintenance.effective("2026-11-27", "2027-06-01"))
+    }
+
+    /** Rapport de lapree (27/11) : séries rangées par l'IA dans les actions, demandes du chat recopiées dans les mesures. */
+    @Test fun seriesDansLesActionsEtDemandesDuChatRetirees() {
+        val site = Site("s2", "Installation 2", kwc = 100.0)
+        val client = Client("c-lapree", "lapree", sites = listOf(site))
+        val actions = """
+            Coffret AC : resserrage OK
+            Onduleur 5 :
+            5 séries de 517 V
+            Poignée ESS : OK
+            Onduleur 6 :
+            Séries : 352, 352 V et 377, 358 V
+            Poignée ESS : OK
+            Nettoyage et maintenance :
+            Nettoyage des ventilateurs : OK
+            Remise en service : OK
+        """.trimIndent()
+        val chat = "cre 1 nouveau client lapree avec 1 installation 36kwc et 3 onduleur sma pour l adresse utilise ma localisation actuelle\n" +
+            "lance l itineraire jusqu a mon domicile\nrelance la recherche courrier analyse de nouveau les courriers\nmode couche"
+        val inter = Intervention("i-l", "2026-11-27", "maintenance", "Maintenance préventive", actions = actions, mesures = chat,
+            onduleurs = (1..6).joinToString("\n") { "Onduleur $it : marque SMA" })
+        val rapport = Rendu.rendreIntervention(SocieteData(clients = listOf(client)), client, site, inter)
+        // Les demandes faites au chat n'apparaissent nulle part.
+        assertTrue(rapport, !rapport.contains("itineraire") && !rapport.contains("courrier") && !rapport.contains("mode couche"))
+        // Un tableau par onduleur, au format « Série N | valeur ».
+        assertTrue(rapport, rapport.contains("### 🔌 Onduleur 5 · SMA") && rapport.contains("### 🔌 Onduleur 6 · SMA"))
+        for (n in 1..5) assertTrue(rapport, rapport.contains("| Série $n | 517 V |"))
+        assertTrue(rapport, rapport.contains("| Série 1 | 352 V | Série 2 | 352 V |"))
+        assertTrue(rapport, rapport.contains("| Série 3 | 377 V | Série 4 | 358 V |"))
+        assertTrue(rapport, rapport.contains("📝 Poignée ESS : OK"))
+        // Les séries ne sont plus répétées dans les actions ; les autres actions restent.
+        assertTrue(rapport, !rapport.contains("5 séries de 517 V") && !rapport.contains("Séries : 352"))
+        assertTrue(rapport, rapport.contains("Nettoyage des ventilateurs : OK") && rapport.contains("Coffret AC : resserrage OK"))
+    }
+
+    @Test fun listeDeTensionsParSerie() {
+        val r = MesuresSeries.analyser("Séries : 352, 352 V et 377, 358 V")
+        assertEquals(listOf("352 V", "352 V", "377 V", "358 V"), r.series.map { it.valeur })
+        // « Série 7 : 320 V » reste une seule série.
+        assertEquals(listOf(7), MesuresSeries.analyser("Série 7 : 320 V").series.map { it.numero })
     }
 }

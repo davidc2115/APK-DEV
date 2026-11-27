@@ -58,7 +58,7 @@ val ONGLETS_REGLAGES = listOf(
 class VoletReglages(val onglet: String, val sous: String, val titre: String, val mots: String, val contenu: @Composable () -> Unit) {
     private val texte by lazy {
         val o = ONGLETS_REGLAGES.firstOrNull { it.id == onglet }
-        fr.dd.jarvis.societe.core.normaliser("$titre $mots ${o?.nom.orEmpty()} ${o?.sous?.firstOrNull { it.first == sous }?.second.orEmpty()}")
+        fr.dd.jarvis.societe.core.normaliser("$titre $mots ${o?.nom.orEmpty()} ${o?.sous?.firstOrNull { it.first == sous }?.second.orEmpty()} ${cheminReglage(onglet, sous, titre)}")
     }
 
     /** Tous les mots de la recherche (sans accents ni majuscules) se retrouvent dans le titre, les mots-clés ou l'onglet. */
@@ -67,10 +67,7 @@ class VoletReglages(val onglet: String, val sous: String, val titre: String, val
         return mots.isNotEmpty() && mots.all { texte.contains(it) }
     }
 
-    fun chemin(): String {
-        val o = ONGLETS_REGLAGES.firstOrNull { it.id == onglet } ?: return titre
-        return "${o.icone} ${o.nom}" + (o.sous.firstOrNull { it.first == sous }?.second?.let { " › $it" } ?: "")
-    }
+    fun chemin(): String = cheminReglage(onglet, sous, titre)
 }
 
 /**

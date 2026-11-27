@@ -1088,10 +1088,20 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val retires = mutableListOf<String>()
         val gardes = champs.mapValues { (_, v) -> Fidelite.verifier(v, support).also { retires += it.retires }.garde }.toMutableMap()
         // Les équipements et leurs mesures sont extraits de la dictée d'origine, pas seulement du résumé IA.
-        val source = a.s("source_utilisateur").ifBlank { dits }
+        // Sans dictée de compte rendu, le chat contient TOUTES les demandes récentes (navigation, courrier, réglages…) :
+        // elles ne sont jamais recopiées dans le rapport ; seuls ses blocs « Onduleur N : … » servent.
+        val dictee = a.s("source_utilisateur")
+        val blocsChat = if (dictee.isBlank()) OnduleursIntervention.numerotes(dits).joinToString("\n") else ""
+        val source = dictee.ifBlank { blocsChat }
         gardes["onduleurs"] = OnduleursIntervention.completer(gardes["onduleurs"].orEmpty(), source)
         // Conserver la dictée brute pour reconstruire les blocs et séries de chaque onduleur au rendu.
-        gardes["mesures"] = source.ifBlank { gardes["mesures"].orEmpty() }.trim()
+        val mesuresIA = gardes["mesures"].orEmpty()
+        val seriesIA = MesuresSeries.parOnduleur(mesuresIA).any { it.second.series.isNotEmpty() } || MesuresSeries.analyser(mesuresIA).series.isNotEmpty()
+        gardes["mesures"] = when {
+            dictee.isNotBlank() -> dictee
+            seriesIA || blocsChat.isBlank() -> mesuresIA
+            else -> listOf(mesuresIA, blocsChat).filter { it.isNotBlank() }.joinToString("\n")
+        }.trim()
         return Garde(gardes, retires, true)
     }
 

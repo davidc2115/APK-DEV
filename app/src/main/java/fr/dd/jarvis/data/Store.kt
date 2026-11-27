@@ -431,6 +431,8 @@ class Store(context: Context) {
     val rapportsPhotosV2 = BPref("rapportsPhotosV2", false)
     /** Une fois : rapports récents régénérés (onduleurs en tableau, séries par onduleur, prochaine maintenance à un an). */
     val rapportsOnduleursV1 = BPref("rapportsOnduleursV1", false)
+    /** Une fois : séries par onduleur en tableaux (aussi depuis les actions), demandes du chat retirées des mesures. */
+    val rapportsSeriesV2 = BPref("rapportsSeriesV2", false)
     /** Rapports d'intervention régénérés une fois avec la nouvelle présentation (emojis, tableau des séries). */
     val rapportsV3 = BPref("rapportsV3", false)
     /** Modes automatiques (voiture, chantier, nuit, maison) et mode forcé (redevient automatique au bout de 4 h). */
@@ -466,6 +468,10 @@ class Store(context: Context) {
     val docsVerifiesLe = SPref("docsVerifiesLe", "")
     /** Dernier onglet ouvert dans les Réglages (« onglet/sous-onglet »). */
     val reglagesVue = SPref("reglagesVue", "")
+    /** Style de l'interface : « hud » (HUD animé) ou « ironman » (effets complets). */
+    val styleInterface = SPref("styleInterface", "hud")
+    /** Petits sons d'interface (style Iron Man). */
+    val sonsInterface = BPref("sonsInterface", true)
 
     // ---- Arrière-plan : écoute « Jarvis » et agents autonomes
     val wakeOn = BPref("wakeOn", false)

@@ -36,7 +36,7 @@ val EventPalette = listOf(
 ).map { it.toInt() }
 
 @Composable
-fun HudTheme(accent: Color, tileAlpha: Float, content: @Composable () -> Unit) {
+fun HudTheme(accent: Color, tileAlpha: Float, style: StyleHud = StyleHud.HUD, anime: Boolean = true, content: @Composable () -> Unit) {
     val scheme = darkColorScheme(
         primary = accent,
         onPrimary = Color.Black,
@@ -49,6 +49,8 @@ fun HudTheme(accent: Color, tileAlpha: Float, content: @Composable () -> Unit) {
         outline = accent.copy(alpha = 0.5f)
     )
     CompositionLocalProvider(LocalAccent provides accent, LocalTileAlpha provides tileAlpha) {
-        MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
+        AmbianceHud(style, anime) {
+            MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
+        }
     }
 }

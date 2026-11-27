@@ -51,31 +51,65 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.getValue
 
-val HudShape = RoundedCornerShape(16.dp)
-val HudShapeSmall = RoundedCornerShape(10.dp)
+/** Coins coupés en biais (haut-gauche, bas-droite) : la signature visuelle du HUD. */
+val HudShape = CutCornerShape(topStart = 14.dp, topEnd = 4.dp, bottomEnd = 14.dp, bottomStart = 4.dp)
+val HudShapeSmall = CutCornerShape(topStart = 8.dp, topEnd = 2.dp, bottomEnd = 8.dp, bottomStart = 2.dp)
 
 @Composable
 fun HudBackground(content: @Composable BoxScope.() -> Unit) {
     val accent = LocalAccent.current
+    val style = LocalStyleHud.current
+    val phase = LocalPhaseHud.current
     Box(Modifier.fillMaxSize().background(HudBg)) {
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+            val p = phase.value
+            val ironman = style == StyleHud.IRONMAN
             drawRect(
                 Brush.radialGradient(
-                    listOf(accent.copy(alpha = 0.22f), Color.Transparent),
+                    listOf(accent.copy(alpha = if (ironman) 0.28f else 0.22f), Color.Transparent),
                     center = Offset(size.width * 0.5f, size.height * 0.12f),
                     radius = size.width * 1.1f
                 )
             )
-            val step = 32.dp.toPx()
+            val step = (if (ironman) 24 else 32).dp.toPx()
+            val trait = accent.copy(alpha = if (ironman) 0.075f else 0.05f)
             var x = 0f
             while (x < size.width) {
-                drawLine(accent.copy(alpha = 0.05f), Offset(x, 0f), Offset(x, size.height), 1f)
+                drawLine(trait, Offset(x, 0f), Offset(x, size.height), 1f)
                 x += step
             }
             var y = 0f
             while (y < size.height) {
-                drawLine(accent.copy(alpha = 0.05f), Offset(0f, y), Offset(size.width, y), 1f)
+                drawLine(trait, Offset(0f, y), Offset(size.width, y), 1f)
                 y += step
+            }
+            // Ligne de scan qui descend lentement (dégradé doux, jamais gênant pour la lecture).
+            val ys = size.height * ((p * if (ironman) 2f else 1f) % 1f)
+            val h = 90.dp.toPx()
+            drawRect(Brush.verticalGradient(listOf(Color.Transparent, accent.copy(alpha = if (ironman) 0.10f else 0.055f), Color.Transparent), startY = ys - h, endY = ys + h),
+                topLeft = Offset(0f, ys - h), size = Size(size.width, 2 * h))
+            if (ironman) {
+                // Réacteur : cercles concentriques gradués et arcs qui tournent, en haut de l'écran.
+                val c = Offset(size.width * 0.5f, size.height * 0.16f)
+                val r = size.width * 0.42f
+                drawCircle(accent.copy(alpha = 0.10f), radius = r, center = c, style = Stroke(1.dp.toPx()))
+                drawCircle(accent.copy(alpha = 0.07f), radius = r * 0.72f, center = c, style = Stroke(1.dp.toPx()))
+                drawCircle(accent.copy(alpha = 0.05f), radius = r * 1.35f, center = c, style = Stroke(1.dp.toPx()))
+                rotate(p * 360f, c) {
+                    for (i in 0 until 60) {
+                        val a = Math.toRadians(i * 6.0)
+                        val l = if (i % 5 == 0) 10.dp.toPx() else 4.dp.toPx()
+                        val ex = c.x + (r * kotlin.math.cos(a)).toFloat(); val ey = c.y + (r * kotlin.math.sin(a)).toFloat()
+                        val ix = c.x + ((r - l) * kotlin.math.cos(a)).toFloat(); val iy = c.y + ((r - l) * kotlin.math.sin(a)).toFloat()
+                        drawLine(accent.copy(alpha = 0.16f), Offset(ix, iy), Offset(ex, ey), 1.dp.toPx())
+                    }
+                    drawArc(accent.copy(alpha = 0.22f), 0f, 70f, false, Offset(c.x - r * 0.86f, c.y - r * 0.86f), Size(r * 1.72f, r * 1.72f), style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
+                    drawArc(accent.copy(alpha = 0.22f), 180f, 70f, false, Offset(c.x - r * 0.86f, c.y - r * 0.86f), Size(r * 1.72f, r * 1.72f), style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
+                }
+                rotate(-p * 540f, c) {
+                    drawArc(accent.copy(alpha = 0.16f), 40f, 120f, false, Offset(c.x - r * 0.6f, c.y - r * 0.6f), Size(r * 1.2f, r * 1.2f), style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+                    drawArc(accent.copy(alpha = 0.16f), 220f, 120f, false, Offset(c.x - r * 0.6f, c.y - r * 0.6f), Size(r * 1.2f, r * 1.2f), style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+                }
             }
         }
         content()
@@ -96,7 +130,7 @@ fun HudPanel(
         modifier
             .clip(HudShape)
             .background(Brush.verticalGradient(listOf(accent.copy(alpha = fillAlpha + 0.05f), accent.copy(alpha = fillAlpha * 0.45f))))
-            .border(1.dp, accent.copy(alpha = 0.65f), HudShape)
+            .bordureHud(accent, HudShape, 1.5.dp)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .drawBehind {
                 val len = 26.dp.toPx()

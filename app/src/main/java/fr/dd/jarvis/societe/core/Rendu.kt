@@ -304,24 +304,17 @@ object Rendu {
         "terminee" -> "✅ Terminée"; "a_suivre" -> "🔁 À suivre"; "en_attente" -> "⏳ En attente"; else -> s
     }
 
-    /**
-     * Tableau compact : trois paires Série/Tension par ligne.
-     * Sur 18 séries, cela réduit le tableau de 18 à 6 lignes sans regrouper les mesures.
-     */
+    /** Tableau des séries d'un onduleur : deux paires « Série N | valeur » par ligne. */
     private fun tableauSeriesCompact(series: List<MesuresSeries.Serie>): String {
         if (series.isEmpty()) return ""
-        val colonnes = 3
-        val entete = List(colonnes) { listOf("Série", "Tension relevée") }.flatten()
-        val separateur = List(colonnes) { listOf("---:", "---:") }.flatten()
-        val lignes = series.chunked(colonnes).map { groupe ->
-            val cellules = groupe.flatMap { listOf(it.numero.toString(), it.valeur) }.toMutableList()
-            while (cellules.size < colonnes * 2) cellules.addAll(listOf("", ""))
-            "| " + cellules.joinToString(" | ") + " |"
-        }
         return buildString {
-            append("| ").append(entete.joinToString(" | ")).append(" |\n")
-            append("| ").append(separateur.joinToString(" | ")).append(" |\n")
-            lignes.forEach { append(it).append('\n') }
+            append("| Série | Valeur | Série | Valeur |\n")
+            append("|---|---:|---|---:|\n")
+            series.chunked(2).forEach { p ->
+                append("| Série ${p[0].numero} | ${p[0].valeur} | ")
+                append(p.getOrNull(1)?.let { "Série ${it.numero} | ${it.valeur}" } ?: " | ")
+                append(" |\n")
+            }
         }.trimEnd()
     }
 
@@ -332,8 +325,10 @@ object Rendu {
         // On n'utilise le champ onduleurs qu'en secours si le champ mesures est réellement vide.
         val sourceMesures = i.mesures.ifBlank { i.onduleurs }
         val mes = MesuresSeries.analyser(sourceMesures)
-        val parOnduleur = MesuresSeries.parOnduleur(sourceMesures)
-        val actions = ListesRapport.elements(i.actions).map { action ->
+        // Séries par onduleur : dans les mesures, sinon dans les actions (l'IA y range parfois « Onduleur 5 : 5 séries de 517 V »).
+        val (parOnduleur, seriesDansActions) = groupesSeries(i)
+        val lignesActions = ListesRapport.elements(i.actions).let { if (seriesDansActions) OnduleursIntervention.horsBlocs(it) else it }
+        val actions = lignesActions.map { action ->
             val n = Fidelite.normaliser(action)
             val emoji = when {
                 "pdl" in n -> "📍"
@@ -358,10 +353,11 @@ object Rendu {
         val fiches = OnduleursIntervention.fiches(i.onduleurs.ifBlank { s.onduleur })
         val groupesOnduleurs = parOnduleur.map { (nom, resultat) ->
             val tableau = tableauSeriesCompact(resultat.series)
-            val observations = resultat.autres.joinToString("\n") { "- 🌦️ ${it}" }
+            val observations = resultat.autres.joinToString("\n") { "- 📝 ${it}" }
             mapOf("onduleur" to titreOnduleur(nom, fiches), "details" to listOf(tableau, observations).filter { it.isNotBlank() }.joinToString("\n\n"))
         }
-        val autres = (if (parOnduleur.isEmpty()) mes.autres else emptyList()).map { mapOf("mesure" to it) }
+        // Autres mesures : seulement ce qui ressemble à une mesure (jamais les demandes faites au chat).
+        val autres = (if (parOnduleur.isEmpty()) mes.autres.filter { MesuresSeries.ressembleMesure(it) } else emptyList()).map { mapOf("mesure" to it) }
         fun image(chemin: String) = "![[${i.id}-${chemin.substringAfterLast('/')}]]"
         val avant = i.photosAvant.map { mapOf("photo" to image(it)) }
         val apres = i.photosApres.map { mapOf("photo" to image(it)) }
@@ -392,6 +388,18 @@ object Rendu {
         )
         return Ctx(vars, mapOf("actions" to actions, "pieces" to pieces, "series" to series, "series_paires" to paires, "groupes_onduleurs" to groupesOnduleurs,
             "mesures" to autres, "photos_avant" to avant, "photos_apres" to apres))
+    }
+
+    /**
+     * Séries classées par onduleur, et vrai si elles viennent des ACTIONS (à retirer alors de la liste des actions) :
+     * d'abord les mesures ; sinon les blocs « Onduleur N » écrits dans les actions.
+     */
+    private fun groupesSeries(i: Intervention): Pair<List<Pair<String, MesuresSeries.Resultat>>, Boolean> {
+        val mesures = MesuresSeries.parOnduleur(i.mesures.ifBlank { i.onduleurs })
+        if (mesures.any { it.second.series.isNotEmpty() }) return mesures to false
+        val actions = MesuresSeries.parOnduleur(i.actions)
+        if (actions.any { it.second.series.isNotEmpty() }) return actions to true
+        return mesures to false
     }
 
     /** « Onduleur 2 » → « Onduleur 2 · SMA » quand sa marque / son modèle sont connus. */
@@ -427,24 +435,23 @@ object Rendu {
             if (!rendu.contains(tableau.lineSequence().first())) rendu = insererApresEntete(rendu, "## ⚡ Onduleurs installés\n$tableau")
         }
         val source = i.mesures.ifBlank { i.onduleurs }
-        val groupes = MesuresSeries.parOnduleur(source)
-        val manquants = groupes.filter { (_, resultat) ->
-            resultat.series.any { serie -> !rendu.contains("| ${serie.numero} | ${serie.valeur} |") }
-        }
+        val groupes = groupesSeries(i).first
+        fun present(serie: MesuresSeries.Serie) = rendu.contains("| Série ${serie.numero} | ${serie.valeur} |") || rendu.contains("| ${serie.numero} | ${serie.valeur} |")
+        val manquants = groupes.filter { (_, resultat) -> resultat.series.any { serie -> !present(serie) } }
         if (manquants.isNotEmpty()) {
             val complement = buildString {
                 append("## ⚡ Mesures par onduleur\n")
                 manquants.forEach { (nom, resultat) ->
                     append("\n### 🔌 ").append(titreOnduleur(nom, fiches)).append('\n')
                     append(tableauSeriesCompact(resultat.series)).append('\n')
-                    resultat.autres.forEach { observation -> append("- 🌦️ ").append(observation).append('\n') }
+                    resultat.autres.forEach { observation -> append("- 📝 ").append(observation).append('\n') }
                 }
             }
             rendu = insererAvantFin(rendu, complement)
         } else if (groupes.isEmpty()) {
             // Séries sans blocs « Onduleur N » : un seul tableau, s'il manque au modèle.
             val series = MesuresSeries.analyser(source).series
-            if (series.isNotEmpty() && series.any { !rendu.contains("| ${it.numero} | ${it.valeur} |") && !rendu.contains("| Série ${it.numero} | ${it.valeur} |") })
+            if (series.isNotEmpty() && series.any { !present(it) })
                 rendu = insererAvantFin(rendu, "## 📊 Mesures par série\n" + tableauSeriesCompact(series))
         }
         return rendu.trim() + "\n"

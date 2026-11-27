@@ -278,7 +278,10 @@ class MainActivity : ComponentActivity() {
         // Widget « dragon » à jour (prochain rendez-vous) à chaque ouverture.
         Thread { runCatching { fr.dd.jarvis.widget.DragonWidget.majTous(applicationContext) } }.start()
         setContent {
-            HudTheme(accentById(app.store.accent.value).color, app.store.tileAlpha.value) {
+            // Animations figées en mode éco ou si Android les a coupées (accessibilité, options développeur).
+            val animationsAndroid = runCatching { android.provider.Settings.Global.getFloat(contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) }.getOrDefault(1f) > 0f
+            HudTheme(accentById(app.store.accent.value).color, app.store.tileAlpha.value,
+                fr.dd.jarvis.ui.StyleHud.de(app.store.styleInterface.value), anime = animationsAndroid && app.store.modeEnergie.value != "eco") {
                 HudBackground { Root(app, vm, terrainDemande, demandeExterne) }
             }
         }
@@ -339,7 +342,8 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
         }
     }
     var tab by rememberSaveable { mutableStateOf(0) }
-    var outilsMenu by rememberSaveable { mutableStateOf(false) }
+    // Panneau « Plus » (tous les écrans et raccourcis en tuiles), ouvert par-dessus l'écran en cours.
+    var plusOuvert by rememberSaveable { mutableStateOf(false) }
     // Écrans de terrain ouverts par-dessus l'onglet en cours (caméra, compte-rendu d'intervention).
     var terrain by rememberSaveable { mutableStateOf(if (app.store.presenceModeActif.value) "presence" else "") }
     LaunchedEffect(terrain) { app.store.presenceModeActif.set(terrain == "presence") }
@@ -395,6 +399,7 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
                     when {
                         vm.listening -> "À l'écoute…"
                         vm.busy -> vm.status.ifBlank { "Réflexion…" }
+                        plusOuvert -> "PLUS"
                         else -> tabs[tab].label.uppercase()
                     },
                     color = HudDim, fontSize = 11.sp, letterSpacing = 2.sp, fontFamily = FontFamily.Monospace
@@ -426,71 +431,20 @@ private fun Root(app: JarvisApp, vm: ChatViewModel, terrainDemande: androidx.com
                 8 -> fr.dd.jarvis.ui.AppareilsWifiScreen(app, demander)
                 else -> SettingsScreen(app) { vm.send(it) }
             }
+            if (plusOuvert) fr.dd.jarvis.ui.PanneauPlus(app, tab,
+                onOnglet = { tab = it; terrain = ""; plusOuvert = false },
+                onTerrain = { t -> plusOuvert = false; if (t == "presence") { terrain = "presence"; presenceAuto = false } else { terrain = t; tab = 0 } },
+                onFermer = { plusOuvert = false })
         }
 
-        // Navigation principale : Accueil, Chat, Agenda, Société et Réglages restent fixes ; les autres écrans sont regroupés dans Outils.
-        if (!imeOpen) Row(
-            Modifier.fillMaxWidth().height(70.dp)
-                .background(accent.copy(alpha = 0.075f))
-                .border(1.dp, accent.copy(alpha = 0.24f)),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            listOf(0, 1, 2, 5).forEach { i ->
-                val t = tabs[i]
-                val sel = tab == i
-                Column(
-                    Modifier.weight(1f).height(62.dp).clickable { tab = i; terrain = ""; outilsMenu = false }.padding(vertical = 5.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(t.icon, null, tint = if (sel) accent else HudDim, modifier = Modifier.size(22.dp))
-                    Text(t.label, color = if (sel) accent else HudDim, fontSize = 10.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
-                }
-            }
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                val sel = tab in 3..8 && tab != 5
-                Column(
-                    Modifier.fillMaxWidth().height(62.dp).clickable { outilsMenu = !outilsMenu }.padding(vertical = 5.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(Icons.Filled.Hub, null, tint = if (sel || outilsMenu) accent else HudDim, modifier = Modifier.size(22.dp))
-                    Text("Outils", color = if (sel || outilsMenu) accent else HudDim, fontSize = 10.sp, fontWeight = if (sel || outilsMenu) FontWeight.SemiBold else FontWeight.Normal)
-                }
-                androidx.compose.material3.DropdownMenu(
-                    expanded = outilsMenu,
-                    onDismissRequest = { outilsMenu = false }
-                ) {
-                    tabs.forEachIndexed { i, t ->
-                        if (i in 3..8 && i != 5) {
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        Icon(t.icon, contentDescription = null, tint = if (tab == i) accent else HudDim, modifier = Modifier.size(20.dp))
-                                        Text(t.label, color = HudText)
-                                    }
-                                },
-                                onClick = { tab = i; terrain = ""; outilsMenu = false }
-                            )
-                        }
-                    }
-                }
-            }
-            run {
-                val i = 9
-                val t = tabs[i]
-                val sel = tab == i
-                Column(
-                    Modifier.weight(1f).height(62.dp).clickable { tab = i; terrain = ""; outilsMenu = false }.padding(vertical = 5.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(t.icon, null, tint = if (sel) accent else HudDim, modifier = Modifier.size(22.dp))
-                    Text(t.label, color = if (sel) accent else HudDim, fontSize = 10.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
-                }
-            }
-        }
+        // Navigation principale : Accueil, Chat, bouton JARVIS (parler), Agenda, Plus (tous les autres écrans en tuiles).
+        if (!imeOpen) fr.dd.jarvis.ui.BarreJarvis(
+            onglet = tab, plusOuvert = plusOuvert, ecoute = vm.listening, occupe = vm.busy, sons = app.store.sonsInterface.value,
+            onOnglet = { tab = it; terrain = ""; plusOuvert = false },
+            onPlus = { plusOuvert = !plusOuvert },
+            onJarvis = { plusOuvert = false; vm.toggleListening() },
+            onJarvisLong = { plusOuvert = false; terrain = ""; tab = 1 },
+        )
     }
     if (terrain == "presence") fr.dd.jarvis.ui.ModePresence(app, statut = vm.status, onParler = { vm.toggleListening() }, onFermer = { app.store.presenceModeActif.set(false); terrain = "" })
     }

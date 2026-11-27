@@ -52,7 +52,8 @@ object OnduleursIntervention {
                     courant = null
                     continue
                 }
-                courant?.let { n -> contenus.getOrPut(n) { StringBuilder() }.append(" ").append(ligne.trim()) }
+                // Lignes gardées telles quelles (une observation par ligne : « Poignée ESS : OK »).
+                courant?.let { n -> contenus.getOrPut(n) { StringBuilder() }.append("\n").append(ligne.trim()) }
                 continue
             }
             for ((index, mn) in matches.withIndex()) {
@@ -66,13 +67,29 @@ object OnduleursIntervention {
                 val detail = ligne.substring(match.range.last + 1, fin).trim().trim(',', ';', ':', '-', '–', '.', ' ')
                 val cible = contenus.getOrPut(numero) { StringBuilder() }
                 if (detail.isNotBlank()) {
-                    if (cible.isNotEmpty()) cible.append(" ")
+                    if (cible.isNotEmpty()) cible.append("\n")
                     cible.append(detail)
                 }
             }
         }
         return contenus.toSortedMap().map { (numero, contenu) ->
             Bloc(numero, "Onduleur $numero", contenu.toString().trim())
+        }
+    }
+
+    /**
+     * Lignes d'une liste (actions…) SANS les blocs « Onduleur N » (en-tête, séries, observations) : quand les séries
+     * sont présentées en tableaux par onduleur, elles ne sont pas répétées dans la liste.
+     */
+    fun horsBlocs(lignes: List<String>): List<String> {
+        var dansBloc = false
+        return lignes.filter { l ->
+            when {
+                marqueurs(l).any { it.first.range.first <= 2 } -> { dansBloc = true; false }
+                dansBloc && FIN_BLOC.containsMatchIn(l) -> { dansBloc = false; true }
+                dansBloc -> false
+                else -> true
+            }
         }
     }
 
@@ -218,6 +235,8 @@ object MesuresSeries {
     private val GROUPE = Regex("""(?i)\b(\d{1,3})\s*$SERIE\b[^\d\n]{0,25}?$VALEUR""")
     private val PLAGE = Regex("""(?i)\b$SERIE\s*(?:n°\s*)?(\d{1,3})\b\s*(?:à|a|au|-|–)\s*(\d{1,3})\b\s*[:=]?\s*[^\d\n]{0,12}?$VALEUR""")
     private val UNE = Regex("""(?i)(?:\b$SERIE|\bS)\s*(?:n°\s*)?(\d{1,3})\b\s*[:=]?\s*[^\d\n]{0,12}?$VALEUR""")
+    /** « Séries : 352, 352 V et 377, 358 V » (deux-points obligatoire : « série 7 : 320 V » est une seule série). */
+    private val LISTE = Regex("""(?i)\bs[ée]ries\s*:\s*((?:\d{2,4}(?:,\d{1,2})?\s*(?:v|volts?)?\s*(?:,|;|/|\bet\b)\s*)+\d{2,4}(?:,\d{1,2})?)\s*(?:v|volts?)\b""")
     private val ETIQUETTE = Regex("""(?i)^(?:tensions?|courants?|mesures?|valeurs?)?\s*(?:relev[ée]e?s?|mesur[ée]e?s?)?\s*[:\-–]?\s*""")
 
     private fun unite(u: String): String = when (u.lowercase()) {
@@ -235,6 +254,11 @@ object MesuresSeries {
         return (if (approx) "≈ " else "") + premier + second
     }
 
+    private val MESURE = Regex("""(?i)(\d\s*(v|volts?|mv|kv|a|ma|w|kw|kwh|wh|mΩ|Ω|ohms?|°\s?c|%|hz)\b|isolement|tension|courant|temp[ée]rature|r[ée]sistance|\bterre\b|mesur|relev|production|index|compteur|conso)""")
+
+    /** Une « autre mesure » ressemble à une mesure (valeur avec unité, isolement, compteur…), pas à une phrase du chat. */
+    fun ressembleMesure(ligne: String): Boolean = ligne.length <= 300 && MESURE.containsMatchIn(ligne)
+
     /** Analyse séparément les séries de chaque onduleur ; les numéros repartent à 1. */
     fun parOnduleur(texte: String): List<Pair<String, Resultat>> =
         OnduleursIntervention.blocs(texte).map { bloc -> bloc.nom to analyser(bloc.contenu) }
@@ -244,7 +268,18 @@ object MesuresSeries {
         val autres = mutableListOf<String>()
         // Les quantités successives décrivent des groupes distincts : 2 séries puis 5 séries = séries 1 à 7.
         var prochaineSerie = 1
-        for (ligneBrute in ListesRapport.elements(Fidelite.enChiffres(texte))) {
+        for (origine in ListesRapport.elements(texte)) {
+            // « Séries : 352, 352 V et 377, 358 V » : une tension par série, dans l'ordre.
+            LISTE.find(origine)?.let { m ->
+                val nombres = Regex("""\d{2,4}(?:,\d{1,2})?(?!\d)""").findAll(m.groupValues[1]).map { it.value }.toList()
+                if (nombres.size >= 2) {
+                    nombres.forEach { v -> if (prochaineSerie <= 200) valeurs[prochaineSerie++] = "$v V" }
+                    val r = origine.replace(m.value, " ").replace(Regex("""\s+"""), " ").trim(' ', ',', ';', ':', '-', '–', '.')
+                    if (r.count { it.isLetter() } >= 4) autres += r
+                    continue
+                }
+            }
+            val ligneBrute = Fidelite.enChiffres(origine)
             // Une dictée peut donner l'unité une seule fois (« 16 séries à 775 volts et 2 séries à 805 »).
             // On propage cette unité uniquement aux groupes sans unité, jamais aux totaux (« 18 séries au total »).
             // Chercher une unité uniquement après une valeur numérique : après normalisation,
@@ -286,7 +321,8 @@ object MesuresSeries {
                 val k = m.groupValues[1].toInt()
                 if (k in 1..200) { valeurs[k] = valeur(m.groupValues, 2); reste = reste.replace(m.value, " "); trouve = true }
             }
-            if (!trouve) { autres += ligne; continue }
+            // Rien de mesuré sur la ligne : gardée telle qu'écrite (accents, majuscules), pas sous sa forme normalisée.
+            if (!trouve) { autres += origine; continue }
             // Ce qui reste d'utile sur la ligne (ex. « isolement OK ») est gardé à part.
             val r = reste.replace(Regex("""\s+"""), " ").trim(' ', ',', ';', ':', '-', '–', '.').replace(ETIQUETTE, "").trim(' ', ',', ':', '-')
             if (r.count { it.isLetter() } >= 4) autres += r

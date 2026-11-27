@@ -47,6 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -58,8 +59,9 @@ import kotlinx.coroutines.launch
 import java.time.LocalTime
 
 /**
- * Réglages rangés en onglets et sous-onglets (voir ONGLETS_REGLAGES) : un sujet par page, et une recherche (🔎) qui
- * retrouve n'importe quel réglage par son nom ou un mot-clé. Le dernier onglet ouvert est retenu.
+ * Réglages : un accueil de 6 tuiles (état en direct), une page par groupe avec des sections repliables (voir
+ * GROUPES_REGLAGES), et une recherche qui retrouve n'importe quel réglage par son nom ou un mot-clé. La dernière page
+ * ouverte est retenue.
  */
 @Composable
 fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
@@ -67,17 +69,45 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var tick by remember { mutableIntStateOf(0) }
+    // Vue mémorisée : « g:<groupe> » ou « g:<groupe>/<onglet>/<sous> » (ancienne forme « onglet/sous » reprise aussi).
     val vue = remember { store.reglagesVue.value }
-    var onglet by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(vue.substringBefore('/').takeIf { id -> ONGLETS_REGLAGES.any { it.id == id } } ?: "general") }
-    var sous by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(vue.substringAfter('/', "")) }
+    val vueSection = remember {
+        when {
+            vue.startsWith("g:") -> vue.removePrefix("g:").substringAfter('/', "")
+            vue.isNotBlank() -> vue
+            else -> ""
+        }
+    }
+    var groupeId by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf(when {
+            vue.startsWith("g:") -> vue.removePrefix("g:").substringBefore('/')
+            vue.isNotBlank() -> groupeDe(vue.substringBefore('/'), vue.substringAfter('/', "")).id
+            else -> ""
+        }.takeIf { id -> GROUPES_REGLAGES.any { it.id == id } }.orEmpty())
+    }
+    var ouvertsTexte by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(vueSection) }
+    val ouverts = ouvertsTexte.split('|').filter { it.isNotBlank() }.toSet()
+    var fichiersOuverts by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var recherche by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     val listeReglages = androidx.compose.foundation.lazy.rememberLazyListState()
-    androidx.compose.runtime.LaunchedEffect(onglet, sous, recherche) {
-        // Chaque rubrique s'ouvre toujours au début : ne jamais conserver un ancien défilement.
+    androidx.compose.runtime.LaunchedEffect(groupeId, recherche) {
+        // Chaque page s'ouvre toujours au début : ne jamais conserver un ancien défilement.
         listeReglages.scrollToItem(0)
     }
-    val ong = ONGLETS_REGLAGES.firstOrNull { it.id == onglet } ?: ONGLETS_REGLAGES.first()
-    val sousCourant = ong.sous.firstOrNull { it.first == sous }?.first ?: ong.sous.firstOrNull()?.first.orEmpty()
+    fun ouvrirGroupe(id: String, section: String = "") {
+        groupeId = id; recherche = null; fichiersOuverts = false
+        val g = GROUPES_REGLAGES.firstOrNull { it.id == id }
+        // Section demandée dépliée ; sinon la première du groupe.
+        ouvertsTexte = section.ifBlank { g?.sections?.firstOrNull { it.onglet != "fichiers" }?.cle.orEmpty() }
+        store.reglagesVue.set("g:$id" + if (ouvertsTexte.isNotBlank()) "/${ouvertsTexte.substringBefore('|')}" else "")
+    }
+    androidx.activity.compose.BackHandler(enabled = fichiersOuverts || groupeId.isNotBlank() || recherche != null) {
+        when {
+            fichiersOuverts -> fichiersOuverts = false
+            recherche != null -> recherche = null
+            else -> { groupeId = ""; store.reglagesVue.set("") }
+        }
+    }
 
     val volets: List<VoletReglages> = listOf(
         VoletReglages("general", "apparence", "Apparence", "theme couleur accent transparence tuiles prenom nom") {
@@ -102,6 +132,24 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     colors = SliderDefaults.colors(thumbColor = LocalAccent.current, activeTrackColor = LocalAccent.current)
                 )
                 HudTextField(store.userName.value, { store.userName.set(it) }, label = "Ton prénom (pour les salutations)")
+            }
+        },
+        VoletReglages("general", "apparence", "Style de l'interface", "style futuriste hud anime iron man effets animations sons interface") {
+            HudPanel(Modifier.fillMaxWidth(), title = "Style de l'interface") {
+                StyleHud.entries.forEach { st ->
+                    val choisi = store.styleInterface.value == st.id
+                    Row(Modifier.fillMaxWidth().clickable { store.styleInterface.set(st.id) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (choisi) "◉" else "○", color = LocalAccent.current, fontSize = 16.sp)
+                        Column(Modifier.padding(start = 10.dp)) {
+                            Text(st.nom, color = if (choisi) Color.White else HudText, fontSize = 13.sp, fontWeight = if (choisi) FontWeight.SemiBold else FontWeight.Normal)
+                            Text(st.aide, color = HudDim, fontSize = 11.sp)
+                        }
+                    }
+                }
+                if (store.styleInterface.value == StyleHud.IRONMAN.id) Row(Modifier.fillMaxWidth().clickable { store.sonsInterface.set(!store.sonsInterface.value) }.padding(vertical = 6.dp)) {
+                    Text((if (store.sonsInterface.value) "✅ " else "⬜ ") + "Sons d'interface (petits bips aux changements d'écran)", color = HudText, fontSize = 12.sp)
+                }
+                Text("En mode énergie « éco » (ou animations coupées dans Android), les effets restent figés pour économiser la batterie.", color = HudDim, fontSize = 11.sp)
             }
         },
         VoletReglages("general", "batterie", "Mode de fonctionnement Jarvis", "performance equilibré équilibre economie energie cpu processeur ram ressources vitesse") {
@@ -1821,49 +1869,50 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
     )
 
     Column(Modifier.fillMaxSize()) {
-        ReglagesNavigation(
-            onglet = onglet, sous = sousCourant, recherche = recherche,
-            onOnglet = { id -> onglet = id; sous = ""; recherche = null; store.reglagesVue.set(id) },
-            onSous = { s -> sous = s; store.reglagesVue.set("$onglet/$s") },
-            onRecherche = { recherche = it },
-        )
+        if (!fichiersOuverts) RechercheReglages(recherche) { recherche = it }
         val r = recherche
+        val groupe = GROUPES_REGLAGES.firstOrNull { it.id == groupeId }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-        if (r == null && onglet == "fichiers") {
-            DocumentLibraryScreen(app, onAsk)
-        } else {
-            val visibles = if (r != null) volets.filter { it.correspond(r) } else volets.filter { it.onglet == onglet && it.sous == sousCourant }
-            LazyColumn(
-                state = listeReglages,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 40.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                if (r != null && r.isNotBlank() && visibles.isEmpty()) item {
-                    Text("Aucun réglage ne correspond à « $r ». Essaie un autre mot (ex. voix, batterie, Freebox, clés, anti-vol).", color = HudDim, fontSize = 12.sp)
+            when {
+                fichiersOuverts -> Column(Modifier.fillMaxSize()) {
+                    Text("‹ ${groupe?.nom?.uppercase() ?: "RÉGLAGES"}", color = LocalAccent.current, fontSize = 11.sp, letterSpacing = 2.sp,
+                        fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable { fichiersOuverts = false }.padding(horizontal = 14.dp, vertical = 8.dp))
+                    Box(Modifier.weight(1f)) { DocumentLibraryScreen(app, onAsk) }
                 }
-                if (r != null && r.isBlank()) item {
-                    Text("Tape un mot : le réglage s'affiche, avec l'onglet où il se trouve.", color = HudDim, fontSize = 12.sp)
-                }
-                visibles.forEach { v ->
-                    item(key = v.onglet + "/" + v.sous + "/" + v.titre) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            // Résultat de recherche : d'où vient ce réglage (toucher pour y aller).
-                            if (r != null) Text("📍 " + v.chemin(), color = LocalAccent.current, fontSize = 12.sp,
-                                modifier = Modifier.clickable { onglet = v.onglet; sous = v.sous; recherche = null; store.reglagesVue.set(v.onglet + "/" + v.sous) })
-                            v.contenu()
+                r != null -> {
+                    val visibles = volets.filter { it.correspond(r) }
+                    LazyColumn(
+                        state = listeReglages,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 40.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        item { EnteteSection("RÉSULTATS") }
+                        if (r.isNotBlank() && visibles.isEmpty()) item {
+                            Text("Aucun réglage ne correspond à « $r ». Essaie un autre mot (ex. voix, batterie, Freebox, clés, anti-vol, style).", color = HudDim, fontSize = 12.sp)
+                        }
+                        visibles.forEach { v ->
+                            item(key = v.onglet + "/" + v.sous + "/" + v.titre) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    // Résultat de recherche : d'où vient ce réglage (toucher pour y aller).
+                                    Text("📍 " + v.chemin(), color = LocalAccent.current, fontSize = 12.sp,
+                                        modifier = Modifier.clickable { ouvrirGroupe(groupeDe(v.onglet, v.sous).id, "${v.onglet}/${v.sous}") })
+                                    v.contenu()
+                                }
+                            }
                         }
                     }
                 }
-                item {
-            Text(
-                "JARVIS 1.0 · " + app.llm.keyStatus(),
-                color = HudDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-                }
+                groupe != null -> PageGroupeReglages(groupe, volets, ouverts, listeReglages,
+                    onRetour = { groupeId = ""; store.reglagesVue.set("") },
+                    onBasculer = { sec ->
+                        ouvertsTexte = (if (sec.cle in ouverts) ouverts - sec.cle else ouverts + sec.cle).joinToString("|")
+                        if (sec.cle !in ouverts) store.reglagesVue.set("g:${groupe.id}/${sec.cle}")
+                    },
+                    onFichiers = { fichiersOuverts = true })
+                else -> AccueilReglages(app) { g -> ouvrirGroupe(g.id) }
             }
-        }
         }
     }
 }
