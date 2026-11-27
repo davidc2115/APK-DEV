@@ -19,6 +19,8 @@ object Xiaomi {
     /** Opérations privées de MIUI / HyperOS (AppOps). */
     const val OP_ARRIERE_PLAN = 10021
     const val OP_ECRAN_VERROUILLE = 10020
+    /** « SMS de notification » : sans elle, HyperOS cache aux applis les SMS des expéditeurs de service (colis, rendez-vous, factures). */
+    const val OP_SMS_NOTIFICATION = 10018
 
     fun est(): Boolean = listOf(Build.MANUFACTURER, Build.BRAND).any { it.orEmpty().lowercase() in setOf("xiaomi", "redmi", "poco") }
 
@@ -33,6 +35,7 @@ object Xiaomi {
 
     fun arrierePlan(ctx: Context) = autorise(ctx, OP_ARRIERE_PLAN)
     fun ecranVerrouille(ctx: Context) = autorise(ctx, OP_ECRAN_VERROUILLE)
+    fun smsNotification(ctx: Context) = autorise(ctx, OP_SMS_NOTIFICATION)
 
     /** Phrase d'aide si une autorisation Xiaomi manque (vide sinon, ou si l'état est inconnu hors Xiaomi). */
     fun conseilLancement(ctx: Context): String {

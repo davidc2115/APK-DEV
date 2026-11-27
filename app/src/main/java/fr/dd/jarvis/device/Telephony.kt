@@ -151,7 +151,7 @@ object Telephony {
     }
 
     /** Nom du contact pour un numéro (tolère les espaces, +33, 0…). */
-    private fun nomDe(app: fr.dd.jarvis.JarvisApp, addr: String): String? {
+    internal fun nomDe(app: fr.dd.jarvis.JarvisApp, addr: String): String? {
         if (!app.contacts.hasPermission() || addr.none { it.isDigit() }) return null
         return runCatching {
             app.contentResolver.query(Uri.withAppendedPath(android.provider.ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(addr)),

@@ -105,4 +105,26 @@ class CourrierPubTest {
         val vrai = Courrier.revalider(el(Courrier.FACTURE, "EDF", "Votre facture de 128,45 € est disponible. Elle sera prélevée le 5 décembre."))
         assertEquals(Courrier.FACTURE, vrai!!.type)
     }
+
+    @Test fun smsPublicitairesEtExpediteursDeMasse() {
+        assertTrue(Courrier.analyser("38015", "OKAIDI : jusqu'à -30% ce week-end en magasin ! Rendez-vous samedi 28/11. STOP au 36111", "SMS", 0L, jour).isEmpty())
+        assertTrue(Courrier.analyser("Intermarché", "Vente flash : 10€ offerts dès 50€ d'achat jusqu'au 30/11. Stop SMS 36173", "SMS", 0L, jour).isEmpty())
+        assertTrue(Courrier.expediteurMarketing("news@okaidi.fr"))
+        assertTrue(Courrier.expediteurMarketing("noreply@e.engie.fr"))
+        assertTrue(Courrier.expediteurMarketing("contact@mailing.bpifrance.fr"))
+        assertFalse(Courrier.expediteurMarketing("paul.martin@gmail.com"))
+        assertFalse(Courrier.expediteurMarketing("facturation@edf.fr"))
+        // Envoi de masse : publicité… sauf un vrai document.
+        assertTrue(mail("Netatmo", "Votre maison connectée\nLaura vous attend lundi 30 novembre à 9h pour un atelier.", listOf(Courrier.EXPEDITEUR_MARKETING)).isEmpty())
+        assertEquals(Courrier.FACTURE, mail("ENGIE", "Votre facture est disponible\nMontant : 84,12 €", listOf(Courrier.EXPEDITEUR_MARKETING)).single().type)
+        // Un vrai SMS de rendez-vous reste.
+        assertEquals(Courrier.RDV, Courrier.analyser("Garage Vitteaux", "Rappel : votre rendez-vous vidange est confirmé le 3/12 à 15h. Garage Vitteaux", "SMS", 0L, jour).single().type)
+    }
+
+    @Test fun smsVuParLaReceptionPuisParLaNotification() {
+        val a = Courrier.Element("a", Courrier.RDV, "SMS", "+33612345678", "Rappel : votre rendez-vous vidange est confirmé le 3/12 à 15h.", 1_000_000L)
+        val b = a.copy(id = "b", source = "Messages", emetteur = "Garage Vitteaux", ts = 1_030_000L)
+        assertTrue(Courrier.memeMessage(a, b))
+        assertFalse(Courrier.memeMessage(a, b.copy(ts = 1_000_000L + 3_600_000L)))
+    }
 }

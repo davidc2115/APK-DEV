@@ -128,9 +128,15 @@ object Courrier {
     // ------------------------------------------------------------------ publicités et newsletters
 
     private val LABELS_PUB = setOf("CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_FORUMS", "SPAM")
+    /** Pseudo-étiquette : adresse d'expédition d'un service d'envoi de masse (news@, newsletter@, marketing@…). */
+    const val EXPEDITEUR_MARKETING = "JARVIS_EXPEDITEUR_MARKETING"
+    private val ADRESSE_MARKETING = Regex("(?i)^(news|newsletters?|marketing|promo(tions?)?|offres?|bons?-?plans?|actus?|actualites?|communication|evenements?|club|fidelite|mailing|emailing|hello|bonjour)[._-]?[a-z0-9]*@|@(news|newsletters?|e-?mail(s|ing)?|mailing|mail|em|e|m|edm|crm|campaign|campaigns|marketing|promo|info|infos|communication|offres?|actu)[0-9]*\\.")
+
+    /** Adresse d'expéditeur typique d'un envoi de masse (« news@okaidi.fr », « noreply@e.engie.fr », « contact@mailing.x.fr »). */
+    internal fun expediteurMarketing(adresse: String): Boolean = ADRESSE_MARKETING.containsMatchIn(adresse.trim())
     /** Pied de page d'un envoi de masse (newsletter, publicité) : désinscription, « version en ligne »… */
-    private val DESABONNEMENT = Regex("\\b(se desinscrire|desinscri\\w*|desabonn\\w*|ne (plus|souhaitez plus|voulez plus) recevoir|pour ne plus recevoir|unsubscribe|gerer (vos|mes) (preferences|abonnements)|preferences de communication|si vous ne visualisez pas|ne s affiche pas correctement|version en ligne|voir la version|voir en ligne|afficher (ce message |cet e ?mail )?dans (votre|le) navigateur|view (it |this email )?in (your )?browser|newsletter|lettre d information|vous recevez (cet|ce) (e ?mail|courriel|message)|cet e ?mail vous a ete envoye|ce message vous a ete envoye|vous avez recu (cet|ce) (e ?mail|message))\\b")
-    private val COMMERCIAL = Regex("\\b(black friday|cyber monday|french days|soldes|vente privee|ventes privees|code promo|bons? plans?|promos?|promotions?|offres?|cagnotte|decouvrez|nouveautes?|nouvelle collection|jusqu a|livraison offerte|profitez|ne manquez pas|derniers jours|dernier jour|exclusivites?|exclusif|exclusive|cadeaux?|remises?|reductions?|economisez|petits prix|meilleures ventes|notre selection|carte fidelite|fidelite|parrainage|parrainez|jeu concours|concours|gagnez|abonnez vous|inscrivez vous|webinaire|webinar|ateliers? gratuits?|catalogue|collection)\\b")
+    private val DESABONNEMENT = Regex("\\b(se desinscrire|desinscri\\w*|desabonn\\w*|ne (plus|souhaitez plus|voulez plus) recevoir|pour ne plus recevoir|unsubscribe|gerer (vos|mes) (preferences|abonnements)|preferences de communication|si vous ne visualisez pas|ne s affiche pas correctement|version en ligne|voir la version|voir en ligne|afficher (ce message |cet e ?mail )?dans (votre|le) navigateur|view (it |this email )?in (your )?browser|newsletter|lettre d information|vous recevez (cet|ce) (e ?mail|courriel|message)|cet e ?mail vous a ete envoye|ce message vous a ete envoye|vous avez recu (cet|ce) (e ?mail|message)|stop (au |sms |par sms au )?\\d{5}|stop sms|repondez stop|desinscription sms)\\b")
+    private val COMMERCIAL = Regex("\\b(black friday|cyber monday|french days|soldes|vente privee|ventes privees|code promo|bons? plans?|promos?|promotions?|offres?|cagnotte|decouvrez|nouveautes?|nouvelle collection|jusqu a|livraison offerte|profitez|ne manquez pas|derniers jours|dernier jour|exclusivites?|exclusif|exclusive|cadeaux?|remises?|reductions?|economisez|petits prix|meilleures ventes|notre selection|carte fidelite|fidelite|parrainage|parrainez|jeu concours|concours|gagnez|abonnez vous|inscrivez vous|webinaire|webinar|ateliers? gratuits?|catalogue|collection|vente flash|ventes flash|bons? d achat|black week|achetez|commandez|en magasin|boutique|inedit|gratuite?s?|offerte?s?)\\b")
     private val POURCENT = Regex("-\\s?\\d{1,2}\\s?%|\\b\\d{1,2}\\s?%\\s?(de remise|de reduction|de réduction|offerts?|sur|off)\\b", RegexOption.IGNORE_CASE)
     /** Ce qu'une publicité n'écrit pas : un document ou un rendez-vous qui concerne vraiment le destinataire. */
     private val TRANSACTIONNEL = Regex("\\b(votre facture|facture n|facture numero|numero de facture|nouvelle facture|montant de votre facture|avis d echeance|echeancier|a payer avant|a regler avant|sera preleve|sera prelevee|prelevement (de|du|le)|relance de paiement|impaye|votre devis|devis n|devis numero|bon pour accord|votre rendez vous (est|du|le|a|avec|de)|confirmation de (votre |du )?rendez vous|rappel de (votre )?rendez vous|rendez vous (est )?confirme|convocation|numero de suivi|suivre votre colis|votre colis|votre commande (a ete |est )?expediee?|avis de passage|votre livraison)\\b")
@@ -140,6 +146,8 @@ object Courrier {
         if (labels.any { it in LABELS_PUB }) return true
         val ns = normaliser(sujet); val nc = normaliser(corps)
         if (TRANSACTIONNEL.containsMatchIn(ns)) return false
+        // Envoi de masse sans objet transactionnel : publicité, sauf s'il cite vraiment un document ou un rendez-vous.
+        if (EXPEDITEUR_MARKETING in labels && !TRANSACTIONNEL.containsMatchIn(nc)) return true
         val commerce = COMMERCIAL.findAll("$ns $nc").map { it.value }.toSet().size + (if (POURCENT.containsMatchIn("$sujet $corps")) 2 else 0)
         if (TRANSACTIONNEL.containsMatchIn(nc)) return commerce >= 5
         return DESABONNEMENT.containsMatchIn("$ns $nc") || commerce >= 2
@@ -336,7 +344,12 @@ object Courrier {
      * expéditeur, reçus à moins de 3 jours d'écart, et même numéro de suivi / même début de texte.
      */
     internal fun memeMessage(a: Element, b: Element): Boolean {
-        if (a.type != b.type || cleEmetteur(a.emetteur) != cleEmetteur(b.emetteur) || kotlin.math.abs(a.ts - b.ts) > 3 * 86_400_000L) return false
+        if (a.type != b.type || kotlin.math.abs(a.ts - b.ts) > 3 * 86_400_000L) return false
+        // SMS vu par la réception Android (numéro) puis par sa notification (nom du contact) : même texte, même moment.
+        if (cleEmetteur(a.emetteur) != cleEmetteur(b.emetteur)) {
+            val ra = normaliser(resumeDe(a.resume)); val rb = normaliser(resumeDe(b.resume))
+            return kotlin.math.abs(a.ts - b.ts) < 10 * 60_000L && ra.length >= 25 && ra.take(60) == rb.take(60)
+        }
         if (a.type == COLIS) return a.numero.isNotBlank() && a.numero == b.numero
         val ra = normaliser(resumeDe(a.resume)); val rb = normaliser(resumeDe(b.resume))
         return ra.length >= 25 && rb.length >= 25 && ra.take(60) == rb.take(60)
@@ -516,12 +529,31 @@ object Courrier {
         return gardes
     }
 
+    /** Bilan d'un rattrapage des SMS : lus, repérés, nouveaux, et ce qui empêche de tout lire. */
+    data class ImportSms(val lus: Int, val reperes: Int, val nouveaux: Int, val probleme: String = "") {
+        fun texte(): String = if (probleme.isNotBlank() && lus == 0) "SMS : $probleme"
+            else "$lus SMS lus (90 jours), $reperes repéré(s) dont $nouveaux nouveau(x)" + (if (probleme.isNotBlank()) " — $probleme" else "")
+    }
+
+    /** Ce qui empêche JARVIS de lire les SMS (autorisation Android, « SMS de notification » d'HyperOS), ou "". */
+    fun problemeSms(c: Context): String = when {
+        c.checkSelfPermission(android.Manifest.permission.READ_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED ->
+            "lecture des SMS non autorisée (Réglages › Téléphone › Contrôle › Autoriser les SMS)"
+        Xiaomi.smsNotification(c) == false ->
+            "HyperOS cache les SMS de service (colis, rendez-vous, factures) : autorise « SMS de notification » dans Autres autorisations de JARVIS"
+        else -> ""
+    }
+
     /** Rattrapage des SMS déjà présents dans la boîte de réception. Seuls les messages reconnus sont conservés. */
-    suspend fun importerSmsRecents(app: JarvisApp): Int {
-        if (!app.store.courrierAnalyse.value || app.checkSelfPermission(android.Manifest.permission.READ_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return 0
+    suspend fun importerSmsRecents(app: JarvisApp): ImportSms {
+        if (!app.store.courrierAnalyse.value) return ImportSms(0, 0, 0, "analyse des SMS et mails désactivée (Réglages › Analyse des SMS et mails)")
+        val probleme = problemeSms(app)
+        if (app.checkSelfPermission(android.Manifest.permission.READ_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return ImportSms(0, 0, 0, probleme)
         val depuis = System.currentTimeMillis() - 90L * 86_400_000L
         val trouves = mutableListOf<Element>()
         val textes = HashMap<String, Pair<String, String>>()
+        val noms = HashMap<String, String>()
+        var lus = 0
         runCatching {
             app.contentResolver.query(android.provider.Telephony.Sms.Inbox.CONTENT_URI,
                 arrayOf(android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.BODY, android.provider.Telephony.Sms.DATE),
@@ -529,10 +561,12 @@ object Courrier {
                 val ia = cursor.getColumnIndex(android.provider.Telephony.Sms.ADDRESS)
                 val ib = cursor.getColumnIndex(android.provider.Telephony.Sms.BODY)
                 val idate = cursor.getColumnIndex(android.provider.Telephony.Sms.DATE)
-                var lus = 0
-                while (cursor.moveToNext() && lus++ < 1000) {
+                while (cursor.moveToNext() && lus < 1000) {
+                    lus++
                     val corps = if (ib >= 0) cursor.getString(ib).orEmpty() else ""
-                    val adresse = if (ia >= 0) cursor.getString(ia).orEmpty() else "SMS"
+                    val numero = if (ia >= 0) cursor.getString(ia).orEmpty() else "SMS"
+                    // Le nom du contact plutôt que son numéro (comme dans la notification) : même expéditeur reconnu.
+                    val adresse = noms.getOrPut(numero) { runCatching { Telephony.nomDe(app, numero) }.getOrNull() ?: numero }
                     val date = if (idate >= 0) cursor.getLong(idate) else System.currentTimeMillis()
                     if (corps.isNotBlank()) trouves += analyser(adresse, corps, "SMS", date).map { e ->
                         textes[e.id] = adresse to corps
@@ -541,8 +575,23 @@ object Courrier {
                 }
             }
         }
-        return verifierNouveaux(app, enregistrer(app, trouves), trouves, textes)
+        val nouveaux = verifierNouveaux(app, enregistrer(app, trouves), trouves, textes)
+        return ImportSms(lus, trouves.size, nouveaux, probleme)
     }
+
+    /**
+     * Éléments déjà enregistrés (à traiter) jamais relus par l'IA, hors colis : relus sur leur aperçu, au plus [max]
+     * par ouverture. Retire les publicités que les règles laissaient passer. Renvoie le nombre d'éléments retirés.
+     */
+    suspend fun reverifierAnciens(app: JarvisApp, max: Int = 10): Int {
+        if (!app.store.courrierAnalyse.value || !app.store.courrierIA.value) return 0
+        var retires = 0
+        liste(app).filter { !it.verifie && !it.traite && it.type != COLIS }.sortedByDescending { it.ts }.take(max).forEach { e ->
+            if (runCatching { CourrierIA.verifier(app, e, e.emetteur, e.resume) }.getOrDefault(e) == null) retires++
+        }
+        return retires
+    }
+
     /**
      * Rattrapage des courriels des comptes actifs (Gmail ou IMAP), même si Jarvis n'a pas vu leur notification.
      * On analyse le sujet et le corps, pas seulement l'aperçu tronqué de la notification ; les mails classés
@@ -558,7 +607,8 @@ object Courrier {
             val trouves = mails.flatMap { mail ->
                 val emetteur = mail.from.ifBlank { mail.fromAddr }.ifBlank { "Expéditeur inconnu" }
                 val contenu = listOf(mail.subject, mail.body.ifBlank { mail.snippet }).filter { it.isNotBlank() }.joinToString("\n")
-                analyser(emetteur, contenu, "Mail", mail.date?.time ?: 0L, labels = mail.labels).map { e ->
+                val labels = if (expediteurMarketing(mail.fromAddr)) mail.labels + EXPEDITEUR_MARKETING else mail.labels
+                analyser(emetteur, contenu, "Mail", mail.date?.time ?: 0L, labels = labels).map { e ->
                     textes[e.id] = emetteur to contenu
                     domaine(e, mail.account, data, regles).let { (d, auto) -> e.copy(domaine = d, auto = auto) }
                 }

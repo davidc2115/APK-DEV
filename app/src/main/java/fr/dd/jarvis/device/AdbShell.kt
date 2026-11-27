@@ -139,6 +139,8 @@ object AdbShell {
             if (Build.VERSION.SDK_INT >= 36) add("pm grant $pkg android.permission.ACCESS_LOCAL_NETWORK")
             listOf("SYSTEM_ALERT_WINDOW", "REQUEST_INSTALL_PACKAGES", "RUN_IN_BACKGROUND", "RUN_ANY_IN_BACKGROUND", "WAKE_LOCK").forEach { add("appops set $pkg $it allow") }
             add("dumpsys deviceidle whitelist +$pkg")
+            // Xiaomi / HyperOS : SMS de service (colis, rendez-vous), ouverture d'applis en arrière-plan, écran verrouillé.
+            if (Xiaomi.est()) listOf(Xiaomi.OP_SMS_NOTIFICATION, Xiaomi.OP_ARRIERE_PLAN, Xiaomi.OP_ECRAN_VERROUILLE).forEach { add("appops set $pkg $it allow") }
             add("cmd notification allow_listener $listener")
             add("cmd notification allow_dnd $pkg")
             add("cur=\$(settings get secure enabled_accessibility_services); case \"\$cur\" in *$a11y*) ;; null|'') settings put secure enabled_accessibility_services $a11y;; *) settings put secure enabled_accessibility_services \"\$cur:$a11y\";; esac; settings put secure accessibility_enabled 1")

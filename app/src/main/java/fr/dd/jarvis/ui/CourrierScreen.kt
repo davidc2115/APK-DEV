@@ -60,21 +60,34 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var smsProbleme by remember { mutableStateOf(Courrier.problemeSms(app)) }
     LaunchedEffect(app) {
-        val resultat = withContext(Dispatchers.IO) {
-            val anciensFauxPositifs = Courrier.revaliderHistorique(app)
-            val sms = Courrier.importerSmsRecents(app)
-            val mails = runCatching { Courrier.importerMailsRecents(app, 200) }
-            Triple(anciensFauxPositifs, sms, mails)
-        }
-        if (resultat.first > 0 || resultat.second > 0 || resultat.third.getOrDefault(0) > 0) version++
-        actionInfo = resultat.third.exceptionOrNull()?.let { "⚠️ Import des mails impossible : ${it.message ?: it.javaClass.simpleName}. Vérifie Réglages › Comptes › Mails." }
-            ?: "Synchronisation terminée : ${resultat.second} nouveau(x) SMS, ${resultat.third.getOrDefault(0)} nouveau(x) mail(s), ${resultat.first} ancienne(s) publicité(s) retirée(s)."
+        actionInfo = "Synchronisation des SMS et mails…"
+        val anciensFauxPositifs = withContext(Dispatchers.IO) { Courrier.revaliderHistorique(app) }
+        if (anciensFauxPositifs > 0) version++
+        val sms = withContext(Dispatchers.IO) { Courrier.importerSmsRecents(app) }
+        smsProbleme = sms.probleme
+        version++
+        val mails = withContext(Dispatchers.IO) { runCatching { Courrier.importerMailsRecents(app, 200) } }
+        version++
+        // Anciens éléments jamais relus par l'IA : les publicités restantes sont retirées.
+        val pubsIA = withContext(Dispatchers.IO) { runCatching { Courrier.reverifierAnciens(app) }.getOrDefault(0) }
+        version++
+        actionInfo = listOfNotNull(
+            "📱 " + sms.texte(),
+            mails.exceptionOrNull()?.let { "⚠️ Import des mails impossible : ${it.message ?: it.javaClass.simpleName}. Vérifie Réglages › Comptes › Mails." }
+                ?: "📧 ${mails.getOrDefault(0)} nouveau(x) élément(s) dans les mails",
+            (anciensFauxPositifs + pubsIA).takeIf { it > 0 }?.let { "🧹 $it publicité(s) ou faux élément(s) retiré(s)" },
+        ).joinToString("\n")
     }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             HudPanel(Modifier.fillMaxWidth(), title = if (domaineFixe == Courrier.SOCIETE) "📬 Reçus pour la Société" else "📬 Courrier reçu") {
                 if (actionInfo.isNotBlank()) Text(actionInfo, color = HudDim, fontSize = 11.sp)
+                if (smsProbleme.isNotBlank()) {
+                    Text("⚠️ SMS : $smsProbleme", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    HudChip("🔓 Ouvrir les autorisations de JARVIS", false) { fr.dd.jarvis.device.Xiaomi.ouvrirAutorisations(context) }
+                }
                 Text(if (domaineFixe == Courrier.SOCIETE) "Factures, devis, rendez-vous et colis classés « Société ». Les éléments perso ou à classer sont dans l'onglet Courrier."
                     else "Colis, rendez-vous, factures et devis repérés dans tes SMS et mails. Classe chacun 🏢 Société ou 🏠 Perso : ce qui vient d'un client de la Société (ou cite un de tes devis / factures, ou arrive sur la boîte mail de la Société) est classé tout seul, et ton choix est retenu pour les prochains messages du même expéditeur.",
                     color = HudDim, fontSize = 12.sp)

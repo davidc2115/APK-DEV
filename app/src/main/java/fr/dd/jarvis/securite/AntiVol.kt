@@ -588,6 +588,12 @@ class AntiVolSmsReceiver : BroadcastReceiver() {
                 messages.groupBy { it.displayOriginatingAddress ?: it.originatingAddress ?: "" }.forEach { (numero, parts) ->
                     val texte = parts.joinToString("") { it.displayMessageBody ?: it.messageBody ?: "" }
                     if (numero.isNotBlank()) runCatching { AntiVol.recevoir(app, numero, texte) }
+                    // Colis, rendez-vous, factures : le SMS complet tel que reçu (la notification peut être masquée ou tronquée).
+                    // Jamais une commande anti-vol (elle contient le code).
+                    if (numero.isNotBlank() && texte.isNotBlank() && !AntiVol.ressembleCommande(texte)) runCatching {
+                        val nom = runCatching { fr.dd.jarvis.device.Telephony.nomDe(app, numero) }.getOrNull() ?: numero
+                        fr.dd.jarvis.device.Courrier.recu(app, "SMS", nom, texte, parts.firstOrNull()?.timestampMillis?.takeIf { it > 0 } ?: System.currentTimeMillis())
+                    }
                 }
             } finally { fin.finish() }
         }.start()
