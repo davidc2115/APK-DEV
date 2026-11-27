@@ -396,18 +396,27 @@ class HomeAssistantAdmin(
                 ws { w -> w.cmd("hacs/repository/remove", JSONObject().put("repository", idHacs(w, a.optString("depot").trim())), 120); "🗑️ Désinstallé. Redémarre Home Assistant si c'était une intégration." }
             }
             // ---- système
-            "diagnostic", "diagnostic_complet", "depanner" -> {
+            "diagnostic", "diagnostic_complet", "depanner" -> runCatching {
                 val entrees = liste(rest("GET", "/api/config/config_entries/entry"))
                 val etats = liste(rest("GET", "/api/states"))
                 val registre = runCatching { ws { w -> w.cmd("config/entity_registry/list") } }.getOrNull()
                 val journal = runCatching { rest("GET", "/api/error_log")?.toString().orEmpty() }.getOrDefault("")
                 val config = runCatching { rest("POST", "/api/config/core/check_config") as? JSONObject }.getOrNull()
                     ?.let { if (it.optString("result") == "valid") "valide" else it.optString("errors").ifBlank { it.toString() }.take(1000) }.orEmpty()
-                HomeAssistantDiagnosticAvance.analyser(
+                val rapport = HomeAssistantDiagnosticAvance.analyser(
                     JSONArray().apply { entrees.forEach { put(it) } },
                     JSONArray().apply { etats.forEach { put(it) } },
                     (registre as? JSONArray) ?: JSONArray(), journal, config
                 )
+                if (action == "diagnostic") rapport
+                else {
+                    val hote = diagnosticSecours?.invoke()?.substringAfter("## Hôte Debian", "")
+                        ?.takeIf { it.isNotBlank() } ?: "Inspection SSH Debian indisponible."
+                    rapport + "\\n\\n## Diagnostic de l'hôte Docker" + hote
+                }
+            }.getOrElse { erreur ->
+                "⚠️ L'API Home Assistant ne répond pas correctement : ${erreur.message?.take(300) ?: "erreur inconnue"}.\\n\\n" +
+                    (diagnosticSecours?.invoke() ?: "Diagnostic de secours indisponible : vérifie l'adresse, le jeton et la connexion SSH.")
             }
             "verifier" -> rest("POST", "/api/config/core/check_config").toString()
             "journal" -> runCatching { rest("GET", "/api/error_log").toString().lines().takeLast(a.optString("lignes").toIntOrNull() ?: 60).joinToString("\n").takeLast(6000) }.getOrElse { "API Home Assistant indisponible : ${it.message?.take(180)}.\n\n" + (diagnosticSecours?.invoke() ?: "Diagnostic hôte indisponible : profil SSH Debian non configuré.") }
