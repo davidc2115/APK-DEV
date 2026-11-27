@@ -837,6 +837,13 @@ object Routeur {
      * Hermès garde : les demandes qui le nomment, le serveur, internet, les automatismes / surveillances, la réflexion
      * libre (explication, conseil, rédaction créative, code) et ses compétences propres.
      */
+    private val TIKTOK_JARVIS = Regex("\\btik ?tok\\b|\\b(reels?|shorts?)\\b|\\bmontages? video|\\bpixabay\\b|\\bpexels\\b|" +
+        "\\b(cree|creer|fais|fait|faire|monte|monter|genere|generer|realise|realiser|prepare|preparer|lance|lancer)\\b[^.?!]{0,50}\\bvideos?\\b", RegexOption.IGNORE_CASE)
+
+    /** Demande TikTok ou création de vidéo : à traiter par les outils de JARVIS. */
+    fun tiktokJarvis(texte: String): Boolean =
+        TIKTOK_JARVIS.containsMatchIn(java.text.Normalizer.normalize(texte, java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), ""))
+
     fun actionJarvis(texte: String): Boolean {
         // Sans accents (le reste intact) : « \\b » se comporte pareil sur Android et sur la JVM des tests.
         val t = java.text.Normalizer.normalize(texte.trim(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
@@ -988,6 +995,10 @@ object Routeur {
         // Home Assistant directement, dans tous les modes — jamais Hermès (sauf automatisme à orchestrer ou panne du serveur).
         if (fr.dd.jarvis.ai.MaisonDirecte.concerne(t) && !ORCHESTRATION.containsMatchIn(t) && !serveurDebian(t))
             return Choix(Cible.JARVIS, "maison : Home Assistant directement")
+        // TikTok et montages vidéo (tendances, niche, concurrents, scripts, montage, brouillons) : les outils de JARVIS
+        // directement, dans tous les modes. Hermès répondait « voulez-vous que je lance… ? » au lieu de lancer.
+        if (tiktokJarvis(t) && !ORCHESTRATION.containsMatchIn(t) && !WEB.containsMatchIn(t))
+            return Choix(Cible.JARVIS, "TikTok / montage vidéo : outils Jarvis directement")
         // Ce qu'Hermès sait faire seul (skills ajoutés : procédures, ponts, accès…) reste chez lui.
         if (competenceHermes != null) return Choix(Cible.HERMES, "compétence d'Hermès « $competenceHermes »")
         // ACTIONS (téléphone, appels, SMS, mails, agenda, rappels, maison, Plex, société, fichiers…) : Jarvis les fait

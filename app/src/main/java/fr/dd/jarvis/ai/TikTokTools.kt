@@ -44,7 +44,7 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 "duree" to prop("Durée visée en secondes (optionnel, ex. 30)."),
                 "objectif" to prop("Ce que la vidéo doit privilégier : vues, abonnés, ventes, notoriété… (optionnel).")
             ), listOf("sujet")),
-        tool("tiktok_video", "TikTok : crée VRAIMENT une ou plusieurs vidéos TikTok montées (pas juste un script), d'une durée précise : plans générés par IA (fal.ai) et/ou vidéos et images existantes, texte incrusté, voix off, musique ou chanson avec paroles. Le montage tourne en arrière-plan (quelques minutes) et le résultat arrive dans le chat. Ne demande pas de précisions inutiles : valeurs par défaut raisonnables.",
+        tool("tiktok_video", "TikTok : APPELLE-LE DIRECTEMENT, sans jamais demander « voulez-vous que je lance… ? » (le montage se lance en arrière-plan et peut être annulé). « En lien avec ma niche » : le sujet est pris dans la niche enregistrée. « Avec Pixabay / Pexels / plans libres de droits » : plans = stock. Crée VRAIMENT une ou plusieurs vidéos TikTok montées (pas juste un script), d'une durée précise : plans générés par IA (fal.ai) et/ou vidéos et images existantes, texte incrusté, voix off, musique ou chanson avec paroles. Le montage tourne en arrière-plan (quelques minutes) et le résultat arrive dans le chat. Ne demande pas de précisions inutiles : valeurs par défaut raisonnables.",
             mapOf(
                 "sujet" to prop("Le sujet / ce que doit raconter la vidéo."),
                 "script" to prop("Script déjà écrit à suivre (optionnel, ex. sortie de tiktok_script)."),
@@ -186,9 +186,15 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 ToolResult(script + (emplacement?.let { "\n\n📁 $it" } ?: ""), direct = true)
             }
             "tiktok_video", "video_montage" -> {
-                val sujet = a.optString("sujet").trim()
+                // « En lien avec ma niche » (ou aucun sujet) : la niche enregistrée donne le thème.
+                val niche = app.store.tiktokNiche.value.trim()
+                val brut = a.optString("sujet").trim()
+                val sujet = when {
+                    niche.isNotBlank() && (brut.isBlank() || Regex("(?i)\\bniche\\b").containsMatchIn(brut)) -> (if (brut.isBlank()) "" else "$brut — ") + "niche du compte : $niche"
+                    else -> brut
+                }
                 val script = a.optString("script").trim()
-                if (sujet.isBlank() && script.isBlank() && a.optString("sources").isBlank()) return ToolResult("Précise le sujet de la vidéo (ou les vidéos/images à monter).")
+                if (sujet.isBlank() && script.isBlank() && a.optString("sources").isBlank()) return ToolResult("Précise le sujet de la vidéo (ou enregistre ta niche dans Réglages › TikTok).")
                 fun vrai(k: String, def: Boolean) = a.optString(k).trim().lowercase().let { if (it.isBlank()) def else it in setOf("true", "oui", "1", "yes") }
                 val d = Montage.Demande(
                     sujet = sujet.ifBlank { script.take(80) }, script = script,
@@ -202,7 +208,8 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                     sources = a.optString("sources").trim(),
                     garderSon = vrai("garder_son", false),
                     tiktok = name == "tiktok_video",
-                    plans = a.optString("plans").ifBlank { "auto" },
+                    // « Avec Pixabay / Pexels / libres de droits » dans la demande : uniquement des plans libres de droits.
+                    plans = a.optString("plans").ifBlank { if (Regex("(?i)pixabay|pexels|libres? de droits").containsMatchIn(brut + " " + script)) "stock" else "auto" },
                     sousTitres = vrai("sous_titres", true),
                     // Brouillons TikTok : automatique dès que la publication est activée et autorisée sur le compte.
                     brouillon = name == "tiktok_video" && app.store.tiktokPublication.value && TikTok.envoiAutorise(app)

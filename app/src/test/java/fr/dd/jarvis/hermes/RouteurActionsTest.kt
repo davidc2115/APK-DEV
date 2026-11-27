@@ -33,4 +33,14 @@ class RouteurActionsTest {
         assertTrue(RelaisGroq.domaines("lis les messages du serveur discord B&G").contains("discord"))
         assertFalse(RelaisGroq.domaines("lis les messages du serveur discord B&G").contains("ssh_"))
     }
+
+    /** « Fais une vidéo TikTok en lien avec ma niche avec Pixabay » : Hermès demandait « voulez-vous que je lance… ? ». */
+    @org.junit.Test fun tiktokEtMontagesParJarvis() {
+        for (t in listOf("Fais-moi une vidéo TikTok en lien avec ma niche avec Pixabay", "crée une vidéo de 30 secondes sur le 11 novembre",
+            "analyse mes concurrents tiktok", "monte une vidéo avec mes photos du chantier", "prépare 3 reels sur les panneaux solaires"))
+            org.junit.Assert.assertEquals(t, Routeur.Cible.JARVIS, Routeur.decider("tout", false, false, t, null).cible)
+        // Explicitement pour Hermès, ou recherche sur internet : inchangé.
+        org.junit.Assert.assertEquals(Routeur.Cible.HERMES, Routeur.decider("tout", false, false, "Hermès, fais une vidéo TikTok", null).cible)
+        org.junit.Assert.assertFalse(Routeur.tiktokJarvis("quelle est la capitale de l'Australie"))
+    }
 }
