@@ -31,6 +31,20 @@ object Stock {
     fun motsClesFr(sujet: String, max: Int = 3): List<String> = sujet.lowercase().split(Regex("[^\\p{L}0-9]+"))
         .filter { it.length > 3 && it !in VIDES_FR }.distinct().take(max)
 
+    private fun sansAccents(t: String) = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+
+    /**
+     * Le plan trouvé montre-t-il ce qu'on cherche ? Ses étiquettes (Pixabay) ou son adresse descriptive (Pexels) doivent
+     * contenir au moins un mot de la recherche : « phoenix fire » ne donne plus un rouge à lèvres.
+     */
+    internal fun pertinent(requete: String, descripteur: String): Boolean {
+        val d = sansAccents(descripteur)
+        if (d.none { it.isLetter() }) return true
+        val mots = sansAccents(requete).split(Regex("[^a-z0-9]+")).filter { it.length >= 3 && it !in VIDES && it !in VIDES_FR }
+        if (mots.isEmpty()) return true
+        return mots.any { m -> d.contains(m.take(5)) }
+    }
+
     /** Mots-clés de recherche tirés d'un prompt de plan (en anglais) quand le scénario n'en donne pas. */
     fun motsCles(visuel: String, max: Int = 4): String = visuel.lowercase().replace(Regex("[^a-z0-9 ]"), " ").split(' ')
         .filter { it.length > 2 && it !in VIDES }.distinct().take(max).joinToString(" ")
@@ -70,6 +84,8 @@ object Stock {
                 val v = vids.optJSONObject(i) ?: continue
                 val id = "pexels:" + v.optLong("id")
                 if (id in pris || v.optInt("duration") < 3) continue
+                val etiquettes = v.optJSONArray("tags")?.let { t -> (0 until t.length()).joinToString(" ") { t.optString(it) } }.orEmpty()
+                if (!pertinent(requete, v.optString("url").substringAfter("/video/").replace('-', ' ') + " " + etiquettes)) continue
                 val lien = choisirPexels(v, vertical) ?: continue
                 pris += id
                 return@withContext Clip(id, lien, "Pexels", v.optJSONObject("user")?.optString("name").orEmpty(), v.optString("url"), v.optInt("duration"))
@@ -83,6 +99,7 @@ object Stock {
                 val h = hits.optJSONObject(i) ?: continue
                 val id = "pixabay:" + h.optLong("id")
                 if (id in pris || h.optInt("duration") < 3) continue
+                if (!pertinent(requete, h.optString("tags") + " " + h.optString("pageURL").substringAfter("/videos/").replace('-', ' '))) continue
                 val lien = choisirPixabay(h) ?: continue
                 pris += id
                 return@withContext Clip(id, lien, "Pixabay", h.optString("user"), h.optString("pageURL"), h.optInt("duration"))

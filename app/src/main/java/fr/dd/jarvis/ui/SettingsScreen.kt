@@ -2407,6 +2407,11 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
         HudTextField(store.tiktokNiche.value, { store.tiktokNiche.set(it) }, Modifier.fillMaxWidth(), label = "Ta niche (mots-clés)", placeholder = "maintenance photovoltaïque, panneaux solaires")
         Spacer(Modifier.height(6.dp))
         HudTextField(store.tiktokConcurrents.value, { store.tiktokConcurrents.set(it) }, Modifier.fillMaxWidth(), label = "Comptes concurrents suivis", placeholder = "@compte1, @compte2")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.tiktokStyle.value, { store.tiktokStyle.set(it) }, Modifier.fillMaxWidth(), label = "Signature de tes vidéos (symbole, couleurs, ton)", placeholder = "phénix bleu blanc rouge en ouverture et en fin, ton engagé")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.tiktokSignature.value, { store.tiktokSignature.set(it) }, Modifier.fillMaxWidth(), label = "Images de signature existantes (facultatif)", placeholder = "JARVIS/Images/Phénix  ou  DCIM/phenix.png")
+        Text("Sans images, JARVIS génère l'image de signature avec Cloudflare (gratuit) d'après la signature ci-dessus, en ouverture et en fin de chaque vidéo.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
         Spacer(Modifier.height(8.dp))
         HudChip(if (store.tiktokHebdo.value) "💡 3 idées de vidéos chaque lundi : oui" else "Idées de vidéos chaque lundi : non", store.tiktokHebdo.value) { store.tiktokHebdo.set(!store.tiktokHebdo.value) }
     }

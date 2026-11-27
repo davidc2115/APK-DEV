@@ -88,13 +88,19 @@ object Montage {
         /** Sous-titres synchronisés avec la voix off. */
         val sousTitres: Boolean = true,
         /** Envoyer la vidéo terminée dans les brouillons TikTok du compte. */
-        val brouillon: Boolean = false
+        val brouillon: Boolean = false,
+        /** Signature et ton de la chaîne (« phénix bleu blanc rouge en ouverture et en fin, ton engagé »). */
+        val style: String = "",
+        /** Images / vidéos de signature existantes pour l'ouverture et la fin (sinon image générée d'après [style]). */
+        val signature: String = ""
     )
 
     private data class Plan(val visuel: String, val texte: String, val recherche: String = "")
-    private data class Storyboard(val titre: String, val analyse: String, val plans: List<Plan>, val voixOff: String, val musique: String, val paroles: String, val legende: String)
-    /** Un morceau de la timeline : vidéo (rognée à [dureeMs]) ou image affichée [dureeMs]. */
-    private data class Segment(val fichier: File, val image: Boolean, val dureeMs: Long, val texte: String)
+    private data class Storyboard(val titre: String, val analyse: String, val plans: List<Plan>, val voixOff: String, val musique: String, val paroles: String, val legende: String,
+                                  val signature: String = "")
+    /** Un morceau de la timeline : vidéo (de [debutMs], rognée à [dureeMs]) ou image affichée [dureeMs]. */
+    private data class Segment(val fichier: File, val image: Boolean, val dureeMs: Long, val texte: String, val debutMs: Long = 0)
+    private val AUDIO = setOf("mp3", "m4a", "aac", "ogg", "oga", "wav", "flac", "opus")
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private const val NOTIF = 7310
@@ -183,7 +189,8 @@ object Montage {
         // 1. Scénario : plans (visuel + texte à l'écran), voix off, musique, paroles, légende.
         progres("✍️ Écriture du scénario…")
         val existants = resoudreSources(app, d.sources, travail)
-        val nbPlans = max(2, ceil(d.dureeS / 5.0).toInt())
+        // TikTok : un plan toutes les ~3 s (rythme de la plateforme) ; ailleurs toutes les ~5 s.
+        val nbPlans = if (d.tiktok) ceil(d.dureeS / 3.0).toInt().coerceIn(3, 12) else max(2, ceil(d.dureeS / 5.0).toInt())
         val sb = storyboard(app, d, nbPlans, k, n, progres)
         // L'analyse éditoriale préalable est une étape obligatoire : ne dépense aucun crédit
         // et ne génère aucun plan si l'agent d'analyse n'a pas produit de résultat exploitable.
@@ -196,11 +203,23 @@ object Montage {
         val dureeExistants = existants.sumOf { (f, image) -> if (image) 3500L else dureeMs(f) ?: 0L }
         val manqueTotal = (ms - dureeExistants).coerceAtLeast(0)
         val echecs = mutableListOf<String>()
+        // 1b. Signature de la chaîne (ouverture et fin) : tes images / vidéos, sinon une image générée (Cloudflare, gratuit).
+        val signature: List<Pair<File, Boolean>> = when {
+            d.signature.isNotBlank() -> resoudreSources(app, d.signature, travail).take(2)
+                .also { if (it.isEmpty()) echecs += "signature : rien trouvé dans « ${d.signature.take(60)} »" }
+            d.style.isNotBlank() && sb.signature.isNotBlank() && app.store.cfAccounts.any { it.contains(':') } -> {
+                progres("🎨 Image de signature (${d.style.take(40)})…")
+                runCatching { listOf(ImageGen.generate(app, sb.signature + ", epic, highly detailed, vertical portrait 9:16 composition, no text, no letters").first to true) }
+                    .getOrElse { echecs += "image de signature : ${it.message?.take(120)}"; emptyList() }
+            }
+            d.style.isNotBlank() && sb.signature.isNotBlank() -> { echecs += "image de signature : ajoute un compte Cloudflare (Réglages › IA › Images) ou tes images dans Réglages › TikTok"; emptyList() }
+            else -> emptyList()
+        }
         // 2a. Plans libres de droits (Pexels / Pixabay, gratuits) : un par plan du scénario, avant toute génération IA.
         val modePlans = d.plans.trim().lowercase()
         val credits = mutableListOf<Stock.Clip>()
         val clipsStock = if (manqueTotal > 0 && Stock.disponible(app) && modePlans != "ia") {
-            val nb = max(1, ceil(manqueTotal / 4000.0).toInt())
+            val nb = if (d.tiktok) ceil(manqueTotal / 3000.0).toInt().coerceIn(1, 12) else max(1, ceil(manqueTotal / 4000.0).toInt())
             progres("🎞️ Recherche de $nb plans libres de droits (Pexels / Pixabay)…")
             val pris = mutableSetOf<String>()
             (0 until nb).mapNotNull { i ->
@@ -286,25 +305,39 @@ object Montage {
         verifierAnnulation()
 
         // 3. Timeline exacte : existants puis plans IA, en boucle si besoin, dernier morceau rogné pour tomber juste.
-        val briques = existants.mapIndexed { i, (f, image) -> Triple(f, image, sb.plans.getOrNull(i)?.texte.orEmpty()) } +
-            clipsStock.map { (_, f, t) -> Triple(f, false, t) } + clipsIa.map { (_, f, t) -> Triple(f, false, t) }
+        val briques = (existants.mapIndexed { i, (f, image) -> Triple(f, image, sb.plans.getOrNull(i)?.texte.orEmpty()) } +
+            clipsStock.map { (_, f, t) -> Triple(f, false, t) } + clipsIa.map { (_, f, t) -> Triple(f, false, t) })
+            .ifEmpty { signature.map { (f, image) -> Triple(f, image, sb.plans.firstOrNull()?.texte.orEmpty()) } }
         if (briques.isEmpty()) return "❌ Aucun plan n'a pu être créé" + (if (echecs.isNotEmpty()) " :\n- " + echecs.joinToString("\n- ") else ".")
         val segments = mutableListOf<Segment>()
+        // Signature : ouverture (et fin dès 15 s), 2,5 s chacune ; le milieu est rempli par les plans.
+        val ouverture = signature.firstOrNull()
+        val fin = signature.lastOrNull()?.takeIf { ms >= 15_000 }
+        val dureeSignature = 2_500L
+        val milieu = ms - (if (ouverture != null) dureeSignature else 0) - (if (fin != null) dureeSignature else 0)
+        if (ouverture != null) segments += Segment(ouverture.first, ouverture.second, dureeSignature, if (d.textes) sb.plans.firstOrNull()?.texte.orEmpty() else "")
         var total = 0L; var i = 0
-        val maxParMorceau = if (briques.size >= 3) max(4000L, ms / briques.size * 2) else ms
-        while (total < ms && i < 400) {
+        // TikTok : coupes de 3,5 s au plus ; un plan réutilisé reprend là où il s'était arrêté (pas deux fois la même image).
+        val maxParMorceau = if (d.tiktok) 3_500L else if (briques.size >= 3) max(4000L, milieu / briques.size * 2) else milieu
+        val consomme = HashMap<File, Long>()
+        while (total < milieu && i < 400) {
             val (f, image, texte) = briques[i % briques.size]
-            val naturel = if (image) min(4000L, ms) else (dureeMs(f) ?: 5000L)
-            val duree = min(min(naturel, maxParMorceau), ms - total)
-            if (duree >= 300) segments += Segment(f, image, duree, if (d.textes) texte else "")
-            total += duree; i++
+            val naturel = if (image) min(4000L, milieu) else (dureeMs(f) ?: 5000L)
+            val debut = if (image) 0L else (consomme[f] ?: 0L).let { if (it + 1_500 > naturel) 0L else it }
+            val duree = min(min(naturel - debut, maxParMorceau), milieu - total)
+            if (duree >= 300) { segments += Segment(f, image, duree, if (d.textes) texte else "", debut); consomme[f] = debut + duree }
+            total += max(duree, 300L); i++
         }
+        if (fin != null) segments += Segment(fin.first, fin.second, dureeSignature, if (d.textes) sb.plans.lastOrNull()?.texte.orEmpty() else "")
 
         // 4. Voix off (synthèse vocale du téléphone) et musique.
         val avecParoles = d.paroles.isNotBlank()
         val texteVoix = when (d.voixOff.trim().lowercase()) {
             "aucune", "non", "false", "sans", "" -> ""
-            "auto", "oui", "true" -> if (avecParoles) "" else sb.voixOff
+            // Scénario sans voix off : les textes des plans sont dits (jamais une vidéo muette sans raison).
+            "auto", "oui", "true" -> if (avecParoles) "" else sb.voixOff.ifBlank {
+                sb.plans.map { it.texte.trim().trimEnd('.', '!', '?') }.filter { it.isNotBlank() }.takeIf { it.size >= 2 }?.joinToString(". ", postfix = ".").orEmpty()
+            }
             else -> d.voixOff
         }
         // Voix dite phrase par phrase : la durée de chaque phrase cale les sous-titres sur la voix.
@@ -313,13 +346,17 @@ object Montage {
         val voix: List<File> = voixPhrases.map { it.first }.ifEmpty {
             if (texteVoix.isNotBlank()) listOfNotNull(synthese(app, texteVoix, File(travail, "voix.wav"))) else emptyList()
         }
+        if (texteVoix.isNotBlank() && voix.isEmpty())
+            echecs += "voix off : la synthèse vocale du téléphone n'a rien produit (vérifie Paramètres Android › Synthèse vocale : moteur Google et voix française installée)"
         val reperes = if (d.sousTitres && voixPhrases.size == phrases.size && phrases.isNotEmpty())
             SousTitres.reperes(phrases, voixPhrases.map { it.second }) else emptyList()
         val musique: File? = when (d.musique.trim().lowercase()) {
             "aucune", "non", "false", "sans" -> null
             else -> {
                 val existant = if (d.musique.isNotBlank() && d.musique.lowercase() != "auto") resoudreSources(app, d.musique, travail).firstOrNull()?.first else null
-                existant ?: if (ImageToVideoGen.disponible(app)) {
+                existant ?: if (!ImageToVideoGen.disponible(app)) musiqueLocale(app, travail).also {
+                    if (it == null) echecs += "musique : aucune (dépose des musiques libres de droits dans le dossier « Music » du téléphone ou « JARVIS/Musiques » du coffre, ou ajoute le son tendance dans TikTok)"
+                } else if (ImageToVideoGen.disponible(app)) {
                     progres(if (avecParoles) "🎤 Chanson avec paroles…" else "🎵 Musique…")
                     runCatching {
                         val desc = if (d.musique.isBlank() || d.musique.lowercase() == "auto") sb.musique else d.musique
@@ -401,6 +438,7 @@ object Montage {
             if (d.musique.isNotBlank() && d.musique.lowercase() !in setOf("auto", "aucune")) append("Musique souhaitée : ${d.musique}\n")
             if (d.voixOff.isNotBlank() && d.voixOff.lowercase() !in setOf("auto", "aucune", "oui", "non")) append("Voix off imposée : ${d.voixOff}\n")
             if (n > 1) append("C'est la variante $k sur $n : choisis un angle, une accroche et des visuels DIFFÉRENTS des autres variantes.\n")
+            if (d.style.isNotBlank()) append("Signature et ton de la chaîne (à respecter dans chaque plan, la voix off et l'image « signature ») : ${d.style}\n")
         }
 
         // Passe 1 : comprendre le brief, les contraintes, le public et l'intention avant de rédiger les prompts.
@@ -444,7 +482,8 @@ object Montage {
             voixOff = j?.optString("voix_off").orEmpty(),
             musique = j?.optString("musique").orEmpty().ifBlank { "upbeat modern instrumental background music" },
             paroles = if (d.paroles.isNotBlank() && d.paroles.lowercase() != "auto") d.paroles else j?.optString("paroles").orEmpty(),
-            legende = j?.optString("legende").orEmpty()
+            legende = j?.optString("legende").orEmpty(),
+            signature = j?.optString("signature").orEmpty().trim()
         )
     }
 
@@ -485,7 +524,34 @@ object Montage {
         MediaMetadataRetriever().run {
             try { setDataSource(f.absolutePath); extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() } finally { release() }
         }
+    }.getOrNull()?.takeIf { it > 0 } ?: if (f.extension.lowercase() == "wav") dureeWav(f) else null
+
+    /** Durée d'un WAV lue dans son en-tête (certains téléphones ne la donnent pas via MediaMetadataRetriever). */
+    internal fun dureeWav(f: File): Long? = runCatching {
+        val b = f.inputStream().use { ins -> val t = ByteArray(4096); val n = ins.read(t).coerceAtLeast(0); t.copyOf(n) }
+        fun le32(o: Int) = (b[o].toLong() and 0xff) or ((b[o + 1].toLong() and 0xff) shl 8) or ((b[o + 2].toLong() and 0xff) shl 16) or ((b[o + 3].toLong() and 0xff) shl 24)
+        if (String(b, 0, 4) != "RIFF" || String(b, 8, 4) != "WAVE") return@runCatching null
+        var o = 12; var octetsParSeconde = 0L; var donnees = -1L; var debutDonnees = 0
+        while (o + 8 <= b.size) {
+            val id = String(b, o, 4); val taille = le32(o + 4)
+            if (id == "fmt ") octetsParSeconde = le32(o + 16)
+            if (id == "data") { donnees = taille; debutDonnees = o + 8; break }
+            o += 8 + taille.toInt() + (taille.toInt() and 1)
+        }
+        // Taille « data » absente ou invalide (écriture en flux) : le reste du fichier.
+        if (donnees <= 0 || donnees > f.length()) donnees = f.length() - debutDonnees
+        if (octetsParSeconde <= 0) null else donnees * 1000 / octetsParSeconde
     }.getOrNull()
+
+    /** Une musique déposée par l'utilisateur : dossier « Music » du téléphone ou « JARVIS/Musiques » du coffre (au hasard). */
+    private fun musiqueLocale(app: JarvisApp, travail: File): File? {
+        val telephone = runCatching { File(Stockage.racine(), "Music").walkTopDown().maxDepth(2).filter { it.isFile && it.extension.lowercase() in AUDIO && it.length() > 50_000 }.toList() }
+            .getOrDefault(emptyList())
+        if (telephone.isNotEmpty()) return telephone.random()
+        val o = app.obsidian
+        val coffre = runCatching { o.chercherFichiers("JARVIS/Musiques/*", limite = 100).filter { it.substringAfterLast('.', "").lowercase() in AUDIO } }.getOrDefault(emptyList())
+        return coffre.randomOrNull()?.let { o.versFichierLocal(it, File(travail, "musique")) }
+    }
 
     // ------------------------------------------------------------------ voix off
 
@@ -634,7 +700,7 @@ object Montage {
             if (overlays.isNotEmpty()) effets += OverlayEffect(ImmutableList.copyOf(overlays))
             val item = if (s.image) MediaItem.Builder().setUri(Uri.fromFile(s.fichier)).setImageDurationMs(s.dureeMs).build()
             else MediaItem.Builder().setUri(Uri.fromFile(s.fichier))
-                .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setEndPositionMs(s.dureeMs).build()).build()
+                .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(s.debutMs).setEndPositionMs(s.debutMs + s.dureeMs).build()).build()
             EditedMediaItem.Builder(item).apply {
                 if (s.image) { setDurationUs(s.dureeMs * 1000); setFrameRate(30) }
                 setRemoveAudio(s.image || !garderSon)

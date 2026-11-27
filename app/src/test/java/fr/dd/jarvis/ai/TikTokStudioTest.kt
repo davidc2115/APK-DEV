@@ -154,4 +154,25 @@ class TikTokStudioTest {
         assertFalse(VideoProviderGen.sansQuota("HTTP 429 : Rate limit exceeded (limit: 10 requests per minute)"))
         assertEquals(listOf("patriotisme", "enraciné", "hommage"), Stock.motsClesFr("niche du compte : patriotisme enraciné, hommage aux forces vives"))
     }
+
+    /** Vidéo « niche patriotique » : un rouge à lèvres pour « le feu ne meurt jamais » — plans hors sujet refusés. */
+    @Test fun planLibreDeDroitsPertinent() {
+        assertFalse(Stock.pertinent("phoenix fire", "lipstick, makeup, beauty woman applying lipstick 3373489"))
+        assertTrue(Stock.pertinent("firefighters fire truck", "firefighter, fire, truck, emergency"))
+        assertTrue(Stock.pertinent("french flag waving", "flag, france, tricolor, wind"))
+        assertTrue(Stock.pertinent("pompiers", "pompier, incendie"))
+        assertTrue(Stock.pertinent("farmer tractor", "12345"))   // rien de descriptif : on ne peut pas juger
+    }
+
+    @Test fun dureeLueDansUnWav() {
+        val f = java.io.File.createTempFile("voix", ".wav")
+        val donnees = ByteArray(44_100 * 2 * 3 / 2)   // 1,5 s en 16 bits mono 44,1 kHz
+        val b = java.nio.ByteBuffer.allocate(44 + donnees.size).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        b.put("RIFF".toByteArray()).putInt(36 + donnees.size).put("WAVE".toByteArray())
+        b.put("fmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(44_100).putInt(88_200).putShort(2).putShort(16)
+        b.put("data".toByteArray()).putInt(donnees.size).put(donnees)
+        f.writeBytes(b.array())
+        assertEquals(1500L, Montage.dureeWav(f))
+        f.delete()
+    }
 }

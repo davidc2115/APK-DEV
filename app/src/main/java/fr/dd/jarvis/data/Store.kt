@@ -559,6 +559,10 @@ class Store(context: Context) {
     val tiktokNiche = SPref("tiktokNiche", "")
     /** Comptes concurrents suivis (@pseudo séparés par des virgules). */
     val tiktokConcurrents = SPref("tiktokConcurrents", "")
+    /** Signature des vidéos de la chaîne (symbole, couleurs, ton) : « phénix bleu blanc rouge en ouverture et en fin, ton engagé ». */
+    val tiktokStyle = SPref("tiktokStyle", "")
+    /** Images / vidéos de signature existantes (coffre ou téléphone) pour l'ouverture et la fin, à la place d'une image générée. */
+    val tiktokSignature = SPref("tiktokSignature", "")
     /** Propositions de vidéos chaque lundi matin, et la dernière semaine traitée (« 2026-W48 »). */
     val tiktokHebdo = BPref("tiktokHebdo", true)
     val tiktokHebdoFait = SPref("tiktokHebdoFait", "")

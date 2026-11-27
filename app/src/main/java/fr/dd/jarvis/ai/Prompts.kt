@@ -203,9 +203,10 @@ Réponds UNIQUEMENT par un objet JSON valide, sans Markdown ni texte autour :
     {
       "visuel": "PROMPT EN ANGLAIS, autonome et précis : sujet exact, apparence constante, action visible, décor, époque, lumière, ambiance, composition, cadrage et mouvement caméra. Aucun texte ni logo.",
       "texte": "incrustation française courte, 2 à 8 mots, placée dans la zone centrale sûre (vide si inutile)",
-      "recherche": "2 à 4 mots-clés EN ANGLAIS pour trouver ce plan dans une banque de vidéos libres de droits (ex. « solar panels roof », « electrician tools closeup »)"
+      "recherche": "2 à 3 mots EN ANGLAIS désignant ce qu'on VOIT réellement, tel qu'on le chercherait dans une banque de vidéos (noms concrets : « firefighters fire truck », « farmer tractor field », « french flag waving », « notre dame paris »), jamais une idée abstraite (« resilience », « spirit ») ni un être imaginaire"
     }
   ],
+  "signature": "si une signature visuelle de la chaîne est donnée (ex. phénix aux flammes bleu blanc rouge) : PROMPT EN ANGLAIS d'une image fixe épique de cette signature, portrait 9:16, sans texte ; sinon chaîne vide",
   "voix_off": "narration française naturelle, adaptée à la durée totale, accroche dès le début et conclusion pertinente",
   "musique": "description EN ANGLAIS du genre, tempo, ambiance et instruments, cohérente avec la demande",
   "paroles": "paroles françaises uniquement si une chanson est explicitement demandée, sinon chaîne vide",
@@ -225,6 +226,8 @@ Règles de réalisation :
 - Musique, paroles et appel à l'action ne doivent être ajoutés que s'ils correspondent à la demande et aux paramètres fournis.
 - Si une chanson est demandée, les paroles doivent être originales et cohérentes avec le sujet ; sinon « paroles » reste vide.
 - Si un détail manque, choisis la solution visuelle la plus simple et la plus proche du brief. Ne transforme jamais une hypothèse en fait.
+- Si une niche ou une signature de chaîne est fournie, CHAQUE plan la sert concrètement (ses métiers, lieux, symboles, couleurs) et la voix off adopte son ton ; aucun plan hors sujet.
+- La voix off est TOUJOURS remplie (sauf si l'utilisateur n'en veut pas) : phrases courtes, à dire en environ 2,5 mots par seconde.
 """.trimIndent()
 
     val CONTACT_CARD = """
