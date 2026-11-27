@@ -356,10 +356,10 @@ class Store(context: Context) {
 
     private fun writeSecretList(k: String, values: List<String>) {
         val secure = secretPrefs ?: throw IllegalStateException(
-            "Stockage chiffré Android indisponible : les jetons Cloudflare ne peuvent pas être modifiés."
+            "Stockage chiffré Android indisponible : les jetons ne peuvent pas être modifiés."
         )
         check(secure.edit().putString(k, values.joinToString("\n")).commit()) {
-            "Échec de l'enregistrement chiffré des jetons Cloudflare."
+            "Échec de l'enregistrement chiffré des jetons."
         }
     }
 
@@ -542,6 +542,22 @@ class Store(context: Context) {
     // carte bancaire, token créé sur huggingface.co/settings/tokens (lecture suffit). Pollinations.ai exige
     // maintenant un abonnement payant ("Pollen") même pour la vidéo — plus utilisable gratuitement.
     val huggingFaceToken = SecretPref("huggingFaceToken")
+    /** Jetons Hugging Face supplémentaires (autres comptes) : utilisés à tour de rôle quand le quota gratuit d'un compte est épuisé. */
+    val hfTokensSupp: SnapshotStateList<String> = mutableStateListOf<String>().also { it.addAll(readSecretList("hfTokensSupp")) }
+    /** Ajoute un jeton Hugging Face supplémentaire. Message d'erreur, ou null si c'est bon. */
+    fun addHfToken(brut: String): String? {
+        val t = brut.trim()
+        if (!Regex("hf_[A-Za-z0-9]{20,}").matches(t)) return "Jeton invalide : il commence par « hf_ » (huggingface.co/settings/tokens, type « Read »)."
+        if (t == huggingFaceToken.value.trim() || t in hfTokensSupp) return "Ce jeton est déjà enregistré."
+        writeSecretList("hfTokensSupp", hfTokensSupp.toList() + t)
+        hfTokensSupp.add(t)
+        return null
+    }
+    fun removeHfToken(i: Int) {
+        if (i !in hfTokensSupp.indices) return
+        writeSecretList("hfTokensSupp", hfTokensSupp.toList().toMutableList().also { it.removeAt(i) })
+        hfTokensSupp.removeAt(i)
+    }
     val falApiKey = SecretPref("falApiKey")
     val dreaminaApiKey = SecretPref("dreaminaApiKey")
     val dreaminaModel = SPref("dreaminaModel", "seedance-1-5-pro-251215")
@@ -563,6 +579,15 @@ class Store(context: Context) {
     val tiktokStyle = SPref("tiktokStyle", "")
     /** Images / vidéos de signature existantes (coffre ou téléphone) pour l'ouverture et la fin, à la place d'une image générée. */
     val tiktokSignature = SPref("tiktokSignature", "")
+    /** Pseudo TikTok du compte (détecté depuis tes vidéos, ou saisi) : sert à tikwm sans connexion TikTok. */
+    val tiktokPseudo = SPref("tiktokPseudo", "")
+    /** Détection automatique (niche, style, concurrents, images de référence) : dernière fois (epoch ms). */
+    val tiktokAutoDate = SPref("tiktokAutoDate", "0")
+    /** Niche / concurrents remplis automatiquement (mis à jour chaque semaine) ; faux dès que tu les modifies toi-même. */
+    val tiktokNicheAuto = BPref("tiktokNicheAuto", false)
+    val tiktokConcurrentsAuto = BPref("tiktokConcurrentsAuto", false)
+    /** Bandeau du haut de tes vidéos (« LIBERTÉ · ÉGALITÉ · FRATERNITÉ »), repris sur chaque montage. */
+    val tiktokBandeau = SPref("tiktokBandeau", "")
     /** Propositions de vidéos chaque lundi matin, et la dernière semaine traitée (« 2026-W48 »). */
     val tiktokHebdo = BPref("tiktokHebdo", true)
     val tiktokHebdoFait = SPref("tiktokHebdoFait", "")

@@ -303,4 +303,41 @@ class TikTokStudioTest {
         assertEquals("« David2135 » (compte gratuit)", HfImage.descriptionCompte(JSONObject("""{"type":"user","name":"David2135","isPro":false}""")))
         assertEquals("« x » (compte PRO)", HfImage.descriptionCompte(JSONObject("""{"name":"x","isPro":true}""")))
     }
+
+    // ------------------------------------------------------------------ sous-titres sur demande, comptes HF, détection auto
+
+    /** Sous-titres seulement si ta phrase les demande ; « les paroles à l'écran » = sous-titres, pas une chanson. */
+    @Test fun sousTitresSeulementSurDemande() {
+        assertFalse(TikTokTools.sousTitresDemandes("Crée une vidéo TikTok sur le patriotisme avec un phénix"))
+        assertTrue(TikTokTools.sousTitresDemandes("fais une vidéo avec des sous-titres"))
+        assertTrue(TikTokTools.sousTitresDemandes("une vidéo sous-titrée sur la France"))
+        assertTrue(TikTokTools.sousTitresDemandes("mets les paroles à l'écran"))
+        assertFalse(TikTokTools.sousTitresDemandes("une vidéo sans sous-titres"))
+        assertFalse(TikTokTools.chansonDemandee("mets les paroles à l'écran"))
+        assertTrue(TikTokTools.chansonDemandee("une chanson avec les paroles à l'écran"))
+    }
+
+    /** Plusieurs comptes Hugging Face : seuls les refus liés au compte font passer au suivant. */
+    @Test fun rotationComptesHuggingFace() {
+        assertTrue(HfJetons.refusDuCompte("quota GPU gratuit épuisé pour le compte Hugging Face « x »"))
+        assertTrue(HfJetons.refusDuCompte("You have exceeded your ZeroGPU runs limit"))
+        assertTrue(HfJetons.refusDuCompte("jeton Hugging Face refusé (invalide, expiré ou supprimé)"))
+        assertFalse(HfJetons.refusDuCompte("service de génération vidéo gratuit (Hugging Face) temporairement indisponible"))
+    }
+
+    /** Détection auto : pseudo tiré du lien, concurrents classés (hors toi), taille des images modèles, réponse de l'IA. */
+    @Test fun detectionAutomatiqueDeLaChaine() {
+        assertEquals("dd.patriote", TikTokAuto.pseudoDepuisLien("https://www.tiktok.com/@dd.patriote/video/7300000000000000001?utm=x"))
+        assertEquals("", TikTokAuto.pseudoDepuisLien("https://vm.tiktok.com/ZMabc/"))
+        fun v(id: String, auteur: String, vues: Long) = TikWm.Video(id, "t", auteur, vues, 0, 0, 0, 0, 20, 0, "", false, "", "")
+        val c = TikTokAuto.classerConcurrents(listOf(v("1", "dd.patriote", 9_000_000), v("2", "france.fiere", 300_000), v("3", "france.fiere", 250_000),
+            v("4", "un.seul.succes", 500_000), v("5", "petit.compte", 2_000), v("2", "france.fiere", 300_000)), "DD.Patriote")
+        assertEquals(listOf("france.fiere", "un.seul.succes", "petit.compte"), c)
+        assertEquals(281 to 500, TikTokAuto.tailleReference(720, 1280))
+        assertEquals(300 to 200, TikTokAuto.tailleReference(300, 200))
+        val p = TikTokAuto.lireProfil("""Voici : {"niche":"Patriotisme français engagé","mots_cles":["#patriotisme","france"],"style":"tricolor phoenix over Paris at night","bandeau":"liberté · égalité · fraternité"}""")!!
+        assertEquals(listOf("patriotisme", "france"), p.motsCles)
+        assertEquals("LIBERTÉ · ÉGALITÉ · FRATERNITÉ", p.bandeau)
+        assertNull(TikTokAuto.lireProfil("""{"niche":""}"""))
+    }
 }

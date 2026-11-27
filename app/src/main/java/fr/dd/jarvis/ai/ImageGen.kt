@@ -38,7 +38,8 @@ object ImageGen {
         "@cf/lykon/dreamshaper-8-lcm"
     )
 
-    private fun genere(account: String, model: String, prompt: String, largeur: Int = 0, hauteur: Int = 0): ByteArray {
+    /** [references] : images modèles (moins de 512 px) pour FLUX.2 (même sujet, mêmes couleurs, même ambiance), 4 au plus. */
+    private fun genere(account: String, model: String, prompt: String, largeur: Int = 0, hauteur: Int = 0, references: List<File> = emptyList()): ByteArray {
         val (id, token) = account.split(":", limit = 2)
         // Les modèles flux-2-* (flux-2-dev, flux-2-klein) attendent du multipart/form-data, pas du JSON.
         val req = if (model.contains("flux-2")) {
@@ -47,6 +48,11 @@ object ImageGen {
                 // klein : 4 étapes fixes (modèle distillé) ; seul flux-2-dev accepte un nombre d'étapes (facturé à l'étape).
                 .apply { if (model.contains("flux-2-dev")) addFormDataPart("steps", "28") }
                 .apply { if (largeur > 0 && hauteur > 0) { addFormDataPart("width", "$largeur"); addFormDataPart("height", "$hauteur") } }
+                .apply {
+                    references.filter { it.isFile }.take(4).forEachIndexed { k, f ->
+                        addFormDataPart("input_image_$k", f.name, f.readBytes().toRequestBody("image/jpeg".toMediaType()))
+                    }
+                }
                 .build()
             Request.Builder().url("https://api.cloudflare.com/client/v4/accounts/$id/ai/run/$model")
                 .header("Authorization", "Bearer $token").post(form).build()
@@ -106,15 +112,16 @@ object ImageGen {
     private fun comptes(app: JarvisApp) = app.store.cfAccounts.filter { it.contains(':') }
 
     /** Une image peut être faite : compte Cloudflare ou jeton Hugging Face (secours gratuit). */
-    fun disponible(app: JarvisApp) = comptes(app).isNotEmpty() || app.store.huggingFaceToken.value.isNotBlank()
+    fun disponible(app: JarvisApp) = comptes(app).isNotEmpty() || HfJetons.configure(app)
 
     /** Génère une image, la garde dans l'appli et dans Obsidian. Retourne (fichier, emplacement Obsidian). */
     /** [largeur] × [hauteur] : format demandé (modèles FLUX.2 seulement, ex. 768 × 1344 pour un TikTok vertical). */
     /** [huggingFace] = false : pas de secours sur Hugging Face (son petit quota gratuit est gardé pour animer les images). */
-    suspend fun generate(app: JarvisApp, prompt: String, modele: String = "", largeur: Int = 0, hauteur: Int = 0, huggingFace: Boolean = true): Pair<File, String> = withContext(Dispatchers.IO) {
+    suspend fun generate(app: JarvisApp, prompt: String, modele: String = "", largeur: Int = 0, hauteur: Int = 0, huggingFace: Boolean = true,
+                         references: List<File> = emptyList()): Pair<File, String> = withContext(Dispatchers.IO) {
         val list = comptes(app)
-        val hf = app.store.huggingFaceToken.value.trim()
-        if (list.isEmpty() && hf.isBlank()) throw IllegalStateException("Aucun compte Cloudflare : ajoute « idCompte:jeton » dans Réglages › IA › Images & vidéo (ou ton jeton Hugging Face gratuit).")
+        val hfOk = HfJetons.configure(app)
+        if (list.isEmpty() && !hfOk) throw IllegalStateException("Aucun compte Cloudflare : ajoute « idCompte:jeton » dans Réglages › IA › Images & vidéo (ou ton jeton Hugging Face gratuit).")
         val model = modele.trim().let { if (it.isBlank()) app.store.cfModel.value.ifBlank { MODELES[0] } else alias(it) }
         val now = System.currentTimeMillis()
         val actifs = list.indices.map { (next + it) % list.size }.filter { (epuises[list[it]] ?: 0L) <= now }
@@ -123,9 +130,12 @@ object ImageGen {
         for (i in ready + cooling) {
             val compte = list[i]
             try {
-                val bytes = try { genere(compte, model, prompt, largeur, hauteur) } catch (e: ApiException) {
-                    // Modèle refusé par ce compte (absent, paramètre) : le modèle de base, le plus sobre.
-                    if (e.code in setOf(400, 404, 422) && model != MODELES[0]) genere(compte, MODELES[0], prompt) else throw e
+                val bytes = try { genere(compte, model, prompt, largeur, hauteur, references) } catch (e: ApiException) {
+                    if (e.code !in setOf(400, 404, 413, 422)) throw e
+                    // Images modèles refusées (format, taille) : même modèle sans elles ; modèle refusé : le modèle de base.
+                    if (references.isNotEmpty() && model.contains("flux-2")) runCatching { genere(compte, model, prompt, largeur, hauteur) }
+                        .getOrElse { if (model != MODELES[0]) genere(compte, MODELES[0], prompt) else throw e }
+                    else if (model != MODELES[0]) genere(compte, MODELES[0], prompt) else throw e
                 }
                 next = (i + 1) % list.size
                 return@withContext enregistrer(app, prompt, bytes)
@@ -144,12 +154,23 @@ object ImageGen {
             else -> last?.message?.take(160) ?: "Cloudflare indisponible"
         }
         if (!huggingFace) throw IllegalStateException(raisonCf)
-        if (hf.isBlank()) throw IllegalStateException("$raisonCf — ajoute ton jeton Hugging Face gratuit (Réglages › IA › Images & vidéo) pour continuer les images sur Hugging Face.")
-        val octets = try { HfImage.image(hf, prompt, largeur, hauteur) } catch (e: Exception) {
+        if (!hfOk) throw IllegalStateException("$raisonCf — ajoute ton jeton Hugging Face gratuit (Réglages › IA › Images & vidéo) pour continuer les images sur Hugging Face.")
+        val octets = try { HfJetons.avec(app) { t -> HfImage.image(t, prompt, largeur, hauteur) } } catch (e: Exception) {
             throw IllegalStateException("$raisonCf ; Hugging Face : ${e.message?.take(160)}")
         }
         enregistrer(app, prompt, enPng(octets))
     }
+
+    /** Copie réduite de [src] (moins de 512 px de côté) pour servir d'image modèle à FLUX.2 ; null si illisible. */
+    fun reference(src: File, dest: File): File? = runCatching {
+        val b = android.graphics.BitmapFactory.decodeFile(src.absolutePath) ?: return@runCatching null
+        val (l, h) = TikTokAuto.tailleReference(b.width, b.height)
+        val r = android.graphics.Bitmap.createScaledBitmap(b, l, h, true)
+        dest.outputStream().use { r.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+        if (r !== b) r.recycle()
+        b.recycle()
+        dest.takeIf { it.length() > 1_000 }
+    }.getOrNull()
 
     /** Hugging Face renvoie du WebP : converti en PNG (format attendu partout dans l'appli et dans Obsidian). */
     private fun enPng(octets: ByteArray): ByteArray = runCatching {

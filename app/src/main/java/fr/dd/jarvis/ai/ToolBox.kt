@@ -823,9 +823,9 @@ class ToolBox(
                 sujet = brief, dureeS = duree.toInt(), format = format,
                 tiktok = Regex("tiktok|reel|short", RegexOption.IGNORE_CASE).containsMatchIn(brief))), direct = true)
             if (nomImage.isBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) &&
-                app.store.huggingFaceToken.value.isBlank() && !fr.dd.jarvis.ai.VideoProviderGen.disponible(app))
+                !fr.dd.jarvis.ai.HfJetons.configure(app) && !fr.dd.jarvis.ai.VideoProviderGen.disponible(app))
                 return ToolResult("❌ Aucun fournisseur vidéo configuré. Ajoute un token Hugging Face, une clé UseAPI Flow ou une clé BytePlus Dreamina dans Réglages › IA › Images & vidéo.")
-            if (nomImage.isNotBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank())
+            if (nomImage.isNotBlank() && !fr.dd.jarvis.ai.ImageToVideoGen.disponible(app) && !fr.dd.jarvis.ai.HfJetons.configure(app))
                 return ToolResult("❌ Pour animer une image, ajoute ton jeton Hugging Face gratuit (ou une clé fal.ai) dans Réglages › IA › Images & vidéo.")
             val prompt = fr.dd.jarvis.ai.VideoGen.preparerPrompt(app, brief, duree, format, nomImage.isNotBlank())
             val (video, loc) = when {

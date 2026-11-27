@@ -90,19 +90,19 @@ object HfImage {
         }
     }
 
-    @Volatile private var dernierDiagnostic = 0L to ""
+    private val diagnostics = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, String>>()
 
     /**
      * Explication d'un refus sans détail : jeton refusé, ou quota GPU gratuit du compte épuisé (il se recharge au fil
      * des heures). Vérifié au plus toutes les 10 minutes. Bloquant.
      */
     fun diagnosticRefus(token: String): String {
-        dernierDiagnostic.let { (t, m) -> if (m.isNotBlank() && System.currentTimeMillis() - t < 10 * 60_000L) return m }
+        diagnostics[token]?.let { (t, m) -> if (m.isNotBlank() && System.currentTimeMillis() - t < 10 * 60_000L) return m }
         val m = try {
             "quota GPU gratuit épuisé pour le compte Hugging Face ${compte(token)} (≈ 3 utilisations et 5 min de GPU par jour) : il revient 24 h après la première utilisation"
         } catch (e: ApiException) { e.message.orEmpty() }
         catch (e: Exception) { "quota GPU gratuit probablement épuisé (vérification du jeton impossible : ${e.message?.take(60)})" }
-        dernierDiagnostic = System.currentTimeMillis() to m
+        diagnostics[token] = System.currentTimeMillis() to m
         return m
     }
 
@@ -145,28 +145,19 @@ object HfImage {
         throw ApiException(0, "${space.nom} n'a rien renvoyé (service peut-être saturé)")
     }
 
-    /** Pause après un refus pour quota : inutile de réessayer à chaque image du même montage. */
-    @Volatile private var pauseJusqua = 0L
-
-    fun enPause() = System.currentTimeMillis() < pauseJusqua
-
     /** Une image gratuite : chaque Space à tour de rôle ; erreur claire si aucun ne répond. Appel bloquant (réseau). */
     fun image(token: String, prompt: String, largeur: Int, hauteur: Int): ByteArray {
-        if (enPause()) throw QuotaEpuise("quota GPU gratuit du jour épuisé sur Hugging Face (réessaie plus tard)")
         val erreurs = mutableListOf<String>()
         var muets = 0
         for (s in SPACES) {
             try { return generer(s, token, prompt, largeur, hauteur) }
-            catch (e: QuotaEpuise) { pauseJusqua = System.currentTimeMillis() + 30 * 60_000L; throw e }
+            catch (e: QuotaEpuise) { throw e }
             catch (e: RefusMuet) { muets++; erreurs += e.message.orEmpty() }
             catch (e: ApiException) { if (e.code == 401 || e.code == 403) throw e; erreurs += e.message.orEmpty() }
             catch (e: Exception) { erreurs += "${s.nom} : ${e.message ?: e.javaClass.simpleName}" }
         }
         // Tous les Spaces refusent sans rien dire : jeton refusé ou quota épuisé, vérifié auprès de Hugging Face.
-        if (muets == SPACES.size) {
-            pauseJusqua = System.currentTimeMillis() + 30 * 60_000L
-            throw QuotaEpuise(diagnosticRefus(token))
-        }
+        if (muets == SPACES.size) throw QuotaEpuise(diagnosticRefus(token))
         throw ApiException(0, erreurs.joinToString(" ; ").take(300))
     }
 }

@@ -86,7 +86,7 @@ object Montage {
         /** auto (plans libres de droits Pexels/Pixabay d'abord, IA pour le reste) | stock | ia */
         val plans: String = "auto",
         /** Sous-titres synchronisés avec la voix off. */
-        val sousTitres: Boolean = true,
+        val sousTitres: Boolean = false,
         /** Envoyer la vidéo terminée dans les brouillons TikTok du compte. */
         val brouillon: Boolean = false,
         /** Signature et ton de la chaîne (« phénix bleu blanc rouge en ouverture et en fin, ton engagé »). */
@@ -133,7 +133,7 @@ object Montage {
 
     /** Lance le(s) montage(s) en arrière-plan ; le résultat arrive dans le chat. Renvoie le message immédiat. */
     fun lancer(app: JarvisApp, d: Demande): String {
-        val sansIa = !ImageToVideoGen.disponible(app) && app.store.huggingFaceToken.value.isBlank() && !VideoProviderGen.disponible(app)
+        val sansIa = !ImageToVideoGen.disponible(app) && !HfJetons.configure(app) && !VideoProviderGen.disponible(app)
         if (sansIa && d.sources.isBlank() && !Stock.disponible(app))
             return "❌ Pour créer des plans vidéo, configure Hugging Face, Gemini (si quota vidéo disponible) ou Dreamina dans Réglages › IA › Images & vidéo — ou donne-moi des vidéos/images existantes à monter (paramètre sources)."
         val duree = d.dureeS.coerceIn(5, 180)
@@ -188,11 +188,21 @@ object Montage {
         val (largeur, hauteur) = if (d.tiktok) 1080 to 1920 else if (vertical) 720 to 1280 else 1280 to 720
         val travail = File(app.cacheDir, "montage_${System.currentTimeMillis()}").apply { mkdirs() }
 
+        // 0. TikTok : niche, style, bandeau, concurrents et images modèles détectés depuis tes vidéos (chaque semaine).
+        var d = d
+        if (d.tiktok) {
+            if (TikTokAuto.possible(app) && TikTokAuto.aRafraichir(app)) { progres("🔍 Analyse de ta chaîne TikTok…"); TikTokAuto.siBesoin(app) }
+            val niche = app.store.tiktokNiche.value.trim()
+            d = d.copy(
+                style = d.style.ifBlank { app.store.tiktokStyle.value.trim() },
+                sujet = if (niche.isNotBlank() && Regex("(?i)\\bniche\\b").containsMatchIn(d.sujet) && !d.sujet.contains(niche)) d.sujet + " — niche du compte : $niche" else d.sujet
+            )
+        }
         // 1. Scénario : plans (visuel + texte à l'écran), voix off, musique, paroles, légende.
         progres("✍️ Écriture du scénario…")
         val existants = resoudreSources(app, d.sources, travail)
-        // TikTok : un plan toutes les ~3 s (rythme de la plateforme) ; ailleurs toutes les ~5 s.
-        val nbPlans = if (d.tiktok) ceil(d.dureeS / 3.0).toInt().coerceIn(3, 12) else max(2, ceil(d.dureeS / 5.0).toInt())
+        // TikTok : un plan toutes les ~4 s (rythme de tes vidéos, plans plus longs et plus lisibles) ; ailleurs toutes les ~5 s.
+        val nbPlans = if (d.tiktok) ceil(d.dureeS / 4.0).toInt().coerceIn(3, 12) else max(2, ceil(d.dureeS / 5.0).toInt())
         val sb = storyboard(app, d, nbPlans, k, n, progres)
         // L'analyse éditoriale préalable est une étape obligatoire : ne dépense aucun crédit
         // et ne génère aucun plan si l'agent d'analyse n'a pas produit de résultat exploitable.
@@ -245,10 +255,17 @@ object Montage {
         var raisonImages = ""
         // Après un refus pour quota, inutile de redemander une image IA à chaque plan.
         var imagesIaEpuisees = !cfOk
+        // Images modèles : miniatures de tes vidéos les plus vues (même phénix, mêmes couleurs, même ambiance) et la
+        // première image de ce montage (le même sujet d'un plan à l'autre).
+        val modelesChaine = if (d.tiktok) TikTokAuto.references(app).take(3) else emptyList()
+        var modeleMontage: File? = null
         suspend fun image(rang: Int, p: Plan): File? = imagesParPlan[rang] ?: if (imagesIaEpuisees) null else runCatching {
-            val prompt = p.visuel + ", ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, cinematic lighting, highly detailed, no text, no letters, no watermark"
+            val modeles = modelesChaine + listOfNotNull(modeleMontage)
+            val prompt = (if (modeles.isNotEmpty()) "Keep exactly the same main subject design, color palette, lighting and mood as the reference images, in a new composition: " else "") +
+                p.visuel + ", ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, cinematic lighting, highly detailed, no text, no letters, no watermark"
             // Image directement au bon format et nette (FLUX.2 klein 4B : ≈ 10 fois moins de quota que le 9B).
-            ImageGen.generate(app, prompt, "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768, huggingFace = false).first
+            ImageGen.generate(app, prompt, "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768, huggingFace = false, references = modeles).first
+                .also { if (modeleMontage == null) modeleMontage = ImageGen.reference(it, File(travail, "modele_montage.jpg")) }
         }.onFailure {
             if (raisonImages.isBlank()) raisonImages = it.message?.take(220).orEmpty()
             if (Regex("(?i)quota|épuisé|allocation|aucun compte|jeton").containsMatchIn(it.message.orEmpty())) imagesIaEpuisees = true
@@ -279,7 +296,7 @@ object Montage {
             return f
         }
         if (manqueTotal > 0 && modePlans != "ia" && (Stock.disponible(app) || cfOk)) {
-            val nb = if (d.tiktok) ceil(manqueTotal / 3000.0).toInt().coerceIn(1, 12) else max(1, ceil(manqueTotal / 4000.0).toInt())
+            val nb = if (d.tiktok) ceil(manqueTotal / 4000.0).toInt().coerceIn(1, 12) else max(1, ceil(manqueTotal / 4000.0).toInt())
             for (i in 0 until nb) {
                 verifierAnnulation()
                 val rang = (existants.size + i) % sb.plans.size
@@ -313,7 +330,7 @@ object Montage {
         val aAnimer = medias.filter { it.image }.take(3)
         var animees = 0
         if (aAnimer.isNotEmpty() && d.tiktok && modePlans != "stock") {
-            if (app.store.huggingFaceToken.value.isBlank()) echecs += "animation IA des images : ajoute ton jeton Hugging Face gratuit (Réglages › IA › Images & vidéo) pour de vraies images animées"
+            if (!HfJetons.configure(app)) echecs += "animation IA des images : ajoute ton jeton Hugging Face gratuit (Réglages › IA › Images & vidéo) pour de vraies images animées"
             else {
                 val limite = System.currentTimeMillis() + 10 * 60_000L
                 for ((k, m) in aAnimer.withIndex()) {
@@ -337,7 +354,7 @@ object Montage {
         // (fal.ai) ou sans quota gratuit (Gemini). L'IA vidéo ne sert qu'en l'absence de tout plan.
         val clipsStock = medias
         val manque = if (modePlans == "stock" || modePlans == "images" || (modePlans == "auto" && medias.isNotEmpty())) 0L else manqueTotal
-        val iaPossible = ImageToVideoGen.disponible(app) || app.store.huggingFaceToken.value.isNotBlank() || VideoProviderGen.disponible(app)
+        val iaPossible = ImageToVideoGen.disponible(app) || HfJetons.configure(app) || VideoProviderGen.disponible(app)
         val clipsIa = if (manque > 0 && iaPossible) {
             val nb = max(1, ceil(manque / 5000.0).toInt())
             val dureeClip = (manque / 1000.0 / nb).coerceIn(2.0, 5.0)
@@ -418,7 +435,7 @@ object Montage {
         if (ouverture != null) segments += Segment(ouverture.first, ouverture.second, dureeSignature, if (d.textes) sb.plans.firstOrNull()?.texte.orEmpty() else "")
         var total = 0L; var i = 0
         // TikTok : coupes de 3,5 s au plus ; un plan réutilisé reprend là où il s'était arrêté (pas deux fois la même image).
-        val maxParMorceau = if (d.tiktok) 3_500L else if (briques.size >= 3) max(4000L, milieu / briques.size * 2) else milieu
+        val maxParMorceau = if (d.tiktok) 4_000L else if (briques.size >= 3) max(4000L, milieu / briques.size * 2) else milieu
         val consomme = HashMap<File, Long>()
         while (total < milieu && i < 400) {
             val (f, image, texte) = briques[i % briques.size]
@@ -519,7 +536,8 @@ object Montage {
             progres("🎞️ Montage" + (if (libelle != "complet") " ($libelle)" else "") + "…")
             val r = runCatching {
                 exporter(app, segments, if (avecSon) voix else emptyList(), if (avecSon) musique else null, avecTexte, d.garderSon && avecSon, l, h, avecParoles, sortie,
-                    if (avecTexte && avecSon) reperes else emptyList(), tiktok = d.tiktok, bandeau = if (avecTexte && d.tiktok) sb.bandeau else "",
+                    if (avecTexte && avecSon) reperes else emptyList(), tiktok = d.tiktok,
+                    bandeau = if (avecTexte && d.tiktok) app.store.tiktokBandeau.value.trim().ifBlank { sb.bandeau } else "",
                     logiciel = logiciel, portrait = portrait)
             }
             if (r.isFailure) { echecs += "montage $libelle : ${r.exceptionOrNull()?.message?.take(140)}"; continue }
@@ -619,6 +637,12 @@ object Montage {
             if (d.voixOff.isNotBlank() && d.voixOff.lowercase() !in setOf("auto", "aucune", "oui", "non")) append("Voix off imposée : ${d.voixOff}\n")
             if (n > 1) append("C'est la variante $k sur $n : choisis un angle, une accroche et des visuels DIFFÉRENTS des autres variantes.\n")
             if (d.style.isNotBlank()) append("Signature et ton de la chaîne (à respecter dans chaque plan, la voix off et l'image « signature ») : ${d.style}\n")
+            if (d.tiktok) {
+                // Ressembler aux vidéos de la chaîne : même sujet récurrent d'un plan à l'autre, textes courts et forts.
+                append("Fidélité à la chaîne : garde LE MÊME sujet principal (même apparence, mêmes couleurs) dans tous les plans, " +
+                    "décors et ambiance cohérents ; textes à l'écran de 1 à 4 mots, percutants, dans le ton de la chaîne.\n")
+                app.store.tiktokBandeau.value.takeIf { it.isNotBlank() }?.let { append("Bandeau habituel en haut des vidéos : $it\n") }
+            }
         }
 
         // Passe 1 : comprendre le brief, les contraintes, le public et l'intention avant de rédiger les prompts.
@@ -1006,7 +1030,7 @@ object Montage {
                 // TikTok : phrase-choc en MAJUSCULES au centre (sous-titres plus bas) ; ailleurs en bas, ou en haut s'il y a des sous-titres.
                 val y = if (tiktok) -0.12f else if (reperes.isNotEmpty()) 0.62f else -0.58f
                 val reglages = OverlaySettings.Builder().setBackgroundFrameAnchor(0f, y).build()
-                overlays += BitmapOverlay.createStaticBitmapOverlay(if (tiktok) bandeau(s.texte.uppercase(), largeur, taille = 0.085f) else bandeau(s.texte, largeur), reglages)
+                overlays += BitmapOverlay.createStaticBitmapOverlay(if (tiktok) bandeau(s.texte.uppercase(), largeur, taille = 0.065f) else bandeau(s.texte, largeur), reglages)
             }
             if (imageBandeau != null) overlays += BitmapOverlay.createStaticBitmapOverlay(imageBandeau, OverlaySettings.Builder().setBackgroundFrameAnchor(0f, 0.9f).build())
             if (reperes.isNotEmpty()) overlays += OverlaySousTitres(reperes, debutUs, largeur)

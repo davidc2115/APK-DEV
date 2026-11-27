@@ -16,12 +16,22 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
         // succès au lieu d'appeler quoi que ce soit.
         val KEYWORDS = Regex("tiktok|tik tok|vid[ée]o|montage|clip|reels?|shorts?|niches?|concurren\\w*|hashtags?|tendances?|brouillons? tiktok|id[ée]es? de (vid[ée]os?|contenus?)", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
+        /** « les paroles à l'écran », « paroles affichées », « paroles en sous-titres » : du texte affiché, pas une chanson. */
+        private val PAROLES_ECRAN = Regex("(?i)paroles? (à|a|sur) l['’ ]?[ée]cran|paroles? affich[ée]e?s?|paroles? en sous[- ]?titres?|paroles? écrites?")
+
         /** Ta phrase demande-t-elle une chanson chantée (avec paroles) plutôt qu'une voix off ? « sans chanson » : non. */
-        internal fun chansonDemandee(phrase: String): Boolean =
-            Regex("(?i)chanson|paroles|chant[ée]e|qui chante|lyrics").containsMatchIn(phrase) &&
-                !Regex("(?i)(sans|pas de|aucune) (chanson|paroles)").containsMatchIn(phrase)
+        internal fun chansonDemandee(phrase: String): Boolean {
+            val p = PAROLES_ECRAN.replace(phrase, " ")
+            return Regex("(?i)chanson|paroles|chant[ée]e|qui chante|lyrics").containsMatchIn(p) &&
+                !Regex("(?i)(sans|pas de|aucune) (chanson|paroles)").containsMatchIn(p)
+        }
+
+        /** Sous-titres (texte de la voix off à l'écran) seulement si ta phrase les demande ; « sans sous-titres » : non. */
+        internal fun sousTitresDemandes(phrase: String): Boolean =
+            (Regex("(?i)sous[- ]?titr|subtitles?|captions?").containsMatchIn(phrase) || PAROLES_ECRAN.containsMatchIn(phrase)) &&
+                !Regex("(?i)(sans|pas de|aucuns?|retire[rsz]?|enl[eè]ve[rsz]?) (les |des )?(sous[- ]?titr|paroles)").containsMatchIn(phrase)
         val NAMES = setOf("tiktok_connexion", "tiktok_deconnexion", "tiktok_profil", "tiktok_mes_videos", "tiktok_analyse", "tiktok_script", "tiktok_video", "video_montage",
-            "tiktok_tendances", "tiktok_niche", "tiktok_concurrents", "tiktok_propositions", "tiktok_brouillon")
+            "tiktok_tendances", "tiktok_niche", "tiktok_concurrents", "tiktok_propositions", "tiktok_brouillon", "tiktok_auto")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -76,7 +86,7 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 "sources" to prop("Vidéos/images EXISTANTES à monter, séparées par « ; » : chemins ou dossiers du coffre (ex. « JARVIS/Images/Coloriage pompier »), fichiers du téléphone (« DCIM/Camera/xxx.mp4 »), « dernieres_videos:5 », « dernieres_images:8 », jarvis-video-ia:… Des plans IA complètent si la durée n'est pas atteinte."),
                 "garder_son" to prop("« true » pour garder le son d'origine des vidéos existantes (mixé sous la musique/voix)."),
                 "plans" to prop("« auto » (défaut : images générées pour les symboles comme le phénix, plans réels Pixabay/Pexels pour les scènes filmables), « images » (uniquement des images générées puis animées), « stock » (uniquement des plans réels libres de droits) ou « ia » (clips vidéo générés)."),
-                "sous_titres" to prop("« true » (défaut) : sous-titres jaunes synchronisés avec la voix off ; « false » sinon."),
+                "sous_titres" to prop("« false » (défaut). Les sous-titres (texte de la voix off) ne sont ajoutés que si l'utilisateur les demande lui-même."),
                 "style" to prop("Signature et ton de la chaîne quand l'utilisateur les décrit (ex. « phénix bleu blanc rouge comme mes anciennes vidéos, ton engagé ») : retenu pour ses prochaines vidéos. Vide = signature enregistrée.")
             )),
         tool("tiktok_tendances", "TikTok : ce qui marche EN CE MOMENT en France (vidéos tendance réelles, hashtags, sons repris, durées, accroches), via tikwm (gratuit, non officiel), puis comment s'en servir dans la niche de l'utilisateur. Avec « theme », cherche les vidéos qui marchent sur ce thème.",
@@ -89,6 +99,9 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
             mapOf("comptes" to prop("Pseudos ou liens des comptes, séparés par des virgules (ex. « @solaire.pro, @elec_martin »). Optionnel si des concurrents sont enregistrés."),
                 "nombre" to prop("Vidéos analysées par compte, 5 à 30 (défaut 20)."),
                 "memoriser" to prop("« true » pour enregistrer ces comptes comme concurrents suivis."))),
+        tool("tiktok_auto", "TikTok : DÉTECTE AUTOMATIQUEMENT la niche, le style visuel, le bandeau et les concurrents du compte à partir de SES vidéos (titres, hashtags, vues) et garde les miniatures de ses vidéos les plus vues comme modèles pour les images des montages. À utiliser pour « détecte ma niche », « trouve mes concurrents », « analyse ma chaîne et mets à jour ».",
+            mapOf("remplacer" to prop("« true » pour remplacer aussi la niche et les concurrents écrits à la main par l'utilisateur (seulement s'il le demande)."),
+                "pseudo" to prop("Pseudo TikTok de l'utilisateur, s'il le donne (utile quand le compte n'est pas connecté)."))),
         tool("tiktok_propositions", "TikTok : propose des idées de vidéos à poster (avec accroche, script minuté, texte à l'écran, son, légende, hashtags et moment de publication), fondées sur les statistiques du compte, les tendances France, la niche et les concurrents. Enregistrées dans le coffre (TikTok/Propositions).",
             mapOf("nombre" to prop("Nombre d'idées, 1 à 6 (défaut 3)."), "theme" to prop("Thème imposé (optionnel ; sinon la niche enregistrée)."))),
         tool("tiktok_brouillon", "TikTok : envoie une vidéo dans les BROUILLONS (boîte de réception) du compte TikTok connecté ; l'utilisateur ajoute le son et publie depuis l'appli TikTok. Par défaut, la dernière vidéo TikTok montée par JARVIS.",
@@ -197,6 +210,9 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 ToolResult(script + (emplacement?.let { "\n\n📁 $it" } ?: ""), direct = true)
             }
             "tiktok_video", "video_montage" -> {
+                // Première vidéo TikTok sans niche connue : niche, style, concurrents et images de référence sont d'abord
+                // détectés depuis tes vidéos (ensuite mis à jour chaque semaine, en arrière-plan, au début des montages).
+                if (name == "tiktok_video" && app.store.tiktokNiche.value.isBlank()) TikTokAuto.siBesoin(app)
                 // « En lien avec ma niche » (ou aucun sujet) : la niche enregistrée donne le thème.
                 val niche = app.store.tiktokNiche.value.trim()
                 val brut = a.optString("sujet").trim()
@@ -238,7 +254,8 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                             else -> a.optString("plans").ifBlank { "auto" }
                         }
                     },
-                    sousTitres = vrai("sous_titres", true),
+                    // Sous-titres seulement si TA phrase les demande (jamais d'après la seule décision de l'IA).
+                    sousTitres = sousTitresDemandes(derniereDemande()),
                     // Brouillons TikTok : automatique dès que la publication est activée et autorisée sur le compte.
                     brouillon = name == "tiktok_video" && app.store.tiktokPublication.value && TikTok.envoiAutorise(app),
                     // Signature de la chaîne (TikTok) : celle donnée maintenant est retenue pour les prochaines vidéos.
@@ -258,19 +275,28 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                     (if (niche.isNotBlank()) " dans la niche de l'utilisateur (« $niche »)." else " pour le compte de l'utilisateur.") + " Cite les vidéos par leur lien quand c'est utile.")
             }
             "tiktok_niche" -> {
+                // Aucune niche connue : elle est d'abord détectée automatiquement depuis tes vidéos.
+                if (a.optString("mots_cles").isBlank() && app.store.tiktokNiche.value.isBlank() && TikTokAuto.possible(app)) runCatching { TikTokAuto.detecter(app) }
                 val mots = a.optString("mots_cles").trim().ifBlank { app.store.tiktokNiche.value.trim() }
                 if (mots.isBlank()) return ToolResult("Quelle est ta niche ? Donne 2 ou 3 mots-clés (ex. « maintenance photovoltaïque »).")
-                if (vraiArg(a, "memoriser")) app.store.tiktokNiche.set(mots)
+                if (vraiArg(a, "memoriser")) { app.store.tiktokNiche.set(mots); app.store.tiktokNicheAuto.set(false) }
                 val donnees = TikTokAnalyse.niche(mots, runCatching { TikWm.hashtags(mots, 15) }.getOrDefault(emptyList()), TikWm.recherche(mots, 40))
                 ToolResult("Données RÉELLES de la niche (tikwm) :\n$donnees\n\n" +
                     "Analyse cette niche avec ces chiffres uniquement : taille (vues des hashtags), saturation (créateurs qui dominent), formats et durées qui marchent, " +
                     "2 ou 3 sous-niches ou angles sous-exploités, et les comptes à suivre comme concurrents (propose de les enregistrer)." +
                     (if (vraiArg(a, "memoriser")) " Indique que la niche « $mots » est enregistrée pour les propositions du lundi." else ""))
             }
+            "tiktok_auto" -> {
+                TikWm.pseudo(a.optString("pseudo")).takeIf { it.isNotBlank() }?.let { app.store.tiktokPseudo.set(it) }
+                if (!TikTokAuto.possible(app)) return ToolResult("Pour détecter ta niche et tes concurrents, connecte ton compte TikTok (Réglages › Comptes › TikTok) ou donne-moi ton pseudo TikTok.")
+                ToolResult(TikTokAuto.detecter(app, force = vraiArg(a, "remplacer")), direct = true)
+            }
             "tiktok_concurrents" -> {
+                // Aucun concurrent connu : ils sont d'abord détectés automatiquement depuis tes vidéos.
+                if (a.optString("comptes").isBlank() && app.store.tiktokConcurrents.value.isBlank() && TikTokAuto.possible(app)) runCatching { TikTokAuto.detecter(app) }
                 val liste = TikTokPropositions.comptes(a.optString("comptes").ifBlank { app.store.tiktokConcurrents.value })
                 if (liste.isEmpty()) return ToolResult("Quels comptes concurrents analyser ? Donne leurs pseudos (ex. « @solaire.pro, @elec_martin »).")
-                if (vraiArg(a, "memoriser")) app.store.tiktokConcurrents.set(liste.joinToString(", ") { "@$it" })
+                if (vraiArg(a, "memoriser")) { app.store.tiktokConcurrents.set(liste.joinToString(", ") { "@$it" }); app.store.tiktokConcurrentsAuto.set(false) }
                 val n = (a.optString("nombre").toIntOrNull() ?: 20).coerceIn(5, 30)
                 val fiches = liste.take(5).map { c ->
                     runCatching { TikTokAnalyse.concurrent(TikWm.compte(c), TikWm.videosDe(c, n)) }.getOrElse { "## @$c\n(indisponible : ${it.message?.take(140)})" }

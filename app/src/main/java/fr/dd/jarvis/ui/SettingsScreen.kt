@@ -1853,7 +1853,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 AgentStatusRow("OpenAI · " + store.openaiModel.value, store.openaiKeys.isNotEmpty(), "${store.openaiKeys.size} clé(s)")
                 AgentStatusRow("Cloudflare Workers AI", store.cfAccounts.isNotEmpty(), "${store.cfAccounts.size} compte(s)")
                 AgentStatusRow("fal.ai · vidéo", store.falApiKey.value.isNotBlank(), if (store.falApiKey.value.isNotBlank()) "clé configurée" else "non configuré")
-                AgentStatusRow("Hugging Face", store.huggingFaceToken.value.isNotBlank(), if (store.huggingFaceToken.value.isNotBlank()) "jeton configuré" else "non configuré")
+                (listOf(store.huggingFaceToken.value) + store.hfTokensSupp.toList()).count { it.isNotBlank() }.let { n ->
+                    AgentStatusRow("Hugging Face", n > 0, if (n > 0) "$n compte${if (n > 1) "s" else ""}" else "non configuré")
+                }
                 val external = store.externalProvidersConfigured()
                 AgentStatusRow("Autres fournisseurs", external.isNotEmpty(), external.ifEmpty { listOf("aucun configuré") }.joinToString(", "))
                 Text("Les secrets ne sont jamais affichés dans ce centre.", color = HudDim, fontSize = 10.sp)
@@ -2351,6 +2353,9 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
     val scope = rememberCoroutineScope()
     var msg by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    val autoScope = rememberCoroutineScope()
+    var autoMsg by remember { mutableStateOf("") }
+    var autoEnCours by remember { mutableStateOf(false) }
     val connecte = store.tiktokAccessToken.value.isNotBlank()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2404,9 +2409,26 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
         if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
     }
     HudPanel(Modifier.fillMaxWidth(), title = "TikTok — niche, concurrents, idées") {
-        HudTextField(store.tiktokNiche.value, { store.tiktokNiche.set(it) }, Modifier.fillMaxWidth(), label = "Ta niche (mots-clés)", placeholder = "maintenance photovoltaïque, panneaux solaires")
+        Text("Détectés automatiquement depuis tes vidéos (et mis à jour chaque semaine) ; ce que tu écris toi-même est gardé.", color = HudDim, fontSize = 11.sp)
+        HudTextField(store.tiktokPseudo.value, { store.tiktokPseudo.set(fr.dd.jarvis.ai.TikWm.pseudo(it)) }, Modifier.fillMaxWidth(), label = "Ton pseudo TikTok (si le compte n'est pas connecté)", placeholder = "@mon.compte")
         Spacer(Modifier.height(6.dp))
-        HudTextField(store.tiktokConcurrents.value, { store.tiktokConcurrents.set(it) }, Modifier.fillMaxWidth(), label = "Comptes concurrents suivis", placeholder = "@compte1, @compte2")
+        HudTextField(store.tiktokNiche.value, { store.tiktokNiche.set(it); store.tiktokNicheAuto.set(false) }, Modifier.fillMaxWidth(), label = "Ta niche" + if (store.tiktokNicheAuto.value) " (détectée)" else "", placeholder = "maintenance photovoltaïque, panneaux solaires")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.tiktokConcurrents.value, { store.tiktokConcurrents.set(it); store.tiktokConcurrentsAuto.set(false) }, Modifier.fillMaxWidth(), label = "Comptes concurrents suivis" + if (store.tiktokConcurrentsAuto.value) " (détectés)" else "", placeholder = "@compte1, @compte2")
+        Spacer(Modifier.height(6.dp))
+        HudTextField(store.tiktokBandeau.value, { store.tiktokBandeau.set(it) }, Modifier.fillMaxWidth(), label = "Bandeau en haut des vidéos", placeholder = "LIBERTÉ · ÉGALITÉ · FRATERNITÉ")
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            HudButton(if (autoEnCours) "Analyse…" else "🔍 Détecter depuis mes vidéos", enabled = !autoEnCours) {
+                autoEnCours = true
+                autoScope.launch {
+                    autoMsg = runCatching { fr.dd.jarvis.ai.TikTokAuto.detecter(app, force = true) }.getOrElse { "❌ ${it.message}" }
+                    autoEnCours = false
+                }
+            }
+            Text("${fr.dd.jarvis.ai.TikTokAuto.references(app).size} image(s) modèle", color = HudDim, fontSize = 11.sp)
+        }
+        if (autoMsg.isNotBlank()) Text(autoMsg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
         Spacer(Modifier.height(6.dp))
         HudTextField(store.tiktokStyle.value, { store.tiktokStyle.set(it) }, Modifier.fillMaxWidth(), label = "Signature de tes vidéos (symbole, couleurs, ton)", placeholder = "phénix bleu blanc rouge en ouverture et en fin, ton engagé")
         Spacer(Modifier.height(6.dp))
@@ -2466,6 +2488,7 @@ private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
     val hfScope = rememberCoroutineScope()
     var hfTest by remember { mutableStateOf("") }
     var hfTestEnCours by remember { mutableStateOf(false) }
+    var hfNouveau by remember { mutableStateOf("") }
     HudPanel(Modifier.fillMaxWidth(), title = "Vidéo IA — fournisseurs") {
         Text("Clés conservées dans le stockage chiffré Android. Les générations peuvent consommer des crédits ou l'abonnement du fournisseur.", color = HudDim, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
@@ -2479,16 +2502,28 @@ private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
             HudButton("Effacer Dreamina") { store.dreaminaApiKey.clear() }
         }
         Spacer(Modifier.height(12.dp))
-        Text("Hugging Face — service gratuit avec quota limité", color = HudText, fontSize = 13.sp)
-        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()); hfTest = "" }, Modifier.fillMaxWidth(), label = "Token Hugging Face", password = true)
+        Text("Hugging Face — gratuit, quota limité par compte", color = HudText, fontSize = 13.sp)
+        Text("≈ 3 utilisations et 5 min de GPU par jour et par compte (animation des images). Plusieurs comptes : ils sont utilisés à tour de rôle quand l'un est épuisé.", color = HudDim, fontSize = 11.sp)
+        HudTextField(store.huggingFaceToken.value, { store.huggingFaceToken.set(it.trim()); hfTest = "" }, Modifier.fillMaxWidth(), label = "Token Hugging Face principal", password = true)
+        store.hfTokensSupp.forEachIndexed { i, t ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Compte ${i + 2} : hf_…${t.takeLast(4)}", color = HudText, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                HudButton("Retirer") { store.removeHfToken(i); hfTest = "" }
+            }
+        }
+        HudTextField(hfNouveau, { hfNouveau = it.trim() }, Modifier.fillMaxWidth(), label = "Ajouter un autre compte (jeton hf_…)", password = true)
         Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HudButton(if (hfTestEnCours) "Test…" else "Tester le jeton", enabled = store.huggingFaceToken.value.isNotBlank() && !hfTestEnCours) {
+            HudButton("Ajouter", enabled = hfNouveau.isNotBlank()) {
+                hfTest = runCatching { store.addHfToken(hfNouveau) }.getOrElse { it.message }?.let { "❌ $it" } ?: "✅ Compte ajouté.".also { hfNouveau = "" }
+            }
+            HudButton(if (hfTestEnCours) "Test…" else "Tester les jetons", enabled = (store.huggingFaceToken.value.isNotBlank() || store.hfTokensSupp.isNotEmpty()) && !hfTestEnCours) {
                 hfTestEnCours = true
                 hfScope.launch {
                     hfTest = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        runCatching { "✅ Jeton valide — compte " + fr.dd.jarvis.ai.HfImage.compte(store.huggingFaceToken.value) +
-                            ". Quota GPU gratuit : quelques minutes par jour (images et animations), rechargé au fil des heures." }
-                            .getOrElse { "❌ " + (it.message ?: "vérification impossible") }
+                        (listOf(store.huggingFaceToken.value) + store.hfTokensSupp.toList()).map { it.trim() }.filter { it.isNotBlank() }.distinct()
+                            .mapIndexed { k, t ->
+                                "Compte ${k + 1} : " + runCatching { "✅ " + fr.dd.jarvis.ai.HfImage.compte(t) }.getOrElse { "❌ " + (it.message ?: "vérification impossible") }
+                            }.joinToString("\n")
                     }
                     hfTestEnCours = false
                 }
@@ -2497,7 +2532,7 @@ private fun PollinationsPanel(store: fr.dd.jarvis.data.Store) {
                 ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://huggingface.co/settings/tokens")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         }
-        if (hfTest.isNotBlank()) Text(hfTest, color = if (hfTest.startsWith("✅")) HudText else HudDim, fontSize = 12.sp)
+        if (hfTest.isNotBlank()) Text(hfTest, color = if (!hfTest.contains("❌")) HudText else HudDim, fontSize = 12.sp)
         Text("Ordre vidéo : Hugging Face (quota gratuit limité), puis Gemini Omni si le projet dispose d’un quota vidéo, puis Dreamina. Dreamina peut facturer les générations. fal.ai reste disponible pour l’animation d’image.", color = HudDim, fontSize = 11.sp)
     }
 }
