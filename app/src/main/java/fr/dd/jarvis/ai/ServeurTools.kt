@@ -854,8 +854,18 @@ class ServeurTools(
                     if (bak != null) Serveur.exec(app, "cp -p ${Serveur.q(bak)} ${Serveur.q(f)} 2>/dev/null || sudo cp -p ${Serveur.q(bak)} ${Serveur.q(f)}")
                     else Serveur.exec(app, "rm -f ${Serveur.q(f)} 2>/dev/null || sudo rm -f ${Serveur.q(f)}")
                     ToolResult("⛔ Home Assistant refuse ce fichier : ancienne version remise, rien n'a changé.\n```\n$err\n```")
-                } else ToolResult("✅ ${f.removePrefix("$dir/")} enregistré." + (bak?.let { " Sauvegarde : ${it.substringAfterLast('/')}." } ?: "") +
-                    (if (f.endsWith(".yaml") || f.endsWith(".yml")) "\nConfiguration valide. " + HaSur.recharger(app) + " Si le changement concerne une intégration non rechargeable, dis « redémarre Home Assistant »." else ""))
+                } else {
+                    val rechargement = if (f.endsWith(".yaml", true) || f.endsWith(".yml", true)) runCatching {
+                        when (f.substringAfterLast('/').lowercase()) {
+                            "scripts.yaml" -> { Serveur.ha(app, "POST", "/api/services/script/reload"); "Scripts rechargés sans redémarrage complet." }
+                            "automations.yaml" -> { Serveur.ha(app, "POST", "/api/services/automation/reload"); "Automatisations rechargées sans redémarrage complet." }
+                            "scenes.yaml" -> { Serveur.ha(app, "POST", "/api/services/scene/reload"); "Scènes rechargées sans redémarrage complet." }
+                            else -> HaSur.recharger(app)
+                        }
+                    }.getOrElse { "Fichier validé, mais rechargement impossible : ${it.message?.take(180)}. Aucun redémarrage n'a été lancé." } else ""
+                    ToolResult("✅ ${f.removePrefix("$dir/")} enregistré." + (bak?.let { " Sauvegarde : ${it.substringAfterLast('/')}." } ?: "") +
+                        (if (rechargement.isNotBlank()) "\nConfiguration valide. $rechargement" else ""))
+                }
             }
             "restaurer" -> {
                 val nom = a.optString("contenu").trim().substringAfterLast('/')
