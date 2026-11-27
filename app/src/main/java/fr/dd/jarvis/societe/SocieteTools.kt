@@ -154,7 +154,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
 - Si l’utilisateur donne des coordonnées GPS pour une installation (copiées de Google Maps « 47.541558, 4.459845 », en degrés-minutes-secondes 47°32'29.6"N 4°27'35.4"E, ou un lien Google Maps), passe-les TELLES QUELLES dans site_gps de client_ecrire (avec site_nom si le client a plusieurs installations) ; pour le siège, dans gps de societe_info_set. Ces coordonnées priment sur l’adresse et ne sont jamais recalculées.
 - Si l’utilisateur est sur place et demande d’enregistrer « ma position », « ma localisation exacte », « ici »… sur une fiche client, appelle client_ecrire avec site_gps = « ma position » ET site_adresse = « ma position » (l’outil relève le GPS du téléphone et l’adresse précise correspondante) ; ne demande pas l’adresse. S’il parle de toutes ses installations (« ses deux installations »), mets site_nom = « toutes ».
 - Pour voir ou améliorer la précision des positions GPS des clients, utilise clients_gps (relocaliser=true pour recalculer avec la Base Adresse Nationale). N’invente jamais de coordonnées.
-- CRÉATION D'UN RAPPORT : utilise TOUJOURS rapport_brouillon_creer pour démarrer un rapport, puis rapport_brouillon_modifier à chaque ajout ou correction. Les brouillons sont persistés localement et restent modifiables après fermeture ou mise en veille. Ne déclenche JAMAIS intervention_enregistrer pendant la rédaction : aucune entrée d'historique, note Obsidian ou PDF définitif ne doit être créée avant validation explicite. Présente le brouillon et demande « Valider le rapport ? » lorsque sa rédaction est terminée ; appelle rapport_brouillon_valider uniquement après un accord explicite. Pour reprendre, utilise rapport_brouillons_liste puis l'ID exact. Pour abandonner, utilise rapport_brouillon_supprimer après demande explicite. intervention_enregistrer reste réservé aux anciens flux/outils et ne doit pas contourner cette procédure. N'invente jamais une intervention de test, un intitulé « test », ni une intervention de remplacement pour simuler une suppression.
+- AJOUT / CORRECTION SUR L'INTERVENTION D'UN CLIENT (« ajoute OK pour le nettoyage … pour l'intervention lapree », « mets … dans le rapport de X », « corrige le bon de X ») : c'est son intervention ENREGISTRÉE → appelle DIRECTEMENT intervention_modifier (client = X ; actions_ajout = les seules lignes à ajouter ou compléter, ex. « Nettoyage des ventilateurs : OK »). N'appelle PAS rapport_brouillons_liste : les brouillons ne servent que pour un NOUVEAU rapport en cours de rédaction ou quand l'utilisateur parle explicitement de son brouillon.
+- CRÉATION D'UN NOUVEAU RAPPORT : utilise TOUJOURS rapport_brouillon_creer pour démarrer un rapport, puis rapport_brouillon_modifier à chaque ajout ou correction de CE brouillon. Les brouillons sont persistés localement et restent modifiables après fermeture ou mise en veille. Ne déclenche JAMAIS intervention_enregistrer pendant la rédaction : aucune entrée d'historique, note Obsidian ou PDF définitif ne doit être créée avant validation explicite. Présente le brouillon et demande « Valider le rapport ? » lorsque sa rédaction est terminée ; appelle rapport_brouillon_valider uniquement après un accord explicite. Pour reprendre, utilise rapport_brouillons_liste puis l'ID exact. Pour abandonner, utilise rapport_brouillon_supprimer après demande explicite. intervention_enregistrer reste réservé aux anciens flux/outils et ne doit pas contourner cette procédure. N'invente jamais une intervention de test, un intitulé « test », ni une intervention de remplacement pour simuler une suppression.
 - Pour supprimer une intervention : utilise impérativement l'outil MCP interventions_liste (nom exact, sans préfixe) pour lire les interventions depuis la base Société de Jarvis, et non Obsidian/Bibliothèque. Lis les ID, présente la date, la catégorie, le résumé et l'ID de la fiche ciblée, puis demande une confirmation explicite à l'utilisateur. Après son « oui » explicite, appelle intervention_supprimer avec client, installation, intervention_id exact et confirmation="oui". Si l'ID manque, si plusieurs fiches correspondent ou si l'utilisateur n'a pas confirmé, arrête-toi sans rien créer ni supprimer. N'appelle jamais intervention_enregistrer en secours d'une suppression.
 - Les photos avant/après sont ajoutées depuis l'onglet Société > Interventions, avec les boutons « Ajouter avant » et « Ajouter après ». Après avoir enregistré l'intervention, indique à l'utilisateur où joindre les photos si elles sont disponibles ; ne prétends jamais qu'une photo a été enregistrée si l'interface ne l'a pas confirmé. Les images sont conservées dans le stockage privé et comme pièces jointes Obsidian.
 - Pour consulter l'historique en vue d'une suppression, appelle interventions_liste sans installation : l'outil liste toutes les installations du client, chaque intervention et son ID exact. Présente ensuite les fiches avec leur installation et demande à l'utilisateur de choisir si sa demande est ambiguë. Pour enregistrer ou modifier une intervention, demande l'installation exacte si le client en possède plusieurs. N'utilise jamais une correspondance partielle ambiguë.
@@ -320,7 +321,8 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "categorie" to prop("Nouvelle catégorie (optionnel)."),
             "description" to prop("Nouveau résumé factuel (optionnel)."),
             "diagnostic" to prop("Diagnostic constaté ou « effacer » (optionnel)."),
-            "actions" to prop("Actions réalisées, une par ligne, ou « effacer » (optionnel)."),
+            "actions" to prop("Liste COMPLÈTE des actions réalisées (remplace l'ancienne), une par ligne, ou « effacer » (optionnel). Pour ajouter ou compléter seulement quelques lignes, utilise actions_ajout."),
+            "actions_ajout" to prop("Lignes d'action à AJOUTER ou COMPLÉTER sans retaper toute la liste (« ajoute OK pour le nettoyage des ventilateurs » → « Nettoyage des ventilateurs : OK »), une par ligne : une ligne qui reprend une action existante la remplace, sinon elle est ajoutée."),
             "pieces" to prop("Pièces remplacées ou « effacer » (optionnel)."),
             "mesures" to prop("Mesures relevées avec unités, une par ligne (« 20 séries à environ 500 V » → tableau des séries), ou « effacer » (optionnel)."),
             "onduleurs" to prop("Tous les onduleurs concernés, un par ligne, ou « effacer » (optionnel)."),
@@ -950,10 +952,39 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
     }
 
 
+    /** Dernière demande de l'utilisateur (appli ou voiture, 15 min). */
+    private fun derniereDemande(): String {
+        val limite = System.currentTimeMillis() - 15 * 60_000L
+        val msgs = (runCatching { app.chat.toList() }.getOrDefault(emptyList()) + fr.dd.jarvis.service.CarBridge.contexte()).filter { it.fromUser && it.ts >= limite }
+        return msgs.maxByOrNull { it.ts }?.text.orEmpty()
+    }
+
+    /**
+     * « Ajoute OK pour … pour l'intervention lapree » : la demande nomme un client SANS brouillon mais avec des
+     * interventions enregistrées. Le modèle est renvoyé vers intervention_modifier au lieu d'afficher les brouillons
+     * (d'un autre client) et de s'arrêter là.
+     */
+    internal fun interventionVisee(demande: String): Client? {
+        val n = " " + normaliser(demande) + " "
+        if (!Regex("\\b(intervention|interventions|rapport|bon|fiche)\\b").containsMatchIn(n)) return null
+        if (Regex("\\bbrouillons?\\b").containsMatchIn(n)) return null
+        return svc.data.clients.filter { c -> normaliser(c.nom).length >= 3 && n.contains(" " + normaliser(c.nom) + " ") }
+            .firstOrNull { c -> svc.data.brouillonsRapport.none { it.clientId == c.id } && c.sites.any { it.interventions.isNotEmpty() } }
+    }
+
     private fun rapportBrouillonsListe(): ToolResult {
+        val demande = derniereDemande()
+        interventionVisee(demande)?.let { c ->
+            val (site, i) = c.sites.flatMap { s -> s.interventions.map { s to it } }.maxByOrNull { it.second.date }!!
+            return ToolResult("Aucun brouillon pour ${c.nom} : la demande « ${demande.take(200)} » vise son intervention ENREGISTRÉE " +
+                "du ${i.date} (${site.nom}, #${i.id}). Appelle maintenant intervention_modifier avec client « ${c.nom} »" +
+                (if (c.sites.size > 1) ", installation « ${site.nom} »" else "") + " et actions_ajout = les seules lignes à ajouter ou compléter " +
+                "(ex. « Nettoyage des ventilateurs : OK »). N'affiche pas cette liste à l'utilisateur.\nActions actuelles :\n" + i.actions.ifBlank { "(aucune)" })
+        }
         val brouillons = svc.data.brouillonsRapport
-        if (brouillons.isEmpty()) return ok("Aucun brouillon de rapport en cours.")
-        return ok(brouillons.sortedByDescending { it.modifieLe }.joinToString("\n\n") { b ->
+        // Résultat rendu au modèle (pas affiché tel quel) : la liste sert souvent d'étape avant de modifier un brouillon.
+        if (brouillons.isEmpty()) return ToolResult("Aucun brouillon de rapport en cours.")
+        return ToolResult(brouillons.sortedByDescending { it.modifieLe }.joinToString("\n\n") { b ->
             val client = svc.data.client(b.clientId)
             val site = client?.sites?.firstOrNull { it.id == b.siteId }
             "Brouillon #" + b.id + " — " + (client?.nom ?: "client supprimé") + " / " + (site?.nom ?: "installation supprimée") +
@@ -976,6 +1007,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val id = a.s("brouillon_id")
         val actuel = svc.data.brouillonsRapport.firstOrNull { it.id == id }
             ?: return err("Brouillon #$id introuvable. Consulte rapport_brouillons_liste.")
+        // Le brouillon d'un AUTRE client n'est jamais rempli avec une demande qui en nomme un (intervention enregistrée).
+        interventionVisee(derniereDemande())?.takeIf { it.id != actuel.clientId }?.let { c ->
+            return err("Brouillon #$id non modifié : il appartient à un autre client. La demande vise l'intervention enregistrée de ${c.nom} : appelle intervention_modifier (client « ${c.nom} », actions_ajout pour ajouter ou compléter des lignes).")
+        }
         val maj = actuel.copy(
             date = if (a.hv("date")) a.s("date") else actuel.date,
             categorie = if (a.hv("categorie")) a.s("categorie") else actuel.categorie,
@@ -1132,7 +1167,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             else -> (listOf(mesuresIA) + manquants.map { "Onduleur ${it.numero} : ${it.contenu}" }).filter { it.isNotBlank() }.joinToString("\n")
         }.trim()
         // Liste détaillée des actions (« Coffret AC : », « Serrage : OK »…) écrite par l'utilisateur, si l'IA l'a résumée.
-        val detail = ActionsDetaillees.extraire(dictee.ifBlank { derniereListeStructuree() })
+        val detail = if (a.has("actions_ajout")) emptyList() else ActionsDetaillees.extraire(dictee.ifBlank { derniereListeStructuree() })
         if (detail.size > ListesRapport.elements(gardes["actions"].orEmpty()).size) gardes["actions"] = detail.joinToString("\n")
         return Garde(gardes, retires, true)
     }
@@ -1149,6 +1184,18 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         val id = idDemande.ifBlank { site.interventions.maxByOrNull { it.date }?.id.orEmpty() }
         val ancienne = site.interventions.firstOrNull { it.id == id }
             ?: return err("Intervention $id introuvable pour ${client.nom} — ${site.nom}. Consulte d'abord interventions_liste pour obtenir son identifiant.")
+        // « Ajoute OK pour le nettoyage des ventilateurs » : lignes ajoutées ou complétées dans la liste existante.
+        // Une liste « actions » bien plus courte que l'ancienne, pour une demande d'ajout, est traitée de même (jamais de perte).
+        val ajout = a.s("actions_ajout").ifBlank {
+            val anciennes = ListesRapport.elements(ancienne.actions)
+            val nouvelles = ListesRapport.elements(a.s("actions"))
+            val demandeAjout = Regex("\\b(ajout\\w*|rajout\\w*|complet\\w*|mets|met|mettre)\\b").containsMatchIn(normaliser(derniereDemande())) &&
+                !Regex("\\b(remplac\\w*|effac\\w*|supprim\\w*|retir\\w*|enlev\\w*|refais|recommence)\\b").containsMatchIn(normaliser(derniereDemande()))
+            if (a.has("actions") && demandeAjout && anciennes.size >= 3 && nouvelles.isNotEmpty() && nouvelles.size < anciennes.size &&
+                anciennes.count { v -> nouvelles.any { normaliser(it) == normaliser(v) } } * 2 < anciennes.size) a.s("actions") else ""
+        }
+        if (ajout.isNotBlank()) a.put("actions_ajout", ajout)
+        if (ajout.isNotBlank()) a.put("actions", ActionsDetaillees.completer(ListesRapport.elements(ancienne.actions), ListesRapport.elements(ajout)).joinToString("\n"))
         fun valeur(cle: String, precedente: String): String {
             if (!a.has(cle)) return precedente
             val v = a.s(cle)

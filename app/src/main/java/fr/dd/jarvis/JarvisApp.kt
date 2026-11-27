@@ -161,9 +161,9 @@ class JarvisApp : Application() {
             store.rapportsPhotosV2.set(true)
         }.start()
         // Une fois : les rapports des 6 derniers mois reprennent la nouvelle présentation des onduleurs et des séries.
-        if (!store.rapportsOnduleursV1.value || !store.rapportsSeriesV2.value || !store.rapportsDetailV3.value || !store.rapportsPropresV4.value || !store.rapportsCategoriesV5.value) Thread {
+        if (!store.rapportsOnduleursV1.value || !store.rapportsSeriesV2.value || !store.rapportsDetailV3.value || !store.rapportsPropresV4.value || !store.rapportsCategoriesV5.value || !store.rapportsNettoyageV6.value) Thread {
             runCatching { societe.regenererRapports(jours = 180) }
-            store.rapportsOnduleursV1.set(true); store.rapportsSeriesV2.set(true); store.rapportsDetailV3.set(true); store.rapportsPropresV4.set(true); store.rapportsCategoriesV5.set(true)
+            store.rapportsOnduleursV1.set(true); store.rapportsSeriesV2.set(true); store.rapportsDetailV3.set(true); store.rapportsPropresV4.set(true); store.rapportsCategoriesV5.set(true); store.rapportsNettoyageV6.set(true)
         }.start()
         societe.data.modeles["planning"]?.let { fr.dd.jarvis.ai.Prompts.planningFormat = it }
         // Contrôle des devis/factures présents dans Obsidian : une recherche par document, au plus toutes les 6 h.

@@ -413,6 +413,8 @@ object Rendu {
     }
 
     private const val REPERE_ACTIONS = "§§ACTIONS_JARVIS§§"
+    /** Résultat d'un contrôle dicté (« OK », « conforme », « RAS »). */
+    private val RESULTAT_DIT = Regex("""(?i)\b(ok|conforme|ras|fait|nok|hs)\b""")
 
     /** Lignes de liste (« - … ») d'un morceau de rapport, sans leur puce ni leur pictogramme. */
     private fun lignesListe(texte: String): List<String> = texte.lines().map { it.trim() }.filter { it.startsWith("- ") || it.startsWith("* ") }
@@ -434,10 +436,11 @@ object Rendu {
         generales.forEach { bloc.append("- ").append(CategoriesActions.emojiLigne(it)).append(' ').append(it).append('\n') }
         for (c in categories.filter { it.cle.isNotEmpty() }) {
             val existante = titres.firstOrNull { CategoriesActions.titreCorrespond(c.cle, it) }
-            // Une ligne déjà écrite ailleurs dans le rapport (relevé du compteur, nettoyage du modèle) n'est pas répétée.
-            val lignes = c.lignes.filterNot { l -> ailleurs.any { e -> CategoriesActions.doublon(l, e) } && (existante != null || CategoriesActions.racines(l).size >= 2) }
+            // Section déjà dans le modèle : ses lignes sont complétées (« OK ») ou les nouvelles ajoutées, au rendu de la section.
+            if (existante != null) { ajouts.getOrPut(existante) { mutableListOf() } += c.lignes; continue }
+            // Une ligne déjà écrite ailleurs dans le rapport (relevé du compteur…) n'est pas répétée.
+            val lignes = c.lignes.filterNot { l -> ailleurs.any { e -> CategoriesActions.doublon(l, e) } && CategoriesActions.racines(l).size >= 2 }
             if (lignes.isEmpty()) continue
-            if (existante != null) { ajouts.getOrPut(existante) { mutableListOf() } += lignes; continue }
             bloc.append("\n## ").append(c.emoji).append(' ').append(c.titre).append('\n')
             lignes.forEach { bloc.append("- ").append(CategoriesActions.emojiLigne(it)).append(' ').append(it).append('\n') }
         }
@@ -452,9 +455,18 @@ object Rendu {
             val i0 = suite.indexOf(titre).takeIf { it >= 0 } ?: continue
             val corps = i0 + titre.length
             val fin = Regex("""(?m)^(#{1,3} |---)""").find(suite, corps)?.range?.first ?: suite.length
-            val section = suite.substring(corps, fin).trimEnd()
-            val texte = lignes.joinToString("") { "\n- " + CategoriesActions.emojiLigne(it) + " " + it }
-            suite = suite.substring(0, corps) + section + texte + "\n\n" + suite.substring(fin)
+            val lignesSection = suite.substring(corps, fin).trimEnd().lines().toMutableList()
+            val nouvelles = mutableListOf<String>()
+            for (l in lignes) {
+                // Ligne déjà présente (« 💨 Nettoyage des ventilateurs ») : elle reçoit le résultat dicté (« : OK ») s'il lui manque.
+                val k = lignesSection.indexOfFirst { e -> e.trimStart().startsWith("- ") && CategoriesActions.doublon(l, e.trimStart().drop(2)) }
+                if (k >= 0) {
+                    val resultat = RESULTAT_DIT.find(l)?.value?.let { if (it.equals("ok", true)) "OK" else it }
+                    if (resultat != null && !RESULTAT_DIT.containsMatchIn(lignesSection[k])) lignesSection[k] = lignesSection[k].trimEnd().trimEnd(':', ' ') + " : " + resultat
+                } else if (ailleurs.none { e -> CategoriesActions.doublon(l, e) && CategoriesActions.racines(l).size >= 2 }) nouvelles += l
+            }
+            val texte = nouvelles.joinToString("") { "\n- " + CategoriesActions.emojiLigne(it) + " " + it }
+            suite = suite.substring(0, corps) + lignesSection.joinToString("\n") + texte + "\n\n" + suite.substring(fin)
         }
         return (debut.trimEnd() + "\n\n" + bloc.toString().trim() + "\n\n" + suite.trimStart('\n')).replace(Regex("\n{3,}"), "\n\n")
     }

@@ -551,6 +551,8 @@ Compteur Linky:
         assertTrue(r, !r.contains("Actions réalisées"))
         assertEquals(r, 1, Regex("## 🧹 Nettoyage").findAll(r).count())
         assertTrue(r, !r.contains("Nettoyage et ventilation OK") && !r.contains("Nettoyage de l'installation OK"))
+        // Les lignes du modèle reçoivent le « OK » dicté.
+        assertTrue(r, r.contains("- 💨 Nettoyage des ventilateurs : OK\n- 🧽 Nettoyage de l'installation : OK"))
         assertTrue(r, r.indexOf("## ⚡ Coffret AC") < r.indexOf("## 🧹 Nettoyage") && r.contains("📐 Compteur Linky — Production : 1021418"))
         // L'ordre du modèle est conservé.
         assertTrue(r, r.indexOf("## 📝 Description") < r.indexOf("## ⚡ Coffret AC") && r.indexOf("## ⚡ Compteur Linky") < r.indexOf("## 📆 Prochaine maintenance"))
@@ -576,5 +578,13 @@ Compteur Linky:
         assertEquals("✅", CategoriesActions.emojiLigne("Pas de défaut de terre"))
         // Un résumé couvrant plusieurs domaines n'est pas rangé dans l'un d'eux.
         assertEquals(listOf(""), CategoriesActions.classer(listOf("Contrôle des coffrets, vérification de la terre, nettoyage des ventilateurs, remise en service")).map { it.cle })
+    }
+
+    /** « Ajoute OK pour le nettoyage des ventilateurs et le nettoyage de l'installation pour l'intervention lapree ». */
+    @Test fun ajoutDeLignesSansPerdreLesAutres() {
+        val actuelles = listOf("Coffret AC :", "Serrage OK", "Coffret Enedis :", "Test du disjoncteur OK", "nettoyage et ventilation", "nettoyage de l'installation", "remise en service OK")
+        val r = ActionsDetaillees.completer(actuelles, listOf("Nettoyage des ventilateurs : OK", "Nettoyage de l'installation : OK", "Contrôle du parafoudre : OK"))
+        assertEquals(listOf("Coffret AC :", "Serrage OK", "Coffret Enedis :", "Test du disjoncteur OK", "Nettoyage des ventilateurs : OK",
+            "Nettoyage de l'installation : OK", "remise en service OK", "Contrôle du parafoudre : OK"), r)
     }
 }

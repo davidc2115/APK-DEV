@@ -273,6 +273,19 @@ object ActionsDetaillees {
         }
     }
 
+    /**
+     * Lignes [ajouts] ajoutées à [actuelles] : une ligne qui reprend une action existante (mêmes mots porteurs,
+     * « nettoyage et ventilation » / « Nettoyage des ventilateurs : OK ») la remplace à sa place ; sinon elle est ajoutée.
+     */
+    fun completer(actuelles: List<String>, ajouts: List<String>): List<String> {
+        val r = actuelles.toMutableList()
+        for (l in ajouts.map { it.trim() }.filter { it.isNotBlank() }) {
+            val i = r.indexOfFirst { e -> !rubrique(e) && (CategoriesActions.doublon(e, l) || CategoriesActions.doublon(l, e)) }
+            if (i >= 0) r[i] = l else r += l
+        }
+        return r
+    }
+
     /** Rubrique (« Coffret AC : », « Nettoyage et maintenance : ») : titre sans contenu après les deux-points. */
     fun rubrique(ligne: String): Boolean = ligne.trimEnd().endsWith(":") && ligne.length <= 60
 }
