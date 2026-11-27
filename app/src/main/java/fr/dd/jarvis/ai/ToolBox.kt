@@ -441,7 +441,8 @@ class ToolBox(
             mapOf("action" to prop("etat | activer | desactiver | sms_on | sms_off | message"), "tous" to prop("activer : oui = tous les rendez-vous, non = seulement ceux des clients."), "texte" to prop("message : texte du SMS automatique."))))
         put(tool("courrier", "Ce que JARVIS a repéré dans les SMS et mails reçus : colis (transporteur, numéro, état, code de retrait, lien de suivi), factures et devis reçus (émetteur, montant, échéance), rendez-vous détectés, chacun classé Société ou Perso (onglet Courrier). Actions : colis | a_traiter (défaut) | traiter (id) | supprimer (id) | rdv_agenda (id facultatif : ajoute le rendez-vous détecté à l'agenda) | liste (tout, avec les id) | classer (id + domaine societe|perso ; retenu pour l'expéditeur).",
             mapOf("action" to prop("colis | a_traiter | liste | traiter | supprimer | rdv_agenda | classer"), "id" to prop("Identifiant de l'élément (action liste)."),
-                "domaine" to prop("classer : societe | perso"))))
+                "domaine" to prop("classer : societe | perso"),
+                "agenda" to prop("rdv_agenda : nom de l'agenda où l'ajouter (facultatif ; sinon celui déjà choisi pour ce classement Société / Perso)."))))
         put(tool("stationnement", "Place de stationnement de la voiture : noter la position actuelle (avec une précision : niveau, place…), dire où est garée la voiture (adresse, heure, distance, lien), ou l'oublier. Retenue aussi automatiquement à la fin d'Android Auto.",
             mapOf("action" to prop("noter | ou (défaut) | oublier"), "note" to prop("Précision facultative (« niveau -2, place 45 »)."))))
         put(tool("tache_terminer", "Marque une tâche comme terminée à partir de son identifiant (#id).", mapOf(
@@ -1442,7 +1443,13 @@ class ToolBox(
                 "rdv_agenda" -> {
                     val e = (if (id.isNotBlank()) C.liste(app).firstOrNull { it.id == id } else C.dernierRdv(app))?.takeIf { it.type == C.RDV }
                     if (e == null) ToolResult("Aucun rendez-vous détecté à ajouter.")
-                    else execute("create_event", C.argsEvenement(e)).also { r -> if (Regex("\\(#\\d+\\)").containsMatchIn(r.text)) C.marquer(app, e.id) }
+                    else {
+                        // Agenda dit (« dans le planning Super U ») et retenu ; sinon celui déjà choisi pour ce classement.
+                        val dit = a.optString("agenda").trim().takeIf { it.isNotBlank() }
+                            ?.let { q -> app.calendar.findCalendar(q, writableOnly = true)?.let { app.calendar.displayName(it) } }
+                        if (dit != null) C.retenirAgenda(app, e, dit)
+                        execute("create_event", C.argsEvenement(e, agenda = dit ?: C.agendaRetenu(app, e))).also { r -> if (Regex("\\(#\\d+\\)").containsMatchIn(r.text)) C.marquer(app, e.id) }
+                    }
                 }
                 else -> ToolResult(C.texte(app, fr.dd.jarvis.device.Courrier.Intention.ATraiter), direct = true)
             }

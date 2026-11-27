@@ -641,7 +641,8 @@ object Courrier {
                 val deja = runCatching { app.calendar.hasPermission() && e.dateRdv != null &&
                     app.calendar.events(Instant.ofEpochMilli(e.dateRdv).atZone(ZoneId.systemDefault()).toLocalDate(), 1).any { kotlin.math.abs(it.begin - e.dateRdv) < 31 * 60_000L } }.getOrDefault(false)
                 if (deja) return
-                "📅 ${e.objet.ifBlank { "Rendez-vous" }} : ${quand(e.dateRdv)}" to "Ajoute à mon agenda : rendez-vous « ${e.objet.ifBlank { e.emetteur }} » ${quand(e.dateRdv)}" + (if (e.lieu.isNotBlank()) " à ${e.lieu}" else "") + " (détecté dans un message reçu)."
+                "📅 ${e.objet.ifBlank { "Rendez-vous" }} : ${quand(e.dateRdv)}" to "Ajoute à mon agenda : rendez-vous « ${e.objet.ifBlank { e.emetteur }} » ${quand(e.dateRdv)}" + (if (e.lieu.isNotBlank()) " à ${e.lieu}" else "") +
+                    agendaRetenu(app, e).let { if (it.isNotBlank()) " dans l'agenda « $it »" else "" } + " (détecté dans un message reçu)."
             }
             FACTURE -> "🧾 Facture ${e.emetteur} : ${euros(e.montant)}${if (e.echeance.isNotBlank()) " avant le ${dateFr(e.echeance)}" else ""}${etiquette(e)}" to
                 if (e.domaine == PERSO) null else "Ajoute une note de frais de ${euros(e.montant)} chez ${e.emetteur}${if (e.echeance.isNotBlank()) " (facture à payer avant le ${dateFr(e.echeance)})" else ""}."
@@ -724,9 +725,19 @@ object Courrier {
     /** Dernier rendez-vous détecté, à venir et non traité. */
     fun dernierRdv(c: Context): Element? = liste(c).filter { it.type == RDV && !it.traite && (it.dateRdv ?: 0) > System.currentTimeMillis() }.maxByOrNull { it.ts }
 
-    fun argsEvenement(e: Element, debutChoisi: java.time.LocalDateTime? = null): JSONObject {
+    /** Agenda retenu pour un élément selon son classement (Société / Perso / à classer), "" si aucun choix encore. */
+    fun agendaRetenu(app: JarvisApp, e: Element): String = when (e.domaine) {
+        SOCIETE -> app.store.courrierAgendaSociete.value; PERSO -> app.store.courrierAgendaPerso.value; else -> app.store.courrierAgendaAutre.value
+    }
+
+    /** Retient l'agenda choisi pour les prochains rendez-vous du même classement. */
+    fun retenirAgenda(app: JarvisApp, e: Element, agenda: String) = when (e.domaine) {
+        SOCIETE -> app.store.courrierAgendaSociete.set(agenda); PERSO -> app.store.courrierAgendaPerso.set(agenda); else -> app.store.courrierAgendaAutre.set(agenda)
+    }
+
+    fun argsEvenement(e: Element, debutChoisi: java.time.LocalDateTime? = null, agenda: String = ""): JSONObject {
         val debut = debutChoisi ?: Instant.ofEpochMilli(e.dateRdv ?: System.currentTimeMillis()).atZone(ZoneId.systemDefault()).toLocalDateTime()
-        return JSONObject().put("title", e.objet.ifBlank { titreRdv(e) }).put("start", debut.toString().take(16)).put("end", debut.plusHours(1).toString().take(16))
+        return JSONObject().put("title", e.objet.ifBlank { titreRdv(e) }).apply { if (agenda.isNotBlank()) put("calendar", agenda) }.put("start", debut.toString().take(16)).put("end", debut.plusHours(1).toString().take(16))
             .put("location", e.lieu).put("description", "Détecté par JARVIS dans un message reçu (${e.emetteur}) :\n${e.synthese.ifBlank { e.resume }}")
     }
 }

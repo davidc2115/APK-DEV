@@ -2,7 +2,13 @@ package fr.dd.jarvis.ui
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -61,6 +67,41 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var smsProbleme by remember { mutableStateOf(Courrier.problemeSms(app)) }
+    // Rendez-vous en cours d'ajout : on choisit d'abord l'agenda (retenu pour le même classement Société / Perso).
+    var rdvAgenda by remember { mutableStateOf<Courrier.Element?>(null) }
+    fun ajouterAuPlanning(e: Courrier.Element, agenda: String) {
+        val initial = e.dateRdv?.let { java.time.Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDateTime() }
+            ?: LocalDate.now().plusDays(1).atTime(9, 0)
+        fun creerEvenement(debut: LocalDateTime) {
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { fr.dd.jarvis.ai.ToolBox(app) { _, _ -> true }.execute("create_event", Courrier.argsEvenement(e, debut, agenda)) }
+                        .getOrElse { fr.dd.jarvis.ai.ToolResult("Échec de création : " + (it.message ?: "erreur inconnue")) }
+                }
+                actionInfo = result.text
+                if (result.text.startsWith("Événement «")) {
+                    Courrier.marquer(app, e.id)
+                    version++
+                }
+            }
+        }
+        if (e.dateRdv != null && !e.statut.contains("heure non précisée")) {
+            creerEvenement(initial)
+        } else {
+            android.app.DatePickerDialog(context, { _, annee, mois, jour ->
+                android.app.TimePickerDialog(context, { _, heure, minute ->
+                    creerEvenement(LocalDate.of(annee, mois + 1, jour).atTime(heure, minute))
+                }, initial.hour, initial.minute, true).show()
+            }, initial.year, initial.monthValue - 1, initial.dayOfMonth).apply {
+                datePicker.minDate = System.currentTimeMillis() - 1000
+            }.show()
+        }
+    }
+    rdvAgenda?.let { e ->
+        ChoixAgenda(app, retenu = Courrier.agendaRetenu(app, e), titre = Courrier.ligne(e).removePrefix("📅 "),
+            onChoix = { agenda -> rdvAgenda = null; Courrier.retenirAgenda(app, e, agenda); ajouterAuPlanning(e, agenda) },
+            onAnnuler = { rdvAgenda = null })
+    }
     LaunchedEffect(app) {
         actionInfo = "Synchronisation des SMS et mails…"
         val anciensFauxPositifs = withContext(Dispatchers.IO) { Courrier.revaliderHistorique(app) }
@@ -136,34 +177,7 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
                         if (e.domaine.isBlank()) Courrier.classer(app, e.id, Courrier.SOCIETE)
                         Courrier.marquer(app, e.id); version++
                     }
-                    if (e.type == Courrier.RDV) HudChip("📅 Ajouter au planning") {
-                        val initial = e.dateRdv?.let { java.time.Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDateTime() }
-                            ?: LocalDate.now().plusDays(1).atTime(9, 0)
-                        fun creerEvenement(debut: LocalDateTime) {
-                            scope.launch {
-                                val result = withContext(Dispatchers.IO) {
-                                    runCatching { fr.dd.jarvis.ai.ToolBox(app) { _, _ -> true }.execute("create_event", Courrier.argsEvenement(e, debut)) }
-                                        .getOrElse { fr.dd.jarvis.ai.ToolResult("Échec de création : " + (it.message ?: "erreur inconnue")) }
-                                }
-                                actionInfo = result.text
-                                if (result.text.startsWith("Événement «")) {
-                                    Courrier.marquer(app, e.id)
-                                    version++
-                                }
-                            }
-                        }
-                        if (e.dateRdv != null && !e.statut.contains("heure non précisée")) {
-                            creerEvenement(initial)
-                        } else {
-                            android.app.DatePickerDialog(context, { _, annee, mois, jour ->
-                                android.app.TimePickerDialog(context, { _, heure, minute ->
-                                    creerEvenement(LocalDate.of(annee, mois + 1, jour).atTime(heure, minute))
-                                }, initial.hour, initial.minute, true).show()
-                            }, initial.year, initial.monthValue - 1, initial.dayOfMonth).apply {
-                                datePicker.minDate = System.currentTimeMillis() - 1000
-                            }.show()
-                        }
-                    }
+                    if (e.type == Courrier.RDV) HudChip("📅 Ajouter au planning") { rdvAgenda = e }
                     if (e.lien.isNotBlank()) HudChip("🔗 Suivi") {
                         runCatching { app.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(e.lien)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                     }
@@ -173,4 +187,48 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
             }
         }
     }
+}
+
+/** Choix de l'agenda (agendas modifiables du téléphone, avec leur couleur) ; celui retenu est en tête et marqué. */
+@Composable
+private fun ChoixAgenda(app: JarvisApp, retenu: String, titre: String, onChoix: (String) -> Unit, onAnnuler: () -> Unit) {
+    val accent = LocalAccent.current
+    val agendas = remember {
+        runCatching { app.calendar.calendars().filter { it.writable } }.getOrDefault(emptyList())
+            .map { it to app.calendar.displayName(it) }
+            .sortedWith(compareBy({ it.second != retenu }, { it.second.lowercase() }))
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onAnnuler,
+        containerColor = androidx.compose.ui.graphics.Color(0xFF0B1424), titleContentColor = accent, textContentColor = HudText,
+        title = { Text("📅 Dans quel planning ?", fontSize = 16.sp) },
+        text = {
+            androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(titre, color = HudDim, fontSize = 12.sp, maxLines = 2)
+                if (agendas.isEmpty()) Text("Aucun agenda modifiable : autorise l'agenda pour JARVIS (Réglages › Système › Autorisations).", color = HudText, fontSize = 12.sp)
+                agendas.forEach { (cal, nom) ->
+                    val choisi = nom == retenu
+                    Row(
+                        androidx.compose.ui.Modifier.fillMaxWidth().clip(HudShapeSmall)
+                            .background(accent.copy(alpha = if (choisi) 0.20f else 0.06f))
+                            .border(1.dp, accent.copy(alpha = if (choisi) 0.9f else 0.3f), HudShapeSmall)
+                            .clickable { onChoix(nom) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.size(12.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(androidx.compose.ui.graphics.Color(app.calendar.calendarColor(cal))))
+                        androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(start = 10.dp).weight(1f)) {
+                            Text(nom, color = HudText, fontSize = 13.sp, fontWeight = if (choisi) FontWeight.SemiBold else FontWeight.Normal)
+                            if (cal.account.isNotBlank() && cal.account != nom) Text(cal.account, color = HudDim, fontSize = 10.sp)
+                        }
+                        if (choisi) Text("retenu", color = accent, fontSize = 10.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { androidx.compose.material3.TextButton(onAnnuler) { Text("Annuler", color = HudDim) } }
+    )
 }
