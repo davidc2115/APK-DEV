@@ -595,8 +595,14 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
             val c = cible(m.groupValues[2].trim())
             val titre = c.titre
             if (titre.length < 2 || Regex("(?i)^(un film|le film|la s[ée]rie|une s[ée]rie|plex|quelque chose|sur|en|au|à|a|dans)(\\s|$)").containsMatchIn(titre)) return null
-            val explicite = m.groupValues[1].isNotBlank() || c.saison != null || c.episode != null || Regex("\\bplex\\b").containsMatchIn(n)
-            if (!explicite && PAS_TITRE.containsMatchIn(fr.dd.jarvis.societe.core.normaliser(titre))) return null
+            val marque = m.groupValues[1].isNotBlank() && !m.groupValues[1].trim().equals("sur plex", true)
+            val titreNorm = fr.dd.jarvis.societe.core.normaliser(titre)
+            // « Regarde pour le partage Freebox avec le serveur Plex », « regarde si… » : une question ou une vérification,
+            // pas un titre. « Regarde » (vérifier / regarder un film) ne lance que « regarde le film X / la série X ».
+            if (!marque && (NON_TITRE.containsMatchIn(titreNorm) || SUJET_TECHNIQUE.containsMatchIn(titreNorm))) return null
+            if (!marque && Regex("^(?:(?:je (?:veux|voudrais)|tu peux|peux tu|on)\\s+)?regarde[rz]?\\b").containsMatchIn(n)) return null
+            val explicite = marque || c.saison != null || c.episode != null || Regex("\\bplex\\b").containsMatchIn(n)
+            if (!explicite && PAS_TITRE.containsMatchIn(titreNorm)) return null
             val lecteur = m.groupValues[3].trim().let { if (fr.dd.jarvis.societe.core.normaliser(it) == "plex") "" else it }
             return "plex_lancer" to JSONObject().put("titre", titre).put("appareil", lecteur).apply {
                 c.saison?.let { put("saison", it.toString()) }
@@ -604,6 +610,11 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
                 if (!explicite) put("verifier", "oui")
             }
         }
+
+        /** Début de « titre » qui trahit une question (« pour le partage… », « si le film… », « comment… »). */
+        private val NON_TITRE = Regex("^(pour|si|comment|pourquoi|quand|est ce|ce qui|ce que|les? problemes?|l etat|la raison|qu il|qu elle)\\b")
+        /** Sujets techniques : jamais le titre d'un film à lancer sans « le film / la série » devant. */
+        private val SUJET_TECHNIQUE = Regex("\\b(freebox|box|serveur|partage|partager|reseau|wi ?fi|config\\w*|reglages?|ssh|docker|conteneur|disque|dossiers?|bibliotheques?|droits|acces|connexion|jeton|token|mise a jour)\\b")
 
         /** État, problème ou diagnostic du serveur Plex (jamais un titre à lancer). */
         private val DIAG = Regex("\\b(etat|statut|status|probleme|problemes|soucis?|pannes?|bugs?|erreurs?|plante|plantage|lent|lenteurs?|marche pas|marche plus|fonctionne pas|fonctionne plus|" +

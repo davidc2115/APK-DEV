@@ -494,7 +494,9 @@ class Brain(
                     else outilBrut to argsBruts
                 // « Lance X sur la télé » sans le mot film / série : seulement si X est bien dans la bibliothèque Plex.
                 // Le média trouvé est passé par son identifiant : pas de seconde recherche.
-                val ok = args.optString("verifier") != "oui" || runCatching {
+                // Un lancement n'est fait par le raccourci que si le titre est VRAIMENT dans la bibliothèque ; sinon la demande
+                // va à l'IA, qui comprend la phrase entière (avant : « Je ne trouve pas « pour le partage Freebox… » »).
+                val ok = outil != "plex_lancer" || runCatching {
                     Plex.trouver(app, args.optString("titre"), strict = true).meilleur?.optString("ratingKey")?.takeIf { it.isNotBlank() }?.also { args.put("titre", it) } != null
                 }.getOrDefault(false)
                 if (ok) {

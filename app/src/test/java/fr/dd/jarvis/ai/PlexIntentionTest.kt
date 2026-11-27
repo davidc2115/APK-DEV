@@ -76,4 +76,16 @@ class PlexIntentionTest {
         assertEquals("plex_lancer", PlexTools.intention("lance le film Erreur de calcul sur plex")?.first)
         assertEquals("plex_lancer", PlexTools.intention("mets Inception sur la télé")?.first)
     }
+
+    /** « Regarde pour le partage Freebox avec le serveur Plex » : une question, jamais un titre à chercher. */
+    @Test fun questionsQuiNeSontPasDesTitres() {
+        assertNull(PlexTools.intention("regarde pour le partage freebox avec le serveur plex"))
+        assertNull(PlexTools.intention("peux-tu regarder pour le partage Freebox avec Plex"))
+        assertNull(PlexTools.intention("mets le dossier de la freebox dans plex"))
+        assertNull(PlexTools.intention("regarde si plex voit le disque de la box"))
+        assertNull(PlexTools.intention("regarde Inception sur la télé"))   // « regarde » seul : l'IA décide
+        // Avec « le film / la série » devant, le lancement reste direct.
+        assertEquals("Le Réseau social", PlexTools.intention("lance le film Le Réseau social sur la télé")!!.second.getString("titre"))
+        assertEquals("Inception", PlexTools.intention("regarde le film Inception sur la télé")!!.second.getString("titre"))
+    }
 }
