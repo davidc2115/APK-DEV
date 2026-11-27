@@ -147,8 +147,13 @@ object GmailApi {
             for (i in 0 until (parts?.length() ?: 0)) walk(parts!!.getJSONObject(i))
         }
         walk(p)
-        val t = plain.ifBlank { html.replace(Regex("(?is)<(style|script)[^>]*>.*?</\\1>"), " ").replace(Regex("<[^>]+>"), " ") }
-        return t.replace("&nbsp;", " ").replace("&amp;", "&").replace(Regex("\\s+"), " ").trim()
+        // HTML : les blocs (paragraphes, lignes de tableau, <br>) deviennent des retours à la ligne, pour que l'objet,
+        // la date et l'adresse d'un rendez-vous restent sur leurs lignes ; entités (« &#xE9; », « &zwnj; ») décodées.
+        val t = plain.ifBlank {
+            html.replace(Regex("(?is)<(style|script|head)[^>]*>.*?</\\1>"), " ")
+                .replace(Regex("(?i)<br\\s*/?>|</(p|div|tr|li|h[1-6]|table)>"), "\n").replace(Regex("<[^>]+>"), " ")
+        }
+        return Courrier.nettoyerTexte(t).lines().filter { it.isNotBlank() }.joinToString("\n").trim()
     }
 
     private suspend fun fetchOne(ctx: Context, account: String, count: Int, unreadOnly: Boolean, full: Boolean = false, everywhere: Boolean = false, lusSeulement: Boolean = false): List<MailItem> {

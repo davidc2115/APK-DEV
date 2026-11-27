@@ -107,7 +107,8 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
                 MarkdownText(Courrier.ligne(e) + if (e.traite) " · ✅ traité" else "")
                 Text(e.source + " · " + java.time.Instant.ofEpochMilli(e.ts).atZone(java.time.ZoneId.systemDefault()).toLocalDate().let { fr.dd.jarvis.ai.DatesFr.libelle(it, LocalDate.now()) },
                     color = HudDim, fontSize = 10.sp)
-                Text(e.resume.take(200), color = HudDim, fontSize = 11.sp)
+                if (e.synthese.isNotBlank()) Text("🤖 " + e.synthese, color = HudText, fontSize = 12.sp)
+                Text(e.resume.take(200), color = HudDim, fontSize = 11.sp, maxLines = if (e.synthese.isNotBlank()) 2 else 4)
                 // Classement
                 Row(Modifier.padding(top = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     HudChip("🏢 Société", e.domaine == Courrier.SOCIETE) { Courrier.classer(app, e.id, Courrier.SOCIETE); version++ }

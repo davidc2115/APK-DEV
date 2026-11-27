@@ -35,6 +35,12 @@ object Courrier {
         val domaine: String = "",
         /** Classé par JARVIS (client de la société, boîte mail de la société, règle apprise) plutôt qu'à la main. */
         val auto: Boolean = false,
+        /** Objet court donné par l'IA (« Vidange Kadjar », « Facture électricité »). */
+        val objet: String = "",
+        /** Ce qu'il faut retenir, en une phrase (IA, d'après le message complet). */
+        val synthese: String = "",
+        /** Vérifié par l'IA sur le message complet : la revalidation par règles ne le retire plus. */
+        val verifie: Boolean = false,
     )
 
     const val COLIS = "colis"; const val FACTURE = "facture"; const val DEVIS = "devis"; const val RDV = "rdv"
@@ -79,8 +85,112 @@ object Courrier {
     private val RELEVE_COMPTEUR_RE = Regex("\\b(relevez? votre compteur|releve de compteur|index de compteur|transmettez votre index|auto releve)\\b")
     private val FINANCE_HORS_FACTURE_RE = Regex("\\b(simulation est sauvegardee|confirmation de votre commande|abonnement .* (prolonge|renouvele) et facture|achat confirme|merci pour votre achat)\\b")
     private val HEURE = Regex("\\b(\\d{1,2}) ?(?:h|:) ?(\\d{2})?\\b")
-    private val ADRESSE = Regex("(\\d{1,4}(?: ?bis| ?ter)?,? (?:rue|avenue|av\\.?|bd|boulevard|chemin|place|allee|allée|impasse|route|quai|cours|faubourg|zone|za|zi|lieu[- ]dit)[^,\\n.]{2,60}(?:,? ?\\d{5} [A-Za-zÀ-ÿ' -]{2,40})?)", RegexOption.IGNORE_CASE)
+    // Le type de voie est un mot entier : « 27 avril 2016 » n'est pas « 27 av(enue) ».
+    private val ADRESSE = Regex("(\\d{1,4}(?: ?bis| ?ter)?,? (?:rue|avenue|av|bd|boulevard|chemin|place|allee|allée|impasse|route|quai|cours|faubourg|zone|za|zi|lieu[- ]dit)(?![A-Za-zÀ-ÿ])\\.?[^,\\n.<>]{2,60}(?:,? ?\\d{5} [A-Za-zÀ-ÿ' -]{2,40})?)", RegexOption.IGNORE_CASE)
     private val GARAGE_RDV = Regex("\\bgarage\\s+([A-ZÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\\s+[A-ZÀ-ÿ][A-Za-zÀ-ÿ'’-]*){0,2})", RegexOption.IGNORE_CASE)
+
+    // ------------------------------------------------------------------ nettoyage du texte reçu
+
+    private val ENTITES = mapOf("nbsp" to " ", "amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"", "apos" to "'", "zwnj" to "", "zwj" to "",
+        "shy" to "", "lrm" to "", "rlm" to "", "eacute" to "é", "egrave" to "è", "ecirc" to "ê", "euml" to "ë", "agrave" to "à", "acirc" to "â",
+        "ccedil" to "ç", "ocirc" to "ô", "ouml" to "ö", "ucirc" to "û", "ugrave" to "ù", "uuml" to "ü", "icirc" to "î", "iuml" to "ï", "oelig" to "œ",
+        "Eacute" to "É", "Egrave" to "È", "Agrave" to "À", "Ccedil" to "Ç", "euro" to "€", "rsquo" to "’", "lsquo" to "‘", "rdquo" to "”",
+        "ldquo" to "“", "laquo" to "«", "raquo" to "»", "hellip" to "…", "ndash" to "–", "mdash" to "—", "deg" to "°", "copy" to "©", "reg" to "®",
+        "trade" to "™", "bull" to "•", "middot" to "·", "times" to "×")
+
+    /**
+     * Texte lisible d'un message : entités HTML décodées (« &#xE9; » → é, « &zwnj; » retiré), caractères invisibles des
+     * newsletters retirés, « \n » littéraux remis en retours à la ligne, espaces resserrés.
+     */
+    fun nettoyerTexte(t: String): String {
+        var s = t.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", " ")
+        repeat(2) { // « &amp;eacute; » : deux passes
+            s = Regex("&(#[xX][0-9a-fA-F]{1,6}|#\\d{1,7}|[a-zA-Z]{2,8});").replace(s) { m ->
+                val k = m.groupValues[1]
+                when {
+                    k.startsWith("#x") || k.startsWith("#X") -> k.substring(2).toIntOrNull(16)?.let { runCatching { String(Character.toChars(it)) }.getOrNull() } ?: m.value
+                    k.startsWith("#") -> k.substring(1).toIntOrNull()?.let { runCatching { String(Character.toChars(it)) }.getOrNull() } ?: m.value
+                    else -> ENTITES[k] ?: ENTITES[k.lowercase()] ?: m.value
+                }
+            }
+        }
+        s = s.replace(Regex("[\\u200B-\\u200F\\u2060-\\u2064\\uFEFF\\u034F\\u00AD\\u180E\\u061C]"), "")
+        return s.lines().map { it.replace(Regex("[ \\t\\u00A0\\u202F]+"), " ").trim() }.joinToString("\n")
+            .replace(Regex("\\n{3,}"), "\n\n").trim()
+    }
+
+    private val URL = Regex("<?\\bhttps?://\\S+>?|<?\\bwww\\.[^\\s>]+>?", RegexOption.IGNORE_CASE)
+
+    /** Aperçu affiché : texte nettoyé, sans les liens de suivi interminables. */
+    internal fun resumeDe(texte: String): String = nettoyerTexte(texte).replace(URL, " ").replace(Regex("\\s+"), " ")
+        .replace(Regex("\\s+([,.;:!?])"), "$1").replace(Regex("^[,.;:!? -]+"), "").trim().take(220)
+
+    // ------------------------------------------------------------------ publicités et newsletters
+
+    private val LABELS_PUB = setOf("CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_FORUMS", "SPAM")
+    /** Pied de page d'un envoi de masse (newsletter, publicité) : désinscription, « version en ligne »… */
+    private val DESABONNEMENT = Regex("\\b(se desinscrire|desinscri\\w*|desabonn\\w*|ne (plus|souhaitez plus|voulez plus) recevoir|pour ne plus recevoir|unsubscribe|gerer (vos|mes) (preferences|abonnements)|preferences de communication|si vous ne visualisez pas|ne s affiche pas correctement|version en ligne|voir la version|voir en ligne|afficher (ce message |cet e ?mail )?dans (votre|le) navigateur|view (it |this email )?in (your )?browser|newsletter|lettre d information|vous recevez (cet|ce) (e ?mail|courriel|message)|cet e ?mail vous a ete envoye|ce message vous a ete envoye|vous avez recu (cet|ce) (e ?mail|message))\\b")
+    private val COMMERCIAL = Regex("\\b(black friday|cyber monday|french days|soldes|vente privee|ventes privees|code promo|bons? plans?|promos?|promotions?|offres?|cagnotte|decouvrez|nouveautes?|nouvelle collection|jusqu a|livraison offerte|profitez|ne manquez pas|derniers jours|dernier jour|exclusivites?|exclusif|exclusive|cadeaux?|remises?|reductions?|economisez|petits prix|meilleures ventes|notre selection|carte fidelite|fidelite|parrainage|parrainez|jeu concours|concours|gagnez|abonnez vous|inscrivez vous|webinaire|webinar|ateliers? gratuits?|catalogue|collection)\\b")
+    private val POURCENT = Regex("-\\s?\\d{1,2}\\s?%|\\b\\d{1,2}\\s?%\\s?(de remise|de reduction|de réduction|offerts?|sur|off)\\b", RegexOption.IGNORE_CASE)
+    /** Ce qu'une publicité n'écrit pas : un document ou un rendez-vous qui concerne vraiment le destinataire. */
+    private val TRANSACTIONNEL = Regex("\\b(votre facture|facture n|facture numero|numero de facture|nouvelle facture|montant de votre facture|avis d echeance|echeancier|a payer avant|a regler avant|sera preleve|sera prelevee|prelevement (de|du|le)|relance de paiement|impaye|votre devis|devis n|devis numero|bon pour accord|votre rendez vous (est|du|le|a|avec|de)|confirmation de (votre |du )?rendez vous|rappel de (votre )?rendez vous|rendez vous (est )?confirme|convocation|numero de suivi|suivre votre colis|votre colis|votre commande (a ete |est )?expediee?|avis de passage|votre livraison)\\b")
+
+    /** Publicité, newsletter ou mailing (Gmail « Promotions », pied de désinscription, vocabulaire commercial). */
+    internal fun publicite(sujet: String, corps: String, labels: List<String> = emptyList()): Boolean {
+        if (labels.any { it in LABELS_PUB }) return true
+        val ns = normaliser(sujet); val nc = normaliser(corps)
+        if (TRANSACTIONNEL.containsMatchIn(ns)) return false
+        val commerce = COMMERCIAL.findAll("$ns $nc").map { it.value }.toSet().size + (if (POURCENT.containsMatchIn("$sujet $corps")) 2 else 0)
+        if (TRANSACTIONNEL.containsMatchIn(nc)) return commerce >= 5
+        return DESABONNEMENT.containsMatchIn("$ns $nc") || commerce >= 2
+    }
+
+    /** L'objet (première ligne) parle clairement d'une facture, d'un devis, d'un rendez-vous ou d'un colis. */
+    internal fun objetTransactionnel(texte: String) =
+        TRANSACTIONNEL.containsMatchIn(normaliser(nettoyerTexte(texte).lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()))
+
+    /** « Prenez rendez-vous », « réservez votre rdv » : une invitation, pas un rendez-vous fixé. */
+    private val INVITATION_RDV = Regex("\\b(prenez|prendre|reservez|reserver|planifiez|planifier|fixez|fixer|programmez|programmer|demandez|demander|convenir d|prise de|prenons|choisissez|choisir) (un |votre |le |vos |d un )?(nouveau )?(rendez vous|rdv)\\b")
+    /** Simple bilan / suivi de consommation : informatif, ce n'est pas une facture. */
+    private val CONSO_INFO = Regex("\\b(bilan (mensuel |annuel |hebdomadaire )?de (votre )?consommation|suivi de (votre )?consommation|votre conso(mmation)? (du mois|d electricite|de gaz|d eau|en kwh)|estimation de (votre )?consommation|releve de consommation)\\b")
+
+    /**
+     * Date (et passage) du rendez-vous : cherchée PRÈS de la formulation du rendez-vous, pas n'importe où dans le
+     * message (dates de validité d'une offre, mentions légales « 27 avril 2016 »…). Texte court : tout le message.
+     */
+    private fun dateRdv(nd: String, ref: LocalDate): Pair<LocalDate, String>? {
+        val cles = (RDV_RE.findAll(nd) + RDV_AUTO_RE.findAll(nd) + RENCONTRE_RE.findAll(nd)).map { it.range.first }.toSortedSet()
+        // Pour chaque formulation, la date la plus proche (de préférence juste après) ; on garde le couple le plus serré.
+        var meilleur: Triple<Int, LocalDate, String>? = null
+        for (p in cles) {
+            val debut = maxOf(0, p - 70)
+            val fen = nd.substring(debut, minOf(nd.length, p + 260))
+            val t = DatesFr.jour(fen, ref) ?: continue
+            val ou = debut + fen.indexOf(t.texte).coerceAtLeast(0)
+            val ecart = if (ou >= p) ou - p else (p - ou) * 2
+            if (meilleur == null || ecart < meilleur.first) meilleur = Triple(ecart, t.date, fen)
+        }
+        meilleur?.let { return it.second to it.third }
+        return if (nd.length <= 500) DatesFr.jour(nd, ref)?.let { it.date to nd } else null
+    }
+
+    /** Lieu du rendez-vous : une adresse du corps du message, jamais celle du pied de page (siège, mentions légales). */
+    private fun lieuRdv(texte: String): String {
+        val l = texte.length
+        return ADRESSE.findAll(texte).firstOrNull { m -> l < 700 || m.range.first < l * 0.7 }?.value?.trim()?.trimEnd(',', ';', ' ', '<', '(').orEmpty()
+    }
+
+    /** Lieu déjà enregistré encore valable avec les règles actuelles (une date prise pour une adresse est retirée). */
+    internal fun lieuValide(lieu: String): String = if (lieu.isBlank() || lieu.startsWith("Garage ") || ADRESSE.matches(lieu.trim())) lieu
+        else ADRESSE.find(lieu)?.value?.trim().orEmpty()
+
+    /** Montant d'une facture / d'un devis : celui qui suit « montant », « total », « à payer »… ; sinon le plus élevé. */
+    private val CONTEXTE_MONTANT = Regex("(montant|total|ttc|ht|a payer|a regler|net a payer|solde|reste a payer|preleve|prelevement|facture|devis|s eleve|d un montant|somme)\\W*(de|du|:|=)?\\W*$")
+    private fun montantDocument(t: String): Double? {
+        val contextuels = MONTANT.findAll(t).filter { m -> CONTEXTE_MONTANT.containsMatchIn(normaliser(t.substring(maxOf(0, m.range.first - 45), m.range.first))) }
+            .mapNotNull { m -> m.groupValues[1].replace(Regex("[ .\\u202F\\u00A0](?=\\d{3}\\b)"), "").replace(',', '.').toDoubleOrNull() }.filter { it > 0 }.toList()
+        return contextuels.maxOrNull() ?: montant(t)
+    }
 
     private fun titreRdv(e: Element): String {
         val n = normaliser(e.resume)
@@ -101,15 +211,26 @@ object Courrier {
 
     private fun id(vararg p: String) = p.joinToString("|").hashCode().toUInt().toString(36)
 
-    /** Éléments trouvés dans un message (titre = expéditeur ou objet). Pur : testable. */
-    fun analyser(titre: String, texte: String, source: String, ts: Long, aujourdhui: LocalDate = LocalDate.now()): List<Element> {
+    /**
+     * Éléments trouvés dans un message (titre = expéditeur ; texte = objet puis corps pour un mail). Pur : testable.
+     * [labels] : étiquettes Gmail (« Promotions » → ignoré).
+     */
+    fun analyser(titre: String, texte: String, source: String, ts: Long, aujourdhui: LocalDate = LocalDate.now(), labels: List<String> = emptyList()): List<Element> {
+        // Identifiant calculé sur le texte brut, comme avant : un message déjà enregistré garde le même identifiant.
+        val resumeBrut = texte.replace(Regex("\\s+"), " ").trim().take(220)
+        val texte = nettoyerTexte(texte)
+        val titre = nettoyerTexte(titre).replace(Regex("\\s+"), " ")
         val brut = "$titre\n$texte".trim()
         if (brut.length < 12) return emptyList()
         val n = normaliser(brut)
         if (SECURITE.containsMatchIn(n)) return emptyList()
+        val sujet = texte.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
+        if (publicite(sujet, "$titre\n$texte", labels)) return emptyList()
+        // Référence des dates relatives (« jeudi », « demain ») : le jour où le message a été reçu.
+        val ref = if (ts > 0) Instant.ofEpochMilli(ts).atZone(ZoneId.systemDefault()).toLocalDate().takeIf { !it.isAfter(aujourdhui) } ?: aujourdhui else aujourdhui
         val emetteur = titre.trim().take(60).ifBlank { source }
         val out = mutableListOf<Element>()
-        val resume = texte.replace(Regex("\\s+"), " ").trim().take(220)
+        val resume = resumeDe(texte)
 
         // Colis
         val t = TRANSPORTEURS.firstOrNull { it.mots.containsMatchIn(n) }
@@ -134,38 +255,47 @@ object Courrier {
             return out
         }
         // Un rendez-vous est reconnu par une formulation explicite, ou par un motif automobile + date + heure.
-        val nd = DatesFr.normaliser(brut)
-        val jourTrouve = DatesFr.jour(nd, aujourdhui)?.date
+        // « Prenez rendez-vous », « réservez votre rdv » sont des invitations, pas des rendez-vous.
+        val nd = DatesFr.normaliser(brut).replace(INVITATION_RDV, " ")
+        val trouve = dateRdv(nd, ref)
+        val jourTrouve = trouve?.first
         val heurePresente = HEURE.containsMatchIn(nd)
-        val corpsNormalise = normaliser(texte)
+        val corpsNormalise = normaliser(texte).replace(INVITATION_RDV, " ")
         val contenuPromotionnel = PUB_RDV_RE.containsMatchIn(corpsNormalise)
         val rdvExpliciteDansCorps = RDV_RE.containsMatchIn(corpsNormalise)
-        val rdvExplicite = (RDV_RE.containsMatchIn(n) && jourTrouve != null) || (rdvExpliciteDansCorps && !contenuPromotionnel)
+        val rdvExplicite = (RDV_RE.containsMatchIn(n.replace(INVITATION_RDV, " ")) && jourTrouve != null) || (rdvExpliciteDansCorps && !contenuPromotionnel)
         val rdvAutomobile = RDV_AUTO_RE.containsMatchIn(corpsNormalise) && jourTrouve != null && heurePresente
         val rdvPersonnel = RENCONTRE_RE.containsMatchIn(corpsNormalise) && jourTrouve != null
-        if ((rdvExplicite || rdvAutomobile || rdvPersonnel) && !contenuPromotionnel && !FACTURE_RE.containsMatchIn(n) && !DEVIS_RE.containsMatchIn(n)) {
-            val jourTrouve = DatesFr.jour(nd, aujourdhui)?.date
-            val jour = jourTrouve?.takeIf { !it.isBefore(aujourdhui) }
-            val h = if (jour != null) HEURE.findAll(nd).firstOrNull { (it.groupValues[1].toIntOrNull() ?: 99) in 6..21 } else null
+        // Long message sans date de rendez-vous : seulement si son objet parle d'un rendez-vous (sinon : document transféré,
+        // compte rendu, signature avec adresse…).
+        val sansDateAdmis = jourTrouve != null || texte.length <= 600 || RDV_RE.containsMatchIn(normaliser(sujet).replace(INVITATION_RDV, " "))
+        if ((rdvExplicite || rdvAutomobile || rdvPersonnel) && sansDateAdmis && !contenuPromotionnel && !FACTURE_RE.containsMatchIn(n) && !DEVIS_RE.containsMatchIn(n)) {
+            val jour = jourTrouve?.takeIf { !it.isBefore(ref) }
+            val fenetre = trouve?.second ?: nd
+            val h = if (jour != null) (HEURE.findAll(fenetre) + HEURE.findAll(nd)).firstOrNull { (it.groupValues[1].toIntOrNull() ?: 99) in 6..21 } else null
             val heure = h?.groupValues?.get(1)?.toIntOrNull()
             val minute = h?.groupValues?.get(2)?.toIntOrNull() ?: 0
             val debut = jour?.atTime(heure ?: 9, minute)?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
-            val lieu = ADRESSE.find(brut)?.value?.trim().orEmpty().ifBlank { GARAGE_RDV.find(texte)?.groupValues?.get(1)?.let { "Garage " + it.trim() }.orEmpty() }
-            out += Element(id(RDV, source, emetteur, ts.toString(), normaliser(resume)), RDV, source, emetteur, resume, ts, dateRdv = debut, lieu = lieu,
+            val lieu = lieuRdv(texte).ifBlank { lieuRdv(titre) }.ifBlank { GARAGE_RDV.find(texte)?.groupValues?.get(1)?.let { "Garage " + it.trim() }.orEmpty() }
+            out += Element(id(RDV, source, emetteur, ts.toString(), normaliser(resumeBrut)), RDV, source, emetteur, resume, ts, dateRdv = debut, lieu = lieu,
                 statut = when { jour == null -> "date non précisée"; heure == null -> "heure non précisée"; else -> "" })
             return out
         }
         // Facture / devis : le montant est facultatif, car souvent absent de l'aperçu d'un SMS ou d'un mail.
-        val m = montant(brut)
+        // Dans un long mail, le mot doit figurer dans l'objet ou le début (pas seulement « vos factures » en pied de page).
+        val debutMessage = normaliser(brut.take(450))
         val documentFinancier = (FACTURE_RE.containsMatchIn(n) || DEVIS_RE.containsMatchIn(n)) &&
-            !RELEVE_COMPTEUR_RE.containsMatchIn(n) && !FINANCE_HORS_FACTURE_RE.containsMatchIn(n)
+            (brut.length <= 700 || FACTURE_RE.containsMatchIn(debutMessage) || DEVIS_RE.containsMatchIn(debutMessage)) &&
+            !RELEVE_COMPTEUR_RE.containsMatchIn(n) && !FINANCE_HORS_FACTURE_RE.containsMatchIn(n) &&
+            !(CONSO_INFO.containsMatchIn(n) && !FACTURE_RE.containsMatchIn(normaliser(sujet)))
         val documentPromotionnel = PROMOTION_RE.containsMatchIn(n) || PUB_RDV_RE.containsMatchIn(n)
         if (documentFinancier && !documentPromotionnel) {
+            val m = montantDocument(brut)
             val devis = DEVIS_RE.containsMatchIn(n) && !FACTURE_RE.containsMatchIn(n)
             val ech = Regex("\\b(?:avant le|au plus tard le|date limite(?: de paiement)?|echeance(?: le| du)?|preleve le|sera preleve le|a payer (?:avant )?le|valable jusqu au|le) ?:? ?(.{4,30})").find(DatesFr.normaliser(brut))
-                ?.groupValues?.get(1)?.let { DatesFr.jour(DatesFr.normaliser(it), aujourdhui)?.date?.toString() }.orEmpty()
+                ?.groupValues?.get(1)?.let { DatesFr.jour(DatesFr.normaliser(it), ref)?.date?.toString() }.orEmpty()
             val montantCle = m?.let { "%.2f".format(java.util.Locale.ROOT, it) } ?: "inconnu"
-            out += Element(id(if (devis) DEVIS else FACTURE, source, emetteur, ts.toString(), montantCle, normaliser(resume)),
+            out += Element(id(if (devis) DEVIS else FACTURE, source, emetteur, ts.toString(), montantCle, normaliser(resumeBrut)),
                 if (devis) DEVIS else FACTURE, source, emetteur, resume, ts, montant = m, echeance = ech)
         }
         return out
@@ -182,7 +312,8 @@ object Courrier {
             Element(o.optString("id"), o.optString("type"), o.optString("source"), o.optString("emetteur"), o.optString("resume"), o.optLong("ts"),
                 o.optString("transporteur"), o.optString("numero"), o.optString("lien"), o.optString("statut"), o.optString("code"),
                 if (o.has("montant")) o.optDouble("montant") else null, o.optString("echeance"), if (o.has("dateRdv")) o.optLong("dateRdv") else null,
-                o.optString("lieu"), o.optBoolean("traite"), o.optString("domaine"), o.optBoolean("auto"))
+                o.optString("lieu"), o.optBoolean("traite"), o.optString("domaine"), o.optBoolean("auto"),
+                o.optString("objet"), o.optString("synthese"), o.optBoolean("verifie"))
         }
     }.getOrDefault(emptyList())
 
@@ -194,10 +325,31 @@ object Courrier {
             a.put(JSONObject().put("id", e.id).put("type", e.type).put("source", e.source).put("emetteur", e.emetteur).put("resume", e.resume).put("ts", e.ts)
                 .put("transporteur", e.transporteur).put("numero", e.numero).put("lien", e.lien).put("statut", e.statut).put("code", e.code)
                 .apply { e.montant?.let { put("montant", it) }; e.dateRdv?.let { put("dateRdv", it) } }
-                .put("echeance", e.echeance).put("lieu", e.lieu).put("traite", e.traite).put("domaine", e.domaine).put("auto", e.auto))
+                .put("echeance", e.echeance).put("lieu", e.lieu).put("traite", e.traite).put("domaine", e.domaine).put("auto", e.auto)
+                .put("objet", e.objet).put("synthese", e.synthese).put("verifie", e.verifie))
         }
         fr.dd.jarvis.data.Ecritures.ecrire(fichier(c)) { a.toString() }
     }
+
+    /**
+     * Même message vu deux fois (notification Gmail puis import du mail complet, ou deux imports) : même type, même
+     * expéditeur, reçus à moins de 3 jours d'écart, et même numéro de suivi / même début de texte.
+     */
+    internal fun memeMessage(a: Element, b: Element): Boolean {
+        if (a.type != b.type || cleEmetteur(a.emetteur) != cleEmetteur(b.emetteur) || kotlin.math.abs(a.ts - b.ts) > 3 * 86_400_000L) return false
+        if (a.type == COLIS) return a.numero.isNotBlank() && a.numero == b.numero
+        val ra = normaliser(resumeDe(a.resume)); val rb = normaliser(resumeDe(b.resume))
+        return ra.length >= 25 && rb.length >= 25 && ra.take(60) == rb.take(60)
+    }
+
+    /** Deux lectures du même message : on garde l'élément connu (classement, « traité ») complété par la plus riche. */
+    private fun fusion(connu: Element, autre: Element): Element = connu.copy(
+        montant = connu.montant ?: autre.montant, echeance = connu.echeance.ifBlank { autre.echeance },
+        dateRdv = connu.dateRdv ?: autre.dateRdv, lieu = connu.lieu.ifBlank { autre.lieu },
+        statut = if (connu.dateRdv == null && autre.dateRdv != null) autre.statut else connu.statut,
+        resume = if (autre.resume.length > connu.resume.length) autre.resume else connu.resume,
+        source = if (autre.source.length > connu.source.length) autre.source else connu.source,
+        objet = connu.objet.ifBlank { autre.objet }, synthese = connu.synthese.ifBlank { autre.synthese }, verifie = connu.verifie || autre.verifie)
 
     /** Ajoute / met à jour (même colis : nouvel état) ; renvoie les éléments NOUVEAUX. */
     @Synchronized
@@ -207,40 +359,68 @@ object Courrier {
         val vraimentNouveaux = mutableListOf<Element>()
         for (e in nouveaux) {
             val i = l.indexOfFirst { it.id == e.id }
-            if (i < 0) { l += e; vraimentNouveaux += e }
+            if (i < 0) {
+                val j = l.indexOfFirst { memeMessage(it, e) }
+                if (j >= 0) { if (e.type != COLIS || e.statut == l[j].statut) l[j] = fusion(l[j], e) else l[j] = l[j].copy(statut = e.statut, ts = maxOf(e.ts, l[j].ts)); continue }
+                l += e; vraimentNouveaux += e
+            }
             else if (e.type == COLIS && e.statut != l[i].statut) l[i] = l[i].copy(statut = e.statut, ts = e.ts, code = e.code.ifBlank { l[i].code }, resume = e.resume,
                 traite = if (e.statut == "livré") l[i].traite else false, domaine = l[i].domaine.ifBlank { e.domaine }, auto = if (l[i].domaine.isBlank()) e.auto else l[i].auto)
-            else if (e.type != COLIS) l[i] = e.copy(traite = l[i].traite, domaine = l[i].domaine.ifBlank { e.domaine }, auto = if (l[i].domaine.isBlank()) e.auto else l[i].auto)
+            else if (e.type != COLIS && !l[i].verifie) l[i] = e.copy(traite = l[i].traite, domaine = l[i].domaine.ifBlank { e.domaine }, auto = if (l[i].domaine.isBlank()) e.auto else l[i].auto)
         }
         sauver(c, l)
         return vraimentNouveaux
+    }
+
+    /** Remplace un élément (vérification par l'IA) ; null le retire. */
+    @Synchronized
+    fun remplacer(c: Context, id: String, e: Element?): Boolean {
+        val l = liste(c)
+        if (l.none { it.id == id }) return false
+        sauver(c, if (e == null) l.filter { it.id != id } else l.map { if (it.id == id) e.copy(id = id, traite = it.traite, domaine = it.domaine.ifBlank { e.domaine }, auto = if (it.domaine.isBlank()) e.auto else it.auto) else it })
+        return true
     }
 
     /**
      * Réévalue les anciens éléments déjà enregistrés avec les critères actuels.
      * Cela retire les anciennes publicités qui avaient été classées à tort, sans effacer les éléments valides.
      */
+    /** Un élément déjà enregistré, revu avec les règles actuelles : corrigé, gardé tel quel, ou null (à retirer). Pur. */
+    internal fun revalider(brut: Element): Element? {
+        // Texte et lieu remis au propre (entités HTML, liens ; « 27 avril 2016 » pris pour une adresse).
+        val ancien = brut.copy(resume = resumeDe(brut.resume), lieu = lieuValide(brut.lieu))
+        if (ancien.verifie) return ancien
+        val tout = ancien.emetteur + " " + ancien.resume
+        if (publicite(ancien.resume, tout)) return null
+        val actuel = analyser(ancien.emetteur, ancien.resume, ancien.source, ancien.ts)
+            .firstOrNull { it.type == ancien.type }
+        val n = normaliser(tout)
+        return when {
+            actuel != null -> actuel.copy(id = ancien.id, traite = ancien.traite, domaine = ancien.domaine, auto = ancien.auto,
+                dateRdv = actuel.dateRdv ?: ancien.dateRdv, lieu = actuel.lieu.ifBlank { ancien.lieu },
+                statut = if (actuel.dateRdv == null && ancien.dateRdv != null) ancien.statut else actuel.statut)
+            PROMOTION_RE.containsMatchIn(n) -> null
+            ancien.type == FACTURE && (RELEVE_COMPTEUR_RE.containsMatchIn(n) || CONSO_INFO.containsMatchIn(n)) -> null
+            (ancien.type == FACTURE || ancien.type == DEVIS) && FINANCE_HORS_FACTURE_RE.containsMatchIn(n) -> null
+            ancien.type == RDV && PUB_RDV_RE.containsMatchIn(n) -> null
+            // Rendez-vous sans date dont l'aperçu ne parle même pas de rendez-vous : document transféré, signature avec
+            // adresse… retiré.
+            ancien.type == RDV && ancien.dateRdv == null && ancien.resume.length >= 120 && !RDV_RE.containsMatchIn(normaliser(ancien.resume.take(120))) -> null
+            // Le résumé stocké est tronqué à 220 caractères : on conserve donc tout élément qu'on ne peut pas
+            // revalider avec certitude, plutôt que de supprimer un vrai rendez-vous dont le détail est plus loin.
+            else -> ancien
+        }
+    }
+
     @Synchronized
     fun revaliderHistorique(c: Context): Int {
         val anciens = liste(c)
-        val valides = anciens.mapNotNull { ancien ->
-            val actuel = analyser(ancien.emetteur, ancien.resume, ancien.source, ancien.ts)
-                .firstOrNull { it.type == ancien.type }
-            when {
-                actuel != null -> actuel.copy(id = ancien.id, traite = ancien.traite, domaine = ancien.domaine, auto = ancien.auto,
-                    dateRdv = actuel.dateRdv ?: ancien.dateRdv, lieu = actuel.lieu.ifBlank { ancien.lieu },
-                    statut = if (actuel.dateRdv == null && ancien.dateRdv != null) ancien.statut else actuel.statut)
-                PROMOTION_RE.containsMatchIn(normaliser(ancien.emetteur + " " + ancien.resume)) -> null
-                ancien.type == FACTURE && RELEVE_COMPTEUR_RE.containsMatchIn(normaliser(ancien.emetteur + " " + ancien.resume)) -> null
-                (ancien.type == FACTURE || ancien.type == DEVIS) && FINANCE_HORS_FACTURE_RE.containsMatchIn(normaliser(ancien.emetteur + " " + ancien.resume)) -> null
-                ancien.type == RDV && PUB_RDV_RE.containsMatchIn(normaliser(ancien.emetteur + " " + ancien.resume)) -> null
-                // Le résumé stocké est tronqué à 220 caractères : on conserve donc tout élément qu'on ne peut pas
-                // revalider avec certitude, plutôt que de supprimer un vrai rendez-vous dont le détail est plus loin.
-                else -> ancien
-            }
-        }
-        val retires = anciens.size - valides.size
-        if (retires > 0 || valides.size != anciens.size) sauver(c, valides)
+        val valides = anciens.mapNotNull { revalider(it) }
+        // Doublons (même message vu par la notification puis par l'import) fusionnés.
+        val uniques = mutableListOf<Element>()
+        valides.sortedBy { it.ts }.forEach { e -> val j = uniques.indexOfFirst { memeMessage(it, e) }; if (j >= 0) uniques[j] = fusion(uniques[j], e) else uniques += e }
+        val retires = anciens.size - uniques.size
+        if (retires > 0 || uniques != anciens.sortedBy { it.ts }) sauver(c, uniques)
         return retires
     }
 
@@ -317,11 +497,31 @@ object Courrier {
 
     // ------------------------------------------------------------------ arrivée d'un message
 
+    /** Au plus autant de lectures par l'IA à chaque rattrapage (les suivantes se font au fil des messages). */
+    private const val IA_PAR_IMPORT = 15
+
+    /**
+     * Éléments relus par l'IA sur leur message complet : les nouveaux, puis ceux déjà enregistrés mais jamais vérifiés
+     * (à traiter) dont le message vient d'être relu. Renvoie le nombre de NOUVEAUX finalement gardés.
+     */
+    private suspend fun verifierNouveaux(app: JarvisApp, nouveaux: List<Element>, trouves: List<Element>, textes: Map<String, Pair<String, String>>): Int {
+        val idsNouveaux = nouveaux.map { it.id }.toSet()
+        val stock = liste(app).associateBy { it.id }
+        val anciens = trouves.mapNotNull { stock[it.id] }.filter { it.id !in idsNouveaux && !it.verifie && !it.traite }.distinctBy { it.id }
+        var gardes = nouveaux.size
+        (nouveaux.sortedByDescending { it.ts } + anciens.sortedByDescending { it.ts }).take(IA_PAR_IMPORT).forEach { e ->
+            val (titre, texte) = textes[e.id] ?: return@forEach
+            if (runCatching { CourrierIA.verifier(app, e, titre, texte) }.getOrDefault(e) == null && e.id in idsNouveaux) gardes--
+        }
+        return gardes
+    }
+
     /** Rattrapage des SMS déjà présents dans la boîte de réception. Seuls les messages reconnus sont conservés. */
-    fun importerSmsRecents(app: JarvisApp): Int {
+    suspend fun importerSmsRecents(app: JarvisApp): Int {
         if (!app.store.courrierAnalyse.value || app.checkSelfPermission(android.Manifest.permission.READ_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return 0
         val depuis = System.currentTimeMillis() - 90L * 86_400_000L
         val trouves = mutableListOf<Element>()
+        val textes = HashMap<String, Pair<String, String>>()
         runCatching {
             app.contentResolver.query(android.provider.Telephony.Sms.Inbox.CONTENT_URI,
                 arrayOf(android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.BODY, android.provider.Telephony.Sms.DATE),
@@ -335,16 +535,18 @@ object Courrier {
                     val adresse = if (ia >= 0) cursor.getString(ia).orEmpty() else "SMS"
                     val date = if (idate >= 0) cursor.getLong(idate) else System.currentTimeMillis()
                     if (corps.isNotBlank()) trouves += analyser(adresse, corps, "SMS", date).map { e ->
+                        textes[e.id] = adresse to corps
                         domaine(e, "", runCatching { app.societe.data }.getOrNull(), regles(app)).let { (d, auto) -> e.copy(domaine = d, auto = auto) }
                     }
                 }
             }
         }
-        return enregistrer(app, trouves).size
+        return verifierNouveaux(app, enregistrer(app, trouves), trouves, textes)
     }
     /**
      * Rattrapage des courriels des comptes actifs (Gmail ou IMAP), même si Jarvis n'a pas vu leur notification.
-     * On analyse le sujet et le corps, pas seulement l'aperçu tronqué de la notification.
+     * On analyse le sujet et le corps, pas seulement l'aperçu tronqué de la notification ; les mails classés
+     * « Promotions » / « Réseaux sociaux » par Gmail sont ignorés.
      */
     suspend fun importerMailsRecents(app: JarvisApp, nombre: Int = 200): Int {
         if (!app.store.courrierAnalyse.value) return 0
@@ -352,27 +554,30 @@ object Courrier {
             val mails = app.mail.fetchRecent(nombre, unreadOnly = false, full = true, everywhere = true)
             val data = runCatching { app.societe.data }.getOrNull()
             val regles = regles(app)
+            val textes = HashMap<String, Pair<String, String>>()
             val trouves = mails.flatMap { mail ->
                 val emetteur = mail.from.ifBlank { mail.fromAddr }.ifBlank { "Expéditeur inconnu" }
                 val contenu = listOf(mail.subject, mail.body.ifBlank { mail.snippet }).filter { it.isNotBlank() }.joinToString("\n")
-                analyser(emetteur, contenu, "Mail", mail.date?.time ?: 0L).map { e ->
+                analyser(emetteur, contenu, "Mail", mail.date?.time ?: 0L, labels = mail.labels).map { e ->
+                    textes[e.id] = emetteur to contenu
                     domaine(e, mail.account, data, regles).let { (d, auto) -> e.copy(domaine = d, auto = auto) }
                 }
             }
-            enregistrer(app, trouves).size
+            verifierNouveaux(app, enregistrer(app, trouves), trouves, textes)
         }
     }
 
-    /** SMS / notification de mail reçus : analysés en arrière-plan, sans jamais bloquer. */
-    fun recu(app: JarvisApp, source: String, titre: String, texte: String, ts: Long = System.currentTimeMillis(), compte: String = "") {
+    /** SMS / notification de mail reçus : analysés en arrière-plan, sans jamais bloquer ; relus par l'IA avant d'avertir. */
+    fun recu(app: JarvisApp, source: String, titre: String, texte: String, ts: Long = System.currentTimeMillis(), compte: String = "", labels: List<String> = emptyList()) {
         if (!app.store.courrierAnalyse.value) return
         Thread {
             runCatching {
                 val data = runCatching { app.societe.data }.getOrNull()
                 val regles = regles(app)
-                val trouves = analyser(titre, texte, source, ts).map { e -> domaine(e, compte, data, regles).let { (d, a) -> e.copy(domaine = d, auto = a) } }
+                val trouves = analyser(titre, texte, source, ts, labels = labels).map { e -> domaine(e, compte, data, regles).let { (d, a) -> e.copy(domaine = d, auto = a) } }
                 val nouveaux = enregistrer(app, trouves)
-                if (app.store.courrierNotif.value) nouveaux.forEach { notifier(app, it) }
+                val finaux = nouveaux.mapNotNull { e -> kotlinx.coroutines.runBlocking { runCatching { CourrierIA.verifier(app, e, titre, texte) }.getOrDefault(e) } }
+                if (app.store.courrierNotif.value) finaux.forEach { notifier(app, it) }
             }
         }.apply { isDaemon = true }.start()
     }
@@ -386,7 +591,7 @@ object Courrier {
                 val deja = runCatching { app.calendar.hasPermission() && e.dateRdv != null &&
                     app.calendar.events(Instant.ofEpochMilli(e.dateRdv).atZone(ZoneId.systemDefault()).toLocalDate(), 1).any { kotlin.math.abs(it.begin - e.dateRdv) < 31 * 60_000L } }.getOrDefault(false)
                 if (deja) return
-                "📅 Rendez-vous détecté : ${quand(e.dateRdv)}" to "Ajoute à mon agenda : rendez-vous « ${e.emetteur} » ${quand(e.dateRdv)}" + (if (e.lieu.isNotBlank()) " à ${e.lieu}" else "") + " (détecté dans un message reçu)."
+                "📅 ${e.objet.ifBlank { "Rendez-vous" }} : ${quand(e.dateRdv)}" to "Ajoute à mon agenda : rendez-vous « ${e.objet.ifBlank { e.emetteur }} » ${quand(e.dateRdv)}" + (if (e.lieu.isNotBlank()) " à ${e.lieu}" else "") + " (détecté dans un message reçu)."
             }
             FACTURE -> "🧾 Facture ${e.emetteur} : ${euros(e.montant)}${if (e.echeance.isNotBlank()) " avant le ${dateFr(e.echeance)}" else ""}${etiquette(e)}" to
                 if (e.domaine == PERSO) null else "Ajoute une note de frais de ${euros(e.montant)} chez ${e.emetteur}${if (e.echeance.isNotBlank()) " (facture à payer avant le ${dateFr(e.echeance)})" else ""}."
@@ -398,7 +603,7 @@ object Courrier {
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         val code = 7900 + (e.id.hashCode() and 0x3FF)
         val b = NotificationCompat.Builder(app, CANAL).setSmallIcon(android.R.drawable.ic_dialog_email).setContentTitle(titre)
-            .setContentText(e.resume.take(120)).setStyle(NotificationCompat.BigTextStyle().bigText(e.resume)).setAutoCancel(true)
+            .setContentText(e.synthese.ifBlank { e.resume }.take(120)).setStyle(NotificationCompat.BigTextStyle().bigText(e.synthese.ifBlank { e.resume })).setAutoCancel(true)
             .setContentIntent(PendingIntent.getActivity(app, code, Intent(app, fr.dd.jarvis.MainActivity::class.java).putExtra("terrain", "courrier").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), flags))
         // À classer : Société ou Perso directement depuis la notification.
         if (e.domaine.isBlank()) listOf(SOCIETE to "🏢 Société", PERSO to "🏠 Perso").forEachIndexed { i, (d, libelle) ->
@@ -428,7 +633,7 @@ object Courrier {
             if (e.lien.isNotBlank()) " · [suivi](${e.lien})" else ""
         FACTURE -> "🧾 ${e.emetteur} — ${euros(e.montant)}${if (e.echeance.isNotBlank()) " · avant le ${dateFr(e.echeance)}" else ""}"
         DEVIS -> "📄 Devis ${e.emetteur} — ${euros(e.montant)}"
-        RDV -> "📅 ${titreRdv(e)} — ${quand(e.dateRdv)}${if (e.lieu.isNotBlank()) " · ${e.lieu}" else ""}"
+        RDV -> "📅 ${e.objet.ifBlank { titreRdv(e) }} — ${quand(e.dateRdv)}${if (e.lieu.isNotBlank()) " · ${e.lieu}" else ""}"
         else -> e.resume
     }
 
@@ -471,8 +676,8 @@ object Courrier {
 
     fun argsEvenement(e: Element, debutChoisi: java.time.LocalDateTime? = null): JSONObject {
         val debut = debutChoisi ?: Instant.ofEpochMilli(e.dateRdv ?: System.currentTimeMillis()).atZone(ZoneId.systemDefault()).toLocalDateTime()
-        return JSONObject().put("title", titreRdv(e)).put("start", debut.toString().take(16)).put("end", debut.plusHours(1).toString().take(16))
-            .put("location", e.lieu).put("description", "Détecté par JARVIS dans un message reçu :\n${e.resume}")
+        return JSONObject().put("title", e.objet.ifBlank { titreRdv(e) }).put("start", debut.toString().take(16)).put("end", debut.plusHours(1).toString().take(16))
+            .put("location", e.lieu).put("description", "Détecté par JARVIS dans un message reçu (${e.emetteur}) :\n${e.synthese.ifBlank { e.resume }}")
     }
 }
 

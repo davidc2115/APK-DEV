@@ -1613,6 +1613,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.courrierAnalyse.set(!store.courrierAnalyse.value) }) {
                     Text((if (store.courrierAnalyse.value) "✅ " else "⬜ ") + "Analyser les SMS et mails reçus", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
                 }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.courrierIA.set(!store.courrierIA.value) }) {
+                    Text((if (store.courrierIA.value) "✅ " else "⬜ ") + "Vérifier chaque message repéré avec l'IA (message complet : écarte les publicités, trouve la vraie date, le montant, l'échéance, le numéro de suivi)", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+                }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { store.courrierNotif.set(!store.courrierNotif.value) }) {
                     Text((if (store.courrierNotif.value) "✅ " else "⬜ ") + "Notification pour un rendez-vous ou une facture détectés (avec « Ajouter à l'agenda » / « En note de frais »)", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
                 }

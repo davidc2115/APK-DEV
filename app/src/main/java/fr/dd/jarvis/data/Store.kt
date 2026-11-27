@@ -699,6 +699,8 @@ class Store(context: Context) {
     /** Analyse des SMS et mails reçus (colis, factures, devis, rendez-vous) et notification des rendez-vous / factures. */
     val courrierAnalyse = BPref("courrierAnalyse", true)
     val courrierNotif = BPref("courrierNotif", true)
+    /** Lecture du message complet par l'IA pour confirmer (vrai rendez-vous, vraie facture…) et préciser dates et montants. */
+    val courrierIA = BPref("courrierIA", true)
     /** Anniversaires (contacts + ceux dits à JARVIS) : notification le jour même et la veille. */
     val anniversairesOn = BPref("anniversairesOn", true)
     /** Mode rendez-vous : Ne pas déranger pendant les rendez-vous de l'agenda (clients ou tous), retour du son à la fin. */

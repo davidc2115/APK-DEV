@@ -207,7 +207,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val nouveaux = unread.filter { key(it) !in seen }
         if (nouveaux.isEmpty()) return
         // Contenu complet des nouveaux mails : colis, factures, devis, rendez-vous (la notification n'en montre qu'un extrait).
-        nouveaux.forEach { m -> runCatching { fr.dd.jarvis.device.Courrier.recu(app, "Mail ${m.account}".trim(), m.from.ifBlank { m.fromAddr }, m.subject + "\n" + m.body.ifBlank { m.snippet }.take(3000), m.date?.time ?: System.currentTimeMillis(), compte = m.account) } }
+        nouveaux.forEach { m -> runCatching { fr.dd.jarvis.device.Courrier.recu(app, "Mail ${m.account}".trim(), m.from.ifBlank { m.fromAddr }, m.subject + "\n" + m.body.ifBlank { m.snippet }.take(3000), m.date?.time ?: System.currentTimeMillis(), compte = m.account, labels = m.labels) } }
         val classes = MailTri.classer(app, nouveaux)
         val urgents = classes.filter { it.cat == "Urgent" || it.prio == 1 }
         journal.append("- 📧 ${nouveaux.size} nouveau(x) mail(s) : " + classes.groupBy { it.cat }.entries.joinToString(", ") { "${it.value.size} ${it.key}" } + "\n")
