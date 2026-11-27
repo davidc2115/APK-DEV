@@ -1078,13 +1078,11 @@ class ToolBox(
             val toujours = a.optString("toujours").trim().lowercase() in setOf("true", "oui", "1", "vrai")
             if (appli.isBlank()) appli = app.store.appPrefs["navigation"].orEmpty()
             val dispo = app.phone.navApps().keys
-            val enVoiture = app.enVoiture || fr.dd.jarvis.car.NavigationVoiture.contexte != null
-            if (appli.isBlank() && dispo.size > 1 && !enVoiture) {
-                ToolResult("CHOIX_REQUIS : demande à l'utilisateur avec quelle application lancer l'itinéraire (${dispo.joinToString(" ou ")}) et s'il veut la garder toujours ou une seule fois, puis rappelle naviguer avec appli et toujours.")
-            } else {
-                // En voiture, privilégier Waze s'il est disponible ; sur le téléphone, prendre l'unique GPS installé.
-                if (appli.isBlank()) appli = if (enVoiture) dispo.firstOrNull { it.contains("Waze") } ?: dispo.firstOrNull().orEmpty()
-                    else dispo.firstOrNull().orEmpty()
+            run {
+                // JAMAIS de question avant un itinéraire (avant : « avec quelle application ? », que la voiture lisait
+                // comme une demande de confirmation, et un « oui » ne lançait rien). L'appli choisie dans JARVIS, sinon
+                // le GPS par défaut du téléphone, sinon Waze (en voiture), sinon la seule installée.
+                if (appli.isBlank()) appli = app.phone.navParDefaut() ?: dispo.firstOrNull { it.contains("Waze") } ?: dispo.firstOrNull().orEmpty()
                 if (toujours && a.optString("appli").isNotBlank()) app.store.setAppPref("navigation", a.optString("appli").trim())
                 var destination = a.optString("destination").trim()
                 if (dispo.isEmpty()) ToolResult("❌ Aucune application de navigation compatible (Waze ou Google Maps) n'est installée.")

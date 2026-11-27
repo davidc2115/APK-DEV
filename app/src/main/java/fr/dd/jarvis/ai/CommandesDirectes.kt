@@ -417,6 +417,31 @@ object CommandesDirectes {
         return Intention("naviguer", JSONObject().put("destination", lieu).put("appli", appli), "🧭 Navigation…")
     }
 
+    private val OUI_NAV = Regex("^(?:oui|ouais|ouai|ok|okay|d accord|vas y|go|lance|lance le|lance la|lance le guidage|lance la navigation|lance l itineraire|" +
+        "c est parti|confirme|je confirme|bien sur|evidemment|allez|allez y|exactement|parfait|carrement|tout a fait|affirmatif|volontiers)" +
+        "(?: (?:oui|vas y|lance|stp|s il te plait|merci|jarvis|c est parti|lance le|lance la|go))*$")
+    private val Q_NAV = Regex("\\b(itineraire|navigation|guidage|gps|trajet|waze|google maps|emmene|emmener|y aller|t y conduire|te guider)\\b")
+
+    /**
+     * « Oui » juste après une question de JARVIS (ou d'Hermès) qui proposait un itinéraire (« Veux-tu que je lance
+     * l'itinéraire vers Dijon ? ») : la destination à lancer, sans repasser par l'IA — avant, le « oui » ne lançait rien.
+     * [history] se termine par la demande en cours.
+     */
+    fun suiteNavigation(texte: String, history: List<ChatMsg>): String? {
+        if (!OUI_NAV.matches(serre(plat(texte)).trim())) return null
+        val avant = history.dropLast(1)
+        val question = avant.lastOrNull()?.takeIf { !it.fromUser }?.text ?: return null
+        val nq = serre(plat(question))
+        if (!question.contains('?') || !Q_NAV.containsMatchIn(nq)) return null
+        // La destination dans la question : « … vers Dijon ? », « … jusqu'au 21 rue de Massingy ? »
+        Regex("(?i)(?:vers|jusqu['’ ]?(?:à|a|au|aux)|direction|pour aller (?:à|a|au|aux)|pour te rendre (?:à|a|au)|à destination de)\\s+(?:l['’]\\s*adresse\\s+)?(.+?)\\s*(?:\\?| avec | sur | dans | maintenant| tout de suite)")
+            .find(question)?.groupValues?.get(1)?.trim()?.trim('«', '»', '"', '*', ' ', '.')
+            ?.takeIf { it.length >= 2 && !Regex("(?i)^(ta|la|ton|le) (destination|adresse)$").matches(it) }?.let { return it }
+        // Sinon : la demande d'itinéraire qui a amené la question.
+        val demande = avant.dropLast(1).lastOrNull { it.fromUser }?.text ?: return null
+        return intention(demande)?.takeIf { it.outil == "naviguer" }?.args?.optString("destination")?.takeIf { it.isNotBlank() }
+    }
+
     private val R_BIBLIO = motif("(?:(?:me|m|nous) )?(?:joue|jouer|mets|met|mettre|lance|lancer|ecoute|ecouter|passe|passer|fais moi ecouter|demarre|demarrer|lis|lire)(?: moi| nous)? " +
         "(.+?)(?: (?:sur|dans|avec) (?:youtube music|yt music|ytm|morphe|youtube))?")
 

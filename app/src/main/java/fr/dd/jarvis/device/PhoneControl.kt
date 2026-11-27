@@ -582,6 +582,13 @@ class PhoneControl(private val ctx: Context) {
     /** Applications de navigation installées (nom affiché → paquet). */
     fun navApps(): Map<String, String> = linkedMapOf("Waze" to "com.waze", "Google Maps" to "com.google.android.apps.maps").filterValues { installed(it) }
 
+    /** GPS choisi par défaut sur le téléphone pour les adresses (« geo: »), ou null si Android demande à chaque fois. */
+    fun navParDefaut(): String? = runCatching {
+        val ri = ctx.packageManager.resolveActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=Dijon")), android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+        val pkg = ri?.activityInfo?.packageName
+        navApps().entries.firstOrNull { it.value == pkg }?.key
+    }.getOrNull()
+
     /** Applications de musique RÉELLEMENT installées (interrogation du téléphone, jamais devinées) : tout paquet qui déclare
      * un service de navigation média (Spotify, YouTube Music, Deezer, VLC, lecteurs constructeur…), nom affiché → paquet. */
     fun musicApps(): Map<String, String> {

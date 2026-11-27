@@ -141,3 +141,24 @@ class CommandesDirectesTest {
         assertNull(i("Hermès, quelle heure est-il ?"))
     }
 }
+
+/** « Oui » à une proposition d'itinéraire : le guidage part (sans repasser par l'IA). */
+class SuiteNavigationTest {
+    private fun h(vararg m: Pair<Boolean, String>) = m.map { ChatMsg(it.first, it.second) }
+
+    @Test fun ouiLanceLItineraire() {
+        assertEquals("Dijon", CommandesDirectes.suiteNavigation("oui", h(true to "emmène-moi à Dijon", false to "Veux-tu que je lance l'itinéraire vers Dijon ?", true to "oui")))
+        assertEquals("21 rue de Massingy, Vitteaux", CommandesDirectes.suiteNavigation("Oui vas-y",
+            h(false to "Je lance la navigation vers 21 rue de Massingy, Vitteaux avec Waze ?", true to "Oui vas-y")))
+        // Destination absente de la question : la demande qui l'a amenée.
+        assertEquals("Beaune", CommandesDirectes.suiteNavigation("ok lance",
+            h(true to "lance la navigation vers Beaune", false to "Tu confirmes le lancement du guidage ?", true to "ok lance")))
+    }
+
+    @Test fun pasUneQuestionDItineraire() {
+        assertNull(CommandesDirectes.suiteNavigation("oui", h(false to "Veux-tu que je crée la facture ?", true to "oui")))
+        assertNull(CommandesDirectes.suiteNavigation("oui", h(false to "L'itinéraire vers Dijon est lancé.", true to "oui")))   // pas une question
+        assertNull(CommandesDirectes.suiteNavigation("non", h(false to "Veux-tu que je lance l'itinéraire vers Dijon ?", true to "non")))
+        assertNull(CommandesDirectes.suiteNavigation("oui", h(true to "oui")))
+    }
+}

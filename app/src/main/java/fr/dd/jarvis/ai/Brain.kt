@@ -315,6 +315,38 @@ class Brain(
         // cerveau répond en appliquant la consigne.
         // Action d'une routine : son compte rendu tient en une ligne (✅ / ❌) — une consigne de réponse (« donne aussi… »)
         // n'a rien à y ajouter, et l'envoyer au cerveau la rendait lente et approximative (poêles, téléphone).
+        // Itinéraire : TOUJOURS lancé directement, sans question ni passage par l'IA — même quand une consigne demande
+        // d'ajouter une information à la réponse (avant, la demande partait alors à l'IA, qui demandait « veux-tu que je
+        // lance l'itinéraire ? », et le « oui » ne lançait rien). « Oui » à une telle question : le guidage part.
+        if (!pourHermes) {
+            CommandesDirectes.suiteNavigation(texteUser, history)?.let { dest ->
+                onStatus("🧭 Navigation…")
+                return reflexe(tools.execute("naviguer", JSONObject().put("destination", dest)).text)
+            }
+            CommandesDirectes.intention(texteUser)?.takeIf { it.outil == "naviguer" }?.let { i ->
+                onStatus(i.statut)
+                executerDirecte(i)?.let { return reflexe(it) }
+            }
+            // « Lance la navigation vers mon (1er) rendez-vous / chez Dupont / de 14 h » : le bon rendez-vous de l'agenda,
+            // puis le guidage vers son adresse — jamais seulement le planning.
+            if (NavigationRdv.demande(texteUser) != null) {
+                onStatus("🧭 Rendez-vous…")
+                runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { NavigationRdv.preparer(app, texteUser) } }.getOrNull()?.let { (cible, echec) ->
+                    if (echec != null) return reflexe(echec)
+                    val (adresse, libelle) = cible ?: return@let
+                    val n = fr.dd.jarvis.societe.core.normaliser(texteUser)
+                    val appli = when { Regex("\\bwaze\\b").containsMatchIn(n) -> "Waze"; Regex("\\b(google maps|maps)\\b").containsMatchIn(n) -> "Google Maps"; else -> "" }
+                    onStatus("🧭 Navigation…")
+                    val r = tools.execute("naviguer", JSONObject().put("destination", adresse).put("appli", appli)).text
+                    if (r.startsWith("CHOIX_REQUIS")) {
+                        val dispo = runCatching { app.phone.navApps().keys.toList() }.getOrDefault(emptyList())
+                        return reflexe("🧭 $libelle\n📍 $adresse\nAvec quelle application lancer le guidage : ${dispo.joinToString(" ou ")} ? " +
+                            "(dis par exemple « toujours avec ${dispo.firstOrNull() ?: "Waze"} » pour la garder)")
+                    }
+                    return reflexe("🧭 $libelle\n📍 $adresse\n$r")
+                }
+            }
+        }
         val consigneAjout = !pourHermes && !reflexesSeuls && consigneExigeUneSuite(texteUser)
         if (consigneAjout) fr.dd.jarvis.voice.JournalVoix.noter("brain", "consigne d'ajout : réflexes directs ignorés")
         if (!pourHermes && !consigneAjout) {
@@ -516,25 +548,6 @@ class Brain(
             if (!pourSociete && PoeleDirect.lecture(texteUser) != null) {
                 onStatus("🔥 Poêle…")
                 runCatching { PoeleDirect.executerLecture(app, texteUser) }.getOrNull()?.let { return reflexeMaison(it, lecture = true) }
-            }
-            // « Lance la navigation vers mon (1er) rendez-vous / chez Dupont / de 14 h » : le bon rendez-vous de l'agenda,
-            // puis le guidage vers son adresse — jamais seulement le planning.
-            if (NavigationRdv.demande(texteUser) != null) {
-                onStatus("🧭 Rendez-vous…")
-                runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { NavigationRdv.preparer(app, texteUser) } }.getOrNull()?.let { (cible, echec) ->
-                    if (echec != null) return reflexe(echec)
-                    val (adresse, libelle) = cible ?: return@let
-                    val n = fr.dd.jarvis.societe.core.normaliser(texteUser)
-                    val appli = when { Regex("\\bwaze\\b").containsMatchIn(n) -> "Waze"; Regex("\\b(google maps|maps)\\b").containsMatchIn(n) -> "Google Maps"; else -> "" }
-                    onStatus("🧭 Navigation…")
-                    val r = tools.execute("naviguer", JSONObject().put("destination", adresse).put("appli", appli)).text
-                    if (r.startsWith("CHOIX_REQUIS")) {
-                        val dispo = runCatching { app.phone.navApps().keys.toList() }.getOrDefault(emptyList())
-                        return reflexe("🧭 $libelle\n📍 $adresse\nAvec quelle application lancer le guidage : ${dispo.joinToString(" ou ")} ? " +
-                            "(dis par exemple « toujours avec ${dispo.firstOrNull() ?: "Waze"} » pour la garder)")
-                    }
-                    return reflexe("🧭 $libelle\n📍 $adresse\n$r")
-                }
             }
             // Réseau mobile (signal, 4G / 5G, APN, SMS qui n'arrivent pas, appels qui coupent) : diagnostic et réglages.
             (fr.dd.jarvis.device.ReseauMobile.intention(texteUser) ?: "optimiser".takeIf {
