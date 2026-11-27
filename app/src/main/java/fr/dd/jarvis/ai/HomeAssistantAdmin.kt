@@ -90,7 +90,7 @@ class HomeAssistantAdmin(
         override fun close() { ws?.close(1000, "fin") }
     }
 
-    private fun <T> ws(f: (Ws) -> T): T = Ws(base, jeton).ouvrir().use(f)
+    private suspend fun <T> ws(f: suspend (Ws) -> T): T = Ws(base, jeton).ouvrir().use { f(it) }
 
     private fun liste(v: Any?): List<JSONObject> = (v as? JSONArray)?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
 
@@ -207,7 +207,7 @@ class HomeAssistantAdmin(
             }
             "entite_modifier" -> ws { w ->
                 val id = a.optString("entity_id").trim().ifBlank { throw IllegalArgumentException("entity_id requis.") }
-                if (!ok("MODIFIER l'entité $id (nom, identifiant, pièce, icône, activation ou visibilité) ?")) return "Annulé."
+                if (!ok("MODIFIER l'entité $id (nom, identifiant, pièce, icône, activation ou visibilité) ?")) return@ws "Annulé."
                 val m = JSONObject().put("entity_id", id)
                 a.optString("nom").takeIf { it.isNotBlank() }?.let { m.put("name", it) }
                 a.optString("nouvel_id").takeIf { it.isNotBlank() }?.let { m.put("new_entity_id", it) }
