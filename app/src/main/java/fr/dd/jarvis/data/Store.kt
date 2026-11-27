@@ -437,6 +437,7 @@ class Store(context: Context) {
     val rapportsDetailV3 = BPref("rapportsDetailV3", false)
     /** Une fois : actions nettoyées (fiche recopiée retirée), séries « 352 V et 377-358 V » lues. */
     val rapportsPropresV4 = BPref("rapportsPropresV4", false)
+    val rapportsCategoriesV5 = BPref("rapportsCategoriesV5", false)
     /** Rapports d'intervention régénérés une fois avec la nouvelle présentation (emojis, tableau des séries). */
     val rapportsV3 = BPref("rapportsV3", false)
     /** Modes automatiques (voiture, chantier, nuit, maison) et mode forcé (redevient automatique au bout de 4 h). */

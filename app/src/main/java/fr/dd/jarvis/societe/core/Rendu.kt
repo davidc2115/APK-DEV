@@ -326,15 +326,9 @@ object Rendu {
         val sourceMesures = i.mesures.ifBlank { i.onduleurs }
         val mes = MesuresSeries.analyser(sourceMesures)
         // Séries par onduleur : dans les mesures, sinon dans les actions (l'IA y range parfois « Onduleur 5 : 5 séries de 517 V »).
-        val (parOnduleur, seriesDansActions) = groupesSeries(i)
-        // Actions : la liste détaillée écrite par l'utilisateur (dans la dictée) si l'IA l'a résumée ; sans les blocs
-        // d'onduleurs dès que leurs séries sont présentées en tableaux.
-        val tableaux = parOnduleur.any { it.second.series.isNotEmpty() } || seriesDansActions
-        fun net(l: List<String>) = if (tableaux) OnduleursIntervention.horsBlocs(l) else l
-        val saisies = net(ActionsDetaillees.nettoyer(ListesRapport.elements(i.actions), i.description, i.categorie, i.statut))
-        val detail = net(ActionsDetaillees.extraire(i.mesures))
-        val lignesActions = if (detail.size >= 3 && detail.size > saisies.size) detail else saisies
-        val actions = lignesActions.map { brute ->
+        val (parOnduleur, _) = groupesSeries(i)
+        val lignesAct = lignesActions(i)
+        val actions = lignesAct.map { brute ->
             // Rubrique (« Coffret AC : ») en gras, ses contrôles dessous.
             val action = if (ActionsDetaillees.rubrique(brute)) "**" + brute.trimEnd().removeSuffix(":").trim() + "**" else brute
             val n = Fidelite.normaliser(action)
@@ -368,8 +362,10 @@ object Rendu {
         }
         // Autres mesures : seulement ce qui ressemble à une mesure (jamais les demandes faites au chat).
         // Avec des tableaux par onduleur : les mesures écrites HORS des blocs d'onduleurs (compteur Linky, isolement…).
+        // Les rubriques seules (« Compteur Linky : ») et les relevés déjà dans les actions n'y sont pas répétés.
         val autres = (if (parOnduleur.isEmpty()) mes.autres.filter { MesuresSeries.ressembleMesure(it) }
             else OnduleursIntervention.horsBlocs(ListesRapport.elements(sourceMesures)).filter { MesuresSeries.ressembleMesure(it) })
+            .filterNot { m -> ActionsDetaillees.rubrique(m) || lignesAct.any { a -> CategoriesActions.doublon(m, a) } }
             .map { mapOf("mesure" to it) }
         fun image(chemin: String) = "![[${i.id}-${chemin.substringAfterLast('/')}]]"
         val avant = i.photosAvant.map { mapOf("photo" to image(it)) }
@@ -401,6 +397,66 @@ object Rendu {
         )
         return Ctx(vars, mapOf("actions" to actions, "pieces" to pieces, "series" to series, "series_paires" to paires, "groupes_onduleurs" to groupesOnduleurs,
             "mesures" to autres, "photos_avant" to avant, "photos_apres" to apres))
+    }
+
+    /**
+     * Actions à présenter : la liste détaillée écrite par l'utilisateur (dans la dictée) si l'IA l'a résumée ; sans les
+     * blocs d'onduleurs dès que leurs séries sont présentées en tableaux.
+     */
+    private fun lignesActions(i: Intervention): List<String> {
+        val (parOnduleur, seriesDansActions) = groupesSeries(i)
+        val tableaux = parOnduleur.any { it.second.series.isNotEmpty() } || seriesDansActions
+        fun net(l: List<String>) = if (tableaux) OnduleursIntervention.horsBlocs(l) else l
+        val saisies = net(ActionsDetaillees.nettoyer(ListesRapport.elements(i.actions), i.description, i.categorie, i.statut))
+        val detail = net(ActionsDetaillees.extraire(i.mesures))
+        return if (detail.size >= 3 && detail.size > saisies.size) detail else saisies
+    }
+
+    private const val REPERE_ACTIONS = "§§ACTIONS_JARVIS§§"
+
+    /** Lignes de liste (« - … ») d'un morceau de rapport, sans leur puce ni leur pictogramme. */
+    private fun lignesListe(texte: String): List<String> = texte.lines().map { it.trim() }.filter { it.startsWith("- ") || it.startsWith("* ") }
+        .map { it.drop(2).trim() }
+
+    /**
+     * Remplace la liste des actions (repérée par [REPERE_ACTIONS]) par une section par catégorie. Une catégorie dont le
+     * modèle a déjà la section (« 🧹 Nettoyage », « Compteur Linky et relevés ») y est ajoutée, sans les doublons.
+     */
+    private fun actionsEnCategories(rendu: String, categories: List<CategoriesActions.Categorie>): String {
+        val ligneRepere = rendu.lines().firstOrNull { REPERE_ACTIONS in it } ?: return rendu
+        val avant = rendu.substringBefore(ligneRepere)
+        val apres = rendu.substringAfter(ligneRepere)
+        val ailleurs = lignesListe(avant + apres)
+        val titres = Regex("""(?m)^#{1,3} .+$""").findAll(apres).map { it.value }.toList()
+        val ajouts = linkedMapOf<String, MutableList<String>>()   // titre de section existante → lignes à y ajouter
+        val bloc = StringBuilder()
+        val generales = categories.firstOrNull { it.cle.isEmpty() }?.lignes.orEmpty()
+        generales.forEach { bloc.append("- ").append(CategoriesActions.emojiLigne(it)).append(' ').append(it).append('\n') }
+        for (c in categories.filter { it.cle.isNotEmpty() }) {
+            val existante = titres.firstOrNull { CategoriesActions.titreCorrespond(c.cle, it) }
+            // Une ligne déjà écrite ailleurs dans le rapport (relevé du compteur, nettoyage du modèle) n'est pas répétée.
+            val lignes = c.lignes.filterNot { l -> ailleurs.any { e -> CategoriesActions.doublon(l, e) } && (existante != null || CategoriesActions.racines(l).size >= 2) }
+            if (lignes.isEmpty()) continue
+            if (existante != null) { ajouts.getOrPut(existante) { mutableListOf() } += lignes; continue }
+            bloc.append("\n## ").append(c.emoji).append(' ').append(c.titre).append('\n')
+            lignes.forEach { bloc.append("- ").append(CategoriesActions.emojiLigne(it)).append(' ').append(it).append('\n') }
+        }
+        // Sans action hors catégorie, le titre « Actions réalisées » resterait vide : il disparaît.
+        var debut = avant
+        if (generales.isEmpty()) {
+            val l = avant.trimEnd().lines()
+            if (l.lastOrNull()?.trimStart()?.startsWith("#") == true) debut = l.dropLast(1).joinToString("\n") + "\n"
+        }
+        var suite = apres
+        for ((titre, lignes) in ajouts) {
+            val i0 = suite.indexOf(titre).takeIf { it >= 0 } ?: continue
+            val corps = i0 + titre.length
+            val fin = Regex("""(?m)^(#{1,3} |---)""").find(suite, corps)?.range?.first ?: suite.length
+            val section = suite.substring(corps, fin).trimEnd()
+            val texte = lignes.joinToString("") { "\n- " + CategoriesActions.emojiLigne(it) + " " + it }
+            suite = suite.substring(0, corps) + section + texte + "\n\n" + suite.substring(fin)
+        }
+        return (debut.trimEnd() + "\n\n" + bloc.toString().trim() + "\n\n" + suite.trimStart('\n')).replace(Regex("\n{3,}"), "\n\n")
     }
 
     /**
@@ -448,8 +504,13 @@ object Rendu {
 
     fun rendreIntervention(d: SocieteData, c: Client, s: Site, i: Intervention): String {
         val contexte = interventionCtx(d, c, s, i)
-        var rendu = Templates.render(d.modele("rapport"), contexte)
+        // Rubriques dictées (« Coffret AC : », « Coffret Enedis : »…) : une vraie section par catégorie, pas une ligne en gras.
+        val categories = CategoriesActions.classer(lignesActions(i))
+        val enCategories = CategoriesActions.structure(categories)
+        val ctx = if (!enCategories) contexte else Ctx(contexte.vars + ("a_actions" to "oui"), contexte.lists + ("actions" to listOf(mapOf("action" to REPERE_ACTIONS, "emoji" to ""))))
+        var rendu = Templates.render(d.modele("rapport"), ctx)
             .replace(Regex("\n{3,}"), "\n\n").trim()
+        if (enCategories) rendu = actionsEnCategories(rendu, categories).trim()
         // Un modèle personnalisé peut omettre le tableau des onduleurs, les tableaux de séries ou ne les mettre qu'en
         // fin de document : le rendu final les garantit, à leur place.
         val fiches = OnduleursIntervention.fiches(i.onduleurs.ifBlank { s.onduleur })

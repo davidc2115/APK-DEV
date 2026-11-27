@@ -340,7 +340,8 @@ class RapportInterventionTest {
         assertTrue(rapport, rapport.contains("📝 Poignée ESS : OK"))
         // Les séries ne sont plus répétées dans les actions ; les autres actions restent.
         assertTrue(rapport, !rapport.contains("5 séries de 517 V") && !rapport.contains("Séries : 352"))
-        assertTrue(rapport, rapport.contains("Nettoyage des ventilateurs : OK") && rapport.contains("Coffret AC : resserrage OK"))
+        assertTrue(rapport, rapport.contains("Nettoyage des ventilateurs : OK") && rapport.contains("## ⚡ Coffret AC\n- ✅ Resserrage OK"))
+        assertTrue(rapport, rapport.contains("## 🧹 Nettoyage et maintenance\n- ✅ Nettoyage des ventilateurs : OK\n- ✅ Remise en service : OK"))
     }
 
     @Test fun listeDeTensionsParSerie() {
@@ -424,10 +425,15 @@ Compteur Linky:
         // Observation de chaque onduleur, telle qu'écrite (y compris « Poignée ESS: OK Onduleur 2: » sur une ligne).
         assertEquals(r, 6, Regex("📝 Poignée ESS: OK").findAll(r).count())
         // Détail complet des actions, sans les séries déjà en tableaux.
-        listOf("**Coffret AC**", "**Coffret Enedis**", "Disjoncteur: OK", "**Vérification de terre**", "Pas de défaut de terre",
-            "Nettoyage des ventilateurs : OK", "Remise en service: OK", "**Compteur Linky**", "Production: 1021418", "Non conso: 0")
-            .forEach { assertTrue("« $it » absent", r.contains(it)) }
-        val actions = r.substring(r.indexOf("## 🛠️"), r.indexOf("## ⚡ Mesures par onduleur"))
+        // Chaque rubrique dictée est une vraie section (pas une ligne en gras dans « Actions réalisées »).
+        listOf("## ⚡ Coffret AC", "## ⚡ Coffret Enedis", "Disjoncteur: OK", "## 🌍 Vérification de terre", "Pas de défaut de terre",
+            "## 🧹 Nettoyage et maintenance", "Nettoyage des ventilateurs : OK", "Remise en service: OK", "Production: 1021418", "Non conso: 0")
+            .forEach { assertTrue("« $it » absent :\n$r", r.contains(it)) }
+        assertTrue(r, !r.contains("**Coffret AC**") && !r.contains("## 🛠️ Actions réalisées"))
+        assertTrue(r, r.contains("## 📟 Compteur Linky\n- 📏 Production: 1021418\n- 📏 Non conso: 0"))
+        // Les relevés déjà dans leur catégorie ne sont pas répétés dans « Autres mesures ».
+        assertTrue(r, !r.contains("Autres mesures"))
+        val actions = r.substring(r.indexOf("## ⚡ Coffret AC"), r.indexOf("## ⚡ Mesures par onduleur"))
         assertTrue(actions, !actions.contains("séries") && !actions.contains("Séries") && !actions.contains("Onduleur 1"))
         assertTrue(actions, !actions.contains("Contrôle des coffrets (AC et Enedis)"))
     }
@@ -489,5 +495,86 @@ Compteur Linky:
             Non conso: 0
         """.trimIndent()
         assertEquals(15, ActionsDetaillees.extraire("Modifie l'intervention de lapree :\n$liste").size)
+    }
+
+    /** Modèle de Dd du 27/11 : sections « Nettoyage » et « Compteur Linky et relevés » à part, actions avec ✅. */
+    private val MODELE_SECTIONS = """
+# 📋 {{titre}}
+
+**{{client}}** — {{installation}}
+{{#description}}
+## 📝 Description
+{{description}}
+{{/description}}
+{{#a_actions}}
+## 🛠️ Actions réalisées
+{{#actions}}- ✅ {{action}}
+{{/actions}}{{/a_actions}}
+## 🧹 Nettoyage
+- 💨 Nettoyage des ventilateurs
+- 🧽 Nettoyage de l'installation
+{{#a_mesures}}
+## ⚡ Compteur Linky et relevés
+{{#mesures}}- 📐 {{mesure}}
+{{/mesures}}{{/a_mesures}}
+{{#prochaine_maintenance}}
+## 📆 Prochaine maintenance
+{{prochaine_maintenance}}
+{{/prochaine_maintenance}}
+""".trim()
+
+    /** Capture du 27/11 (16 h) : « coffret AC » / « coffret enedis » en gras au lieu de vraies catégories. */
+    @Test fun rubriquesDicteesEnVraiesSections() {
+        val site = Site("s2", "Installation 2", kwc = 100.0)
+        val client = Client("c", "lapree", sites = listOf(site))
+        val actions = """
+            coffret AC :
+            serrage OK
+            disjoncteur OK
+            parafoudre OK
+            coffret enedis :
+            test du disjoncteur OK
+            serrage OK
+            nettoyage et ventilation OK
+            nettoyage de l'installation OK
+            remise en service OK
+            installation pleinement fonctionnel et aucun problème
+        """.trimIndent()
+        val inter = Intervention("i", "2026-11-27", "maintenance", "Maintenance préventive", actions = actions,
+            mesures = "Compteur Linky — Production : 1021418, Non conso : 0", prochaineMaintenance = "2027-11-27")
+        val r = Rendu.rendreIntervention(SocieteData(clients = listOf(client), modeles = mapOf("rapport" to MODELE_SECTIONS)), client, site, inter)
+        assertTrue(r, r.contains("## ⚡ Coffret AC\n- ✅ Serrage OK\n- ✅ Disjoncteur OK\n- ✅ Parafoudre OK"))
+        assertTrue(r, r.contains("## ⚡ Coffret Enedis\n- ✅ Test du disjoncteur OK\n- ✅ Serrage OK\n"))
+        assertTrue(r, r.contains("## ▶️ Remise en service\n- ✅ Remise en service OK\n- ✅ Installation pleinement fonctionnel et aucun problème"))
+        // Plus de rubrique en gras ni de titre « Actions réalisées » vide ; le nettoyage reste dans SA section, sans doublon.
+        assertTrue(r, !r.contains("**") || !r.contains("**coffret"))
+        assertTrue(r, !r.contains("Actions réalisées"))
+        assertEquals(r, 1, Regex("## 🧹 Nettoyage").findAll(r).count())
+        assertTrue(r, !r.contains("Nettoyage et ventilation OK") && !r.contains("Nettoyage de l'installation OK"))
+        assertTrue(r, r.indexOf("## ⚡ Coffret AC") < r.indexOf("## 🧹 Nettoyage") && r.contains("📐 Compteur Linky — Production : 1021418"))
+        // L'ordre du modèle est conservé.
+        assertTrue(r, r.indexOf("## 📝 Description") < r.indexOf("## ⚡ Coffret AC") && r.indexOf("## ⚡ Compteur Linky") < r.indexOf("## 📆 Prochaine maintenance"))
+    }
+
+    @Test fun nettoyageDicteAjouteASaSectionExistante() {
+        val site = Site("s2", "Installation 2")
+        val client = Client("c", "lapree", sites = listOf(site))
+        val inter = Intervention("i", "2026-11-27", "maintenance", "Maintenance", actions = "Coffret AC :\nSerrage : OK\nNettoyage des onduleurs : OK")
+        val r = Rendu.rendreIntervention(SocieteData(clients = listOf(client), modeles = mapOf("rapport" to MODELE_SECTIONS)), client, site, inter)
+        val nettoyage = r.substringAfter("## 🧹 Nettoyage").substringBefore("##")
+        assertTrue(r, nettoyage.contains("- ✅ Nettoyage des onduleurs : OK") && nettoyage.contains("Nettoyage des ventilateurs"))
+        assertTrue(r, r.contains("## ⚡ Coffret AC\n- ✅ Serrage : OK"))
+    }
+
+    @Test fun categoriesDesActions() {
+        val c = CategoriesActions.classer(listOf("Contrôle visuel OK", "Coffret DC : sectionneur OK, fusibles OK", "Vérification de terre:", "Pas de défaut de terre",
+            "Onduleur 3 :", "Nettoyage des ventilateurs OK", "Compteur Linky - Production : 1021418"))
+        assertEquals(listOf("", "coffret dc", "terre", "onduleur 3", "linky"), c.map { it.cle })
+        assertEquals(listOf("Sectionneur OK", "Fusibles OK"), c[1].lignes)
+        assertEquals(listOf("Nettoyage des ventilateurs OK"), c[3].lignes)   // sous « Onduleur 3 », reste à l'onduleur
+        assertEquals("⚠️", CategoriesActions.emojiLigne("Parafoudre HS à remplacer"))
+        assertEquals("✅", CategoriesActions.emojiLigne("Pas de défaut de terre"))
+        // Un résumé couvrant plusieurs domaines n'est pas rangé dans l'un d'eux.
+        assertEquals(listOf(""), CategoriesActions.classer(listOf("Contrôle des coffrets, vérification de la terre, nettoyage des ventilateurs, remise en service")).map { it.cle })
     }
 }
