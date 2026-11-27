@@ -73,7 +73,7 @@ class VeilleWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val texte = listOfNotNull(
             listOfNotNull(s.kwc.takeIf { it > 0 }?.let { "$it kWc" }, s.onduleur.takeIf { it.isNotBlank() }?.let { "onduleur $it" }).joinToString(" · ").ifBlank { null },
             derniere?.let { "Dernière intervention : ${it.date} (${it.categorie}) — ${it.description.take(90)}" } ?: "Première intervention sur cette installation.",
-            s.interventions.mapNotNull { it.prochaineMaintenance.ifBlank { null } }.maxOrNull()?.let { "Prochaine maintenance prévue : $it" },
+            s.interventions.mapNotNull { fr.dd.jarvis.societe.core.ProchaineMaintenance.effective(it.date, it.prochaineMaintenance).ifBlank { null } }.maxOrNull()?.let { "Prochaine maintenance prévue : $it" },
             c.tel.takeIf { it.isNotBlank() }?.let { "📞 $it" },
         ).joinToString("\n")
         if (Build.VERSION.SDK_INT >= 26) ctx.getSystemService(NotificationManager::class.java)

@@ -137,7 +137,8 @@ class SocieteService(
             id = b.id, date = b.date, categorie = b.categorie.ifBlank { "maintenance" },
             description = b.description.trim(), diagnostic = b.diagnostic, actions = b.actions,
             pieces = b.pieces, mesures = b.mesures, statut = b.statut,
-            prochaineMaintenance = b.prochaineMaintenance, notes = b.notes, onduleurs = b.onduleurs
+            prochaineMaintenance = fr.dd.jarvis.societe.core.ProchaineMaintenance.planifier(b.date, b.prochaineMaintenance, b.categorie.ifBlank { "maintenance" }),
+            notes = b.notes, onduleurs = b.onduleurs
         )
         val existante = site.interventions.firstOrNull { it.id == b.id }
         if (existante == null) {

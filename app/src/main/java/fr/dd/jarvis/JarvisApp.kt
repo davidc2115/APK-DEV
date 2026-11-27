@@ -160,6 +160,11 @@ class JarvisApp : Application() {
             runCatching { societe.regenererRapportsAvecPhotos() }
             store.rapportsPhotosV2.set(true)
         }.start()
+        // Une fois : les rapports des 6 derniers mois reprennent la nouvelle présentation des onduleurs et des séries.
+        if (!store.rapportsOnduleursV1.value) Thread {
+            runCatching { societe.regenererRapports(jours = 180) }
+            store.rapportsOnduleursV1.set(true)
+        }.start()
         societe.data.modeles["planning"]?.let { fr.dd.jarvis.ai.Prompts.planningFormat = it }
         // Contrôle des devis/factures présents dans Obsidian : une recherche par document, au plus toutes les 6 h.
         if (System.currentTimeMillis() - (store.docsVerifiesLe.value.toLongOrNull() ?: 0L) > 6 * 3_600_000L) Thread {

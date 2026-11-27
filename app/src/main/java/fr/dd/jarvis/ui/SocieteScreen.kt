@@ -235,7 +235,7 @@ private fun InterventionsTab(app: JarvisApp) {
                         if (item.actions.isNotBlank()) { HudDivider(); Text("TRAVAUX RÉALISÉS", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text(item.actions, color = HudText, fontSize = 12.sp) }
                         if (item.pieces.isNotBlank()) { HudDivider(); Text("PIÈCES / RÉFÉRENCES", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text(item.pieces, color = HudText, fontSize = 12.sp) }
                         if (item.mesures.isNotBlank()) { HudDivider(); Text("MESURES RELEVÉES", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text(item.mesures, color = HudText, fontSize = 12.sp) }
-                        if (item.prochaineMaintenance.isNotBlank()) Text("PROCHAINE MAINTENANCE · " + dateFr(item.prochaineMaintenance), color = Color(0xFFFFC56E), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        if (item.prochaineEffective().isNotBlank()) Text("PROCHAINE MAINTENANCE · " + dateFr(item.prochaineEffective()), color = Color(0xFFFFC56E), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         if (item.notes.isNotBlank()) Text("Notes : " + item.notes, color = HudDim, fontSize = 11.sp)
                         if (item.photosAvant.isNotEmpty() || item.photosApres.isNotEmpty()) { HudDivider(); Text("REPORTAGE PHOTO", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold); PhotosIntervention(item.photosAvant, "Avant · " + item.photosAvant.size); PhotosIntervention(item.photosApres, "Après · " + item.photosApres.size) }
                         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -243,7 +243,7 @@ private fun InterventionsTab(app: JarvisApp) {
                                 editTarget = Triple(client, site, item); date = item.date; categorie = item.categorie
                                 description = item.description; diagnostic = item.diagnostic; actions = item.actions
                                 pieces = item.pieces; mesures = item.mesures; statut = item.statut
-                                prochaine = item.prochaineMaintenance; notes = item.notes
+                                prochaine = item.prochaineEffective(); notes = item.notes
                             }
                             Action("📷 Avant") { photoTarget = InterventionPhotoTarget(client.id, site.id, item.id, true); picker.launch(arrayOf("image/*")) }
                             Action("📷 Après") { photoTarget = InterventionPhotoTarget(client.id, site.id, item.id, false); picker.launch(arrayOf("image/*")) }

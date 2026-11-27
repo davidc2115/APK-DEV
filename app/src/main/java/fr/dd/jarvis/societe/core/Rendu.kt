@@ -355,10 +355,11 @@ object Rendu {
             mapOf("serie_a" to "Série ${p[0].numero}", "valeur_a" to p[0].valeur,
                 "serie_b" to (p.getOrNull(1)?.let { "Série ${it.numero}" } ?: ""), "valeur_b" to (p.getOrNull(1)?.valeur ?: ""))
         }
+        val fiches = OnduleursIntervention.fiches(i.onduleurs.ifBlank { s.onduleur })
         val groupesOnduleurs = parOnduleur.map { (nom, resultat) ->
             val tableau = tableauSeriesCompact(resultat.series)
             val observations = resultat.autres.joinToString("\n") { "- 🌦️ ${it}" }
-            mapOf("onduleur" to nom, "details" to listOf(tableau, observations).filter { it.isNotBlank() }.joinToString("\n\n"))
+            mapOf("onduleur" to titreOnduleur(nom, fiches), "details" to listOf(tableau, observations).filter { it.isNotBlank() }.joinToString("\n\n"))
         }
         val autres = (if (parOnduleur.isEmpty()) mes.autres else emptyList()).map { mapOf("mesure" to it) }
         fun image(chemin: String) = "![[${i.id}-${chemin.substringAfterLast('/')}]]"
@@ -375,12 +376,17 @@ object Rendu {
             "client" to c.nom, "installation" to s.nom.ifBlank { "Installation" },
             "date" to dateFr(i.date), "categorie" to i.categorie.replaceFirstChar { it.uppercase() },
             "statut" to statutIntervention(i.statut),
-            "adresse" to s.adresse, "onduleur" to onduleursAffiches, "onduleurs" to onduleursAffiches.lines().filter { it.isNotBlank() }.joinToString("\n") { "- 🔌 " + it.trim().trimEnd('|') }, "kwc" to (if (s.kwc > 0) nombre(s.kwc) else ""),
+            // « onduleur » tient sur UNE ligne (il est souvent placé dans une case du tableau d'en-tête : plusieurs lignes
+            // y cassaient le tableau) ; « onduleurs » est le tableau aligné de tous les onduleurs.
+            "adresse" to s.adresse,
+            "onduleur" to (if (fiches.size > 1) OnduleursIntervention.resume(fiches) else onduleursAffiches.lines().joinToString(" · ") { it.trim().trimEnd('|') }.trim()),
+            "onduleurs" to (OnduleursIntervention.tableau(fiches).ifBlank { onduleursAffiches.lines().filter { it.isNotBlank() }.joinToString("\n") { "- 🔌 " + it.trim().trimEnd('|') } }),
+            "kwc" to (if (s.kwc > 0) nombre(s.kwc) else ""),
             "description" to Fidelite.sansMeta(i.description), "diagnostic" to Fidelite.sansMeta(i.diagnostic),
             "a_actions" to drapeau(actions), "a_pieces" to drapeau(pieces), "a_series" to drapeau(series), "a_groupes_onduleurs" to drapeau(groupesOnduleurs),
             "a_mesures" to drapeau(autres), "a_photos_avant" to drapeau(avant), "a_photos_apres" to drapeau(apres),
             "nb_series" to (if (series.isEmpty()) "" else series.size.toString()),
-            "prochaine_maintenance" to (if (i.prochaineMaintenance.isBlank()) "" else dateFr(i.prochaineMaintenance)),
+            "prochaine_maintenance" to i.prochaineEffective().let { if (it.isBlank()) "" else dateFr(it) },
             "notes" to Fidelite.sansMeta(i.notes),
             "signature" to (if (i.signature.isBlank()) "" else image(i.signature))
         )
@@ -388,27 +394,60 @@ object Rendu {
             "mesures" to autres, "photos_avant" to avant, "photos_apres" to apres))
     }
 
+    /** « Onduleur 2 » → « Onduleur 2 · SMA » quand sa marque / son modèle sont connus. */
+    private fun titreOnduleur(nom: String, fiches: List<OnduleursIntervention.Fiche>): String {
+        val n = Regex("""\d+""").find(nom)?.value?.toIntOrNull() ?: return nom
+        val f = fiches.firstOrNull { it.numero == n }?.court?.takeIf { it.isNotBlank() && it.length <= 60 } ?: return nom
+        return "$nom · $f"
+    }
+
+    /** Section ajoutée par le rendu : avant la prochaine maintenance / photos / notes / signature / pied de page. */
+    private fun insererAvantFin(rendu: String, bloc: String): String {
+        val fin = Regex("""(?m)^#{1,3} .*(Prochaine maintenance|Photos|Notes|Signature)""").find(rendu)?.range?.first
+            ?: rendu.lastIndexOf("\n---").takeIf { it > 0 }?.plus(1)
+            ?: return rendu.trimEnd() + "\n\n" + bloc.trim() + "\n"
+        return rendu.substring(0, fin).trimEnd() + "\n\n" + bloc.trim() + "\n\n" + rendu.substring(fin)
+    }
+
+    /** Section ajoutée juste après l'en-tête (avant la première rubrique « ## »). */
+    private fun insererApresEntete(rendu: String, bloc: String): String {
+        val debut = Regex("""(?m)^## """).find(rendu)?.range?.first ?: return rendu.trimEnd() + "\n\n" + bloc.trim() + "\n"
+        return rendu.substring(0, debut).trimEnd() + "\n\n" + bloc.trim() + "\n\n" + rendu.substring(debut)
+    }
+
     fun rendreIntervention(d: SocieteData, c: Client, s: Site, i: Intervention): String {
         val contexte = interventionCtx(d, c, s, i)
-        val rendu = Templates.render(d.modele("rapport"), contexte)
+        var rendu = Templates.render(d.modele("rapport"), contexte)
             .replace(Regex("\n{3,}"), "\n\n").trim()
-        // Un modèle personnalisé peut omettre les tableaux imbriqués ou n’afficher que des plages.
-        // Vérifier le Markdown final et ajouter une ligne explicite pour chaque série manquante.
+        // Un modèle personnalisé peut omettre le tableau des onduleurs, les tableaux de séries ou ne les mettre qu'en
+        // fin de document : le rendu final les garantit, à leur place.
+        val fiches = OnduleursIntervention.fiches(i.onduleurs.ifBlank { s.onduleur })
+        if (fiches.size > 1) {
+            val tableau = OnduleursIntervention.tableau(fiches)
+            if (!rendu.contains(tableau.lineSequence().first())) rendu = insererApresEntete(rendu, "## ⚡ Onduleurs installés\n$tableau")
+        }
         val source = i.mesures.ifBlank { i.onduleurs }
         val groupes = MesuresSeries.parOnduleur(source)
         val manquants = groupes.filter { (_, resultat) ->
             resultat.series.any { serie -> !rendu.contains("| ${serie.numero} | ${serie.valeur} |") }
         }
-        if (manquants.isEmpty()) return rendu + "\n"
-        val complement = buildString {
-            append("\n\n## 📊 Détail individuel des séries par onduleur\n")
-            manquants.forEach { (nom, resultat) ->
-                append("\n### 🔌 ").append(nom).append('\n')
-                append(tableauSeriesCompact(resultat.series)).append('\n')
-                resultat.autres.forEach { observation -> append("- 🌦️ ").append(observation).append('\n') }
+        if (manquants.isNotEmpty()) {
+            val complement = buildString {
+                append("## ⚡ Mesures par onduleur\n")
+                manquants.forEach { (nom, resultat) ->
+                    append("\n### 🔌 ").append(titreOnduleur(nom, fiches)).append('\n')
+                    append(tableauSeriesCompact(resultat.series)).append('\n')
+                    resultat.autres.forEach { observation -> append("- 🌦️ ").append(observation).append('\n') }
+                }
             }
+            rendu = insererAvantFin(rendu, complement)
+        } else if (groupes.isEmpty()) {
+            // Séries sans blocs « Onduleur N » : un seul tableau, s'il manque au modèle.
+            val series = MesuresSeries.analyser(source).series
+            if (series.isNotEmpty() && series.any { !rendu.contains("| ${it.numero} | ${it.valeur} |") && !rendu.contains("| Série ${it.numero} | ${it.valeur} |") })
+                rendu = insererAvantFin(rendu, "## 📊 Mesures par série\n" + tableauSeriesCompact(series))
         }
-        return (rendu + complement).trim() + "\n"
+        return rendu.trim() + "\n"
     }
 
     /** Données fictives pour valider un modèle réécrit (balises autorisées + rendu sans erreur). */

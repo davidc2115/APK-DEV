@@ -20,6 +20,7 @@ import fr.dd.jarvis.service.JarvisNotificationListener
 import fr.dd.jarvis.societe.Geo
 import fr.dd.jarvis.societe.core.euro
 import fr.dd.jarvis.societe.core.dateFr
+import fr.dd.jarvis.societe.core.prochaineEffective
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -244,11 +245,11 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         val maintenance = d.clients.flatMap { client ->
             client.sites.flatMap { site ->
                 site.interventions.mapNotNull { intervention ->
-                    val date = runCatching { LocalDate.parse(intervention.prochaineMaintenance) }.getOrNull()
+                    val date = runCatching { LocalDate.parse(intervention.prochaineEffective()) }.getOrNull()
                     if (date != null && !date.isAfter(LocalDate.now().plusDays(14))) Triple(client, site, intervention) else null
                 }
             }
-        }.sortedBy { it.third.prochaineMaintenance }
+        }.sortedBy { it.third.prochaineEffective() }
         if (retard.isEmpty() && bientotEchues.isEmpty() && devis.isEmpty() && maintenance.isEmpty()) {
             store.agentLastFact.set(today)
             return
@@ -269,7 +270,7 @@ class AgentsWorker(private val ctx: Context, params: WorkerParameters) : Corouti
         if (maintenance.isNotEmpty()) {
             sb.append("Maintenances photovoltaïques à prévoir (retard ou dans les 14 jours) :\n")
             maintenance.forEach { (client, site, intervention) ->
-                val date = intervention.prochaineMaintenance
+                val date = intervention.prochaineEffective()
                 val retardTxt = if (date < today) " — EN RETARD" else ""
                 sb.append("• " + client.nom + " · " + site.nom + " — " + dateFr(date) + retardTxt + "\n")
             }

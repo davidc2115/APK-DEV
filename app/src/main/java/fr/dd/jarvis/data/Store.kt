@@ -429,6 +429,8 @@ class Store(context: Context) {
     /** Voix Android choisie (nom de la voix du moteur Google) ; vide = la meilleure voix française disponible. */
     val voixAndroid = SPref("voixAndroid", "")
     val rapportsPhotosV2 = BPref("rapportsPhotosV2", false)
+    /** Une fois : rapports récents régénérés (onduleurs en tableau, séries par onduleur, prochaine maintenance à un an). */
+    val rapportsOnduleursV1 = BPref("rapportsOnduleursV1", false)
     /** Rapports d'intervention régénérés une fois avec la nouvelle présentation (emojis, tableau des séries). */
     val rapportsV3 = BPref("rapportsV3", false)
     /** Modes automatiques (voiture, chantier, nuit, maison) et mode forcé (redevient automatique au bout de 4 h). */

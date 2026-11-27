@@ -159,8 +159,9 @@ class RapportInterventionTest {
         )
         val rapport = Rendu.rendreIntervention(SocieteData(clients = listOf(client)), client, site, intervention)
 
-        assertTrue(rapport.contains("Onduleur 1 : Sungrow 125cx"))
-        assertTrue(rapport.contains("Onduleur 2 : Sungrow 125cx"))
+        // Onduleurs en tableau aligné.
+        assertTrue(rapport, rapport.contains("| Onduleur 1 | Sungrow 125cx |"))
+        assertTrue(rapport, rapport.contains("| Onduleur 2 | Sungrow 125cx |"))
         assertTrue(rapport.contains("Mesures par onduleur"))
         assertTrue(rapport.contains("775 V"))
         assertTrue(rapport.contains("805 V"))
@@ -220,4 +221,91 @@ class RapportInterventionTest {
         for (n in 5..18) assertTrue("Série $n de l'onduleur 2 absente", rapport.contains("| $n | ≈ 770 V |"))
     }
 
+
+    /** Modèle personnalisé du type de celui de Dd : un onduleur dans le tableau d'en-tête, pas de section de séries. */
+    private val MODELE_PERSO = """
+# 📋 {{titre}}
+
+**{{client}}** — {{installation}}
+
+| | |
+|---|---|
+| 📅 **Date** | {{date}} |
+| 📌 **Statut** | {{statut}} |
+{{#adresse}}| 📍 **Adresse** | {{adresse}} |
+{{/adresse}}| ⚡ **Onduleur** | {{onduleur}} |
+{{#kwc}}| ☀️ **Puissance** | {{kwc}} kWc |
+{{/kwc}}
+{{#description}}
+## 📝 Description
+{{description}}
+{{/description}}
+{{#a_actions}}
+## 🛠️ Actions réalisées
+{{#actions}}- {{emoji}} {{action}}
+{{/actions}}{{/a_actions}}
+{{#prochaine_maintenance}}
+## 📅 Prochaine maintenance
+{{prochaine_maintenance}}
+{{/prochaine_maintenance}}
+{{#notes}}
+## 🗒️ Notes
+{{notes}}
+{{/notes}}
+""".trim()
+
+    @Test fun sixOnduleursEnTableauAligneSansCasserLEntete() {
+        val site = Site("s-lapree", "Installation 2", adresse = "Mairey, 21320 Mont-Saint-Jean", kwc = 100.0)
+        val client = Client("c-lapree", "lapree", sites = listOf(site))
+        val onduleurs = (1..6).joinToString("\n") { "Onduleur $it : marque SMA" }
+        val dictee = """
+            onduleur 1 : 4 séries à 750 volts
+            onduleur numéro deux : quatre séries à environ 760 volts
+            onduleur 3 : 3 séries à 745 V
+        """.trimIndent()
+        val inter = Intervention("i-lapree", "2026-11-27", "maintenance", "Maintenance préventive", actions = "coffret AC\nresserrage ok",
+            mesures = dictee, onduleurs = onduleurs, prochaineMaintenance = "2026-11-27", notes = "RAS")
+        val rapport = Rendu.rendreIntervention(SocieteData(clients = listOf(client), modeles = mapOf("rapport" to MODELE_PERSO)), client, site, inter)
+
+        // L'en-tête reste un tableau : la case Onduleur tient sur une ligne, plus de lignes orphelines.
+        assertTrue(rapport, rapport.contains("| ⚡ **Onduleur** | 6 onduleurs · SMA |"))
+        assertTrue(rapport, rapport.lines().none { it.trim() == "Onduleur 2 : marque SMA" })
+        // Tableau aligné des onduleurs, juste après l'en-tête.
+        assertTrue(rapport, rapport.contains("| Onduleur | Marque |"))
+        for (n in 1..6) assertTrue(rapport, rapport.contains("| Onduleur $n | SMA |"))
+        assertTrue(rapport.indexOf("Onduleurs installés") < rapport.indexOf("## 📝 Description"))
+        // Séries classées par onduleur (même dictées « numéro deux » / « quatre »), avant la prochaine maintenance.
+        assertTrue(rapport, rapport.contains("### 🔌 Onduleur 1 · SMA"))
+        assertTrue(rapport, rapport.contains("### 🔌 Onduleur 2 · SMA"))
+        assertTrue(rapport, rapport.contains("| 1 | 750 V |") && rapport.contains("| 4 | ≈ 760 V |") && rapport.contains("| 3 | 745 V |"))
+        assertTrue(rapport.indexOf("Mesures par onduleur") < rapport.indexOf("Prochaine maintenance"))
+        // Prochaine maintenance : un an après, pas le jour même.
+        assertTrue(rapport, rapport.contains("27/11/2027"))
+    }
+
+    @Test fun onduleursAvecMarqueModeleEtNumeroDeSerie() {
+        val f = OnduleursIntervention.fiches("Onduleur 1 : marque SMA modèle STP 25000TL n° de série 1900123456\nOnduleur 2 : Huawei SUN2000-100KTL")
+        assertEquals(2, f.size)
+        assertEquals("SMA", f[0].marque); assertEquals("STP 25000TL", f[0].modele); assertEquals("1900123456", f[0].serie)
+        val t = OnduleursIntervention.tableau(f)
+        assertTrue(t, t.startsWith("| Onduleur | Marque | Modèle | N° de série |"))
+        assertTrue(t, t.contains("| Onduleur 1 | SMA | STP 25000TL | 1900123456 |"))
+        assertTrue(t, t.contains("| Onduleur 2 | Huawei SUN2000-100KTL |  |  |"))
+    }
+
+    @Test fun onduleurUnPeuChaudNEstPasUnNumero() {
+        assertTrue(OnduleursIntervention.blocs("l'onduleur un peu chaud au toucher").isEmpty())
+        assertEquals(listOf(1), OnduleursIntervention.blocs("onduleur numéro un : 2 séries à 700 V").map { it.numero })
+        assertEquals(listOf(3), OnduleursIntervention.blocs("onduleur trois : 2 séries à 700 V").map { it.numero })
+    }
+
+    @Test fun prochaineMaintenanceUnAnApres() {
+        assertEquals("2027-11-27", ProchaineMaintenance.planifier("2026-11-27", "", "maintenance"))
+        assertEquals("2027-11-27", ProchaineMaintenance.planifier("2026-11-27", "2026-11-27", "maintenance"))
+        assertEquals("2027-03-15", ProchaineMaintenance.planifier("2026-11-27", "2027-03-15", "maintenance"))
+        assertEquals("", ProchaineMaintenance.planifier("2026-11-27", "", "panne"))
+        assertEquals("2027-11-27", ProchaineMaintenance.effective("2026-11-27", "2026-11-27"))
+        assertEquals("", ProchaineMaintenance.effective("2025-01-10", ""))
+        assertEquals("2027-06-01", ProchaineMaintenance.effective("2026-11-27", "2027-06-01"))
+    }
 }

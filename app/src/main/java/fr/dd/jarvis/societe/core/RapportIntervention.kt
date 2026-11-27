@@ -18,7 +18,25 @@ object ListesRapport {
  * « Onduleur 1 », « Onduleur 2 », etc. sont donc extraits directement de la source.
  */
 object OnduleursIntervention {
-    private val MARQUEUR = Regex("""(?i)\bonduleur\s*(?:n[°o]\s*)?(\d+)\s*[:=\-–]?\s*""")
+    private const val MOTS = "un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|onze|douze|treize|quatorze|quinze|seize|vingt"
+    /** « Onduleur 2 », « onduleur n° 2 », « onduleur numéro deux », « onduleur trois : … » (dictée vocale). */
+    private val MARQUEUR = Regex("""(?i)\bonduleur\s*(n[°o]\.?\s*|num[ée]ro\s*)?(\d+|(?:$MOTS)\b)\s*[:=\-–]?\s*""")
+    private val EN_LETTRES = mapOf("un" to 1, "une" to 1, "deux" to 2, "trois" to 3, "quatre" to 4, "cinq" to 5, "six" to 6, "sept" to 7,
+        "huit" to 8, "neuf" to 9, "dix" to 10, "onze" to 11, "douze" to 12, "treize" to 13, "quatorze" to 14, "quinze" to 15, "seize" to 16, "vingt" to 20)
+
+    /**
+     * Marqueurs d'onduleur d'une ligne, avec leur numéro. « un / une » en lettres n'en est un qu'après « numéro » ou
+     * suivi de « : » (« l'onduleur un peu chaud » n'est pas l'onduleur 1).
+     */
+    private fun marqueurs(ligne: String): List<Pair<MatchResult, Int>> = MARQUEUR.findAll(ligne).mapNotNull { m ->
+        val mot = m.groupValues[2].lowercase()
+        val n = mot.toIntOrNull() ?: EN_LETTRES[mot] ?: return@mapNotNull null
+        if ((mot == "un" || mot == "une") && m.groupValues[1].isBlank()) {
+            val apres = ligne.substring((m.groups[2]?.range?.last ?: m.range.last) + 1).trimStart()
+            if (apres.isNotEmpty() && apres[0] !in ":=-–,") return@mapNotNull null
+        }
+        m to n
+    }.toList()
     private val FIN_BLOC = Regex("""(?i)^\s*(?:[•*▪-]\s*)?(?:pdl\b|coffret\b|partie\b|remise en service\b|aucun probl[eè]me\b|nettoyage\b|contr[oô]le\b|diagnostic\b|conclusion\b)""")
 
     data class Bloc(val numero: Int, val nom: String, val contenu: String)
@@ -28,7 +46,7 @@ object OnduleursIntervention {
         val contenus = linkedMapOf<Int, StringBuilder>()
         var courant: Int? = null
         for (ligne in source.split(Regex("""[\r\n;]+"""))) {
-            val matches = MARQUEUR.findAll(ligne).toList()
+            val matches = marqueurs(ligne)
             if (matches.isEmpty()) {
                 if (FIN_BLOC.containsMatchIn(ligne)) {
                     courant = null
@@ -37,14 +55,14 @@ object OnduleursIntervention {
                 courant?.let { n -> contenus.getOrPut(n) { StringBuilder() }.append(" ").append(ligne.trim()) }
                 continue
             }
-            for ((index, match) in matches.withIndex()) {
-                val numero = match.groupValues[1].toIntOrNull() ?: continue
+            for ((index, mn) in matches.withIndex()) {
+                val (match, numero) = mn
                 if (numero !in 1..100) continue
                 // Si un résumé IA est suivi de la dictée source, le second bloc numéroté remplace le premier
                 // au lieu de doubler artificiellement le nombre de séries.
                 if (courant != numero && contenus.containsKey(numero)) contenus[numero] = StringBuilder()
                 courant = numero
-                val fin = matches.getOrNull(index + 1)?.range?.first ?: ligne.length
+                val fin = matches.getOrNull(index + 1)?.first?.range?.first ?: ligne.length
                 val detail = ligne.substring(match.range.last + 1, fin).trim().trim(',', ';', ':', '-', '–', '.', ' ')
                 val cible = contenus.getOrPut(numero) { StringBuilder() }
                 if (detail.isNotBlank()) {
@@ -67,11 +85,11 @@ object OnduleursIntervention {
     fun identites(source: String): List<String> {
         val resultat = sortedMapOf<Int, String>()
         for (ligne in source.split(Regex("""[\r\n;]+"""))) {
-            val matches = MARQUEUR.findAll(ligne).toList()
-            for ((index, match) in matches.withIndex()) {
-                val numero = match.groupValues[1].toIntOrNull() ?: continue
+            val matches = marqueurs(ligne)
+            for ((index, mn) in matches.withIndex()) {
+                val (match, numero) = mn
                 if (numero !in 1..100) continue
-                val fin = matches.getOrNull(index + 1)?.range?.first ?: ligne.length
+                val fin = matches.getOrNull(index + 1)?.first?.range?.first ?: ligne.length
                 val detail = ligne.substring(match.range.last + 1, fin).trim()
                     .trim(',', ';', ':', '-', '–', '.', ' ', '\'', '"', '[', ']')
                 val normalise = Fidelite.enChiffres(detail)
@@ -98,7 +116,91 @@ object OnduleursIntervention {
         }
         return lignes.values.joinToString("\n")
     }
+
+    /** Un onduleur de l'installation : numéro, marque, modèle et numéro de série (ce qui a été dit). */
+    data class Fiche(val numero: Int, val marque: String, val modele: String, val serie: String, val texte: String) {
+        /** Libellé court (« SMA », « SMA Tripower 25000 », ou le texte dit). */
+        val court: String get() = listOf(marque, modele).filter { it.isNotBlank() }.joinToString(" ").ifBlank { texte }
+    }
+
+    private const val FIN_CHAMP = """(?=\s*(?:[,;/]|\bmarque\b|\bmod[eè]le\b|\bn°|\bno\b|\bnum[ée]ro\b|\bs/?n\b|\bpuissance\b|$))"""
+    private val R_SERIE = Regex("""(?i)\b(?:n[°o]\s*(?:de\s*)?s[ée]rie|num[ée]ro\s+de\s+s[ée]rie|s/n|sn)\s*[:=]?\s*([A-Za-z0-9][A-Za-z0-9\-./]{2,})""")
+    private val R_MARQUE = Regex("""(?i)\bmarque\s*[:=]?\s*(.+?)$FIN_CHAMP""")
+    private val R_MODELE = Regex("""(?i)\bmod[eè]le\s*[:=]?\s*(.+?)$FIN_CHAMP""")
+
+    /**
+     * Onduleurs de l'installation, numérotés : « Onduleur 3 : marque SMA modèle STP 25000 n° de série 123 » → fiche.
+     * Une liste sans numéros (« SMA Tripower\nFronius Symo ») est numérotée dans l'ordre.
+     */
+    fun fiches(source: String): List<Fiche> {
+        val lignes = identites(source).ifEmpty {
+            source.replace(Regex("""[\[\]'"]"""), "").split(Regex("""[\r\n;]+""")).map { it.trim().trim(',', '-', '•', '|', ' ') }
+                .filter { it.isNotBlank() }.mapIndexed { i, l -> "Onduleur ${i + 1} : $l" }
+        }
+        return lignes.mapNotNull { l ->
+            val m = Regex("""(?i)^onduleur\s+(\d+)\s*:\s*(.*)$""").find(l.trim()) ?: return@mapNotNull null
+            val texte = m.groupValues[2].trim().trimEnd('|', ' ', '.')
+            val serie = R_SERIE.find(texte)?.groupValues?.get(1).orEmpty()
+            val marque = R_MARQUE.find(texte)?.groupValues?.get(1)?.trim().orEmpty()
+            val modele = R_MODELE.find(texte)?.groupValues?.get(1)?.trim().orEmpty()
+            Fiche(m.groupValues[1].toInt(), marque, modele, serie, texte)
+        }
+    }
+
+    private fun cellule(t: String) = t.replace('|', '/').replace(Regex("""\s+"""), " ").trim()
+
+    /** Tableau aligné des onduleurs (colonnes vides retirées). */
+    fun tableau(fiches: List<Fiche>): String {
+        if (fiches.isEmpty()) return ""
+        val detaille = fiches.any { it.marque.isNotBlank() || it.modele.isNotBlank() }
+        val colonnes = mutableListOf<Pair<String, (Fiche) -> String>>("Onduleur" to { f -> "Onduleur ${f.numero}" })
+        if (detaille) {
+            // Une ligne sans « marque » ni « modèle » garde son texte dans la colonne Marque.
+            if (fiches.any { it.marque.isNotBlank() || it.modele.isBlank() }) colonnes += "Marque" to { f -> f.marque.ifBlank { if (f.modele.isBlank()) f.texte else "" } }
+            if (fiches.any { it.modele.isNotBlank() }) colonnes += "Modèle" to { f -> f.modele }
+        } else colonnes += "Marque / modèle" to { f -> R_SERIE.replace(f.texte, "").trim(' ', ',', ';', '-').ifBlank { f.texte } }
+        if (fiches.any { it.serie.isNotBlank() }) colonnes += "N° de série" to { f -> f.serie }
+        return buildString {
+            append("| ").append(colonnes.joinToString(" | ") { it.first }).append(" |\n")
+            append("|").append(colonnes.joinToString("|") { "---" }).append("|\n")
+            fiches.forEach { f -> append("| ").append(colonnes.joinToString(" | ") { cellule(it.second(f)) }).append(" |\n") }
+        }.trimEnd()
+    }
+
+    /** Résumé sur une ligne (case d'un tableau) : « 6 onduleurs · SMA ». */
+    fun resume(fiches: List<Fiche>): String = when (fiches.size) {
+        0 -> ""
+        1 -> fiches[0].court
+        else -> "${fiches.size} onduleurs · " + fiches.map { it.court }.distinct().joinToString(", ")
+    }
 }
+
+/**
+ * Prochaine maintenance : jamais la date de l'intervention elle-même. Non dite pour une visite annuelle (maintenance,
+ * nettoyage, contrôle) → un an après ; dite mais égale ou antérieure à l'intervention (date du jour recopiée) → un an après.
+ */
+object ProchaineMaintenance {
+    private val ANNUELLES = setOf("maintenance", "maintenance preventive", "nettoyage", "controle", "entretien", "visite annuelle")
+
+    private fun jour(s: String) = runCatching { java.time.LocalDate.parse(s.trim()) }.getOrNull()
+
+    /** À l'enregistrement d'une intervention. */
+    fun planifier(date: String, prochaine: String, categorie: String): String {
+        val d = jour(date) ?: return prochaine
+        if (prochaine.isBlank()) return if (normaliser(categorie) in ANNUELLES) d.plusYears(1).toString() else ""
+        val p = jour(prochaine) ?: return prochaine
+        return if (p.isAfter(d)) p.toString() else d.plusYears(1).toString()
+    }
+
+    /** À l'affichage d'une fiche déjà enregistrée : corrige seulement une date égale ou antérieure à l'intervention. */
+    fun effective(date: String, prochaine: String): String {
+        val p = jour(prochaine) ?: return prochaine
+        val d = jour(date) ?: return prochaine
+        return if (p.isAfter(d)) prochaine else d.plusYears(1).toString()
+    }
+}
+
+fun Intervention.prochaineEffective(): String = ProchaineMaintenance.effective(date, prochaineMaintenance)
 
 /**
  * Mesures par série (string) : « 20 séries à environ 500 V » → Série 1 … Série 20 à ≈ 500 V ; « séries 1 à 10 : 480 V »,

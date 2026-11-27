@@ -1008,11 +1008,12 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         }
         val date = a.s("date").ifBlank { LocalDate.now().toString() }
         if (runCatching { LocalDate.parse(date) }.isFailure) return err("Date invalide : utilise yyyy-MM-dd.")
-        val prochaine = a.s("prochaine_maintenance")
-        if (prochaine.isNotBlank() && runCatching { LocalDate.parse(prochaine) }.isFailure) return err("Date de prochaine maintenance invalide : utilise yyyy-MM-dd.")
+        if (a.s("prochaine_maintenance").isNotBlank() && runCatching { LocalDate.parse(a.s("prochaine_maintenance")) }.isFailure) return err("Date de prochaine maintenance invalide : utilise yyyy-MM-dd.")
         val statut = a.s("statut").ifBlank { "terminee" }.lowercase()
         if (statut !in setOf("terminee", "a_suivre", "en_attente")) return err("Statut invalide : terminee, a_suivre ou en_attente.")
         val categorie = a.s("categorie").ifBlank { "maintenance" }
+        // Visite annuelle : prochaine maintenance un an après si elle n'est pas dite (ou si la date du jour a été recopiée).
+        val prochaine = fr.dd.jarvis.societe.core.ProchaineMaintenance.planifier(date, a.s("prochaine_maintenance"), categorie)
         val descriptionNormalisee = description.trim().replace(Regex("\\s+"), " ").lowercase()
         val doublon = site.interventions.firstOrNull { existante ->
             existante.date == date &&
@@ -1109,9 +1110,10 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         }
         val date = valeur("date", ancienne.date)
         if (runCatching { LocalDate.parse(date) }.isFailure) return err("Date invalide : utilise yyyy-MM-dd.")
-        val prochaine = valeur("prochaine_maintenance", ancienne.prochaineMaintenance)
-        if (prochaine.isNotBlank() && runCatching { LocalDate.parse(prochaine) }.isFailure)
+        val prochaineDite = valeur("prochaine_maintenance", ancienne.prochaineMaintenance)
+        if (prochaineDite.isNotBlank() && runCatching { LocalDate.parse(prochaineDite) }.isFailure)
             return err("Date de prochaine maintenance invalide : utilise yyyy-MM-dd ou « effacer ».")
+        val prochaine = fr.dd.jarvis.societe.core.ProchaineMaintenance.effective(date, prochaineDite)
         val statut = valeur("statut", ancienne.statut).lowercase()
         if (statut !in setOf("terminee", "a_suivre", "en_attente"))
             return err("Statut invalide : terminee, a_suivre ou en_attente.")
@@ -1181,7 +1183,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
                         if (item.pieces.isNotBlank()) append("\n- Pièces : " + item.pieces)
                         if (item.mesures.isNotBlank()) append("\n- Mesures : " + item.mesures)
                         if (item.onduleurs.isNotBlank()) append("\n- Onduleur(s) : " + item.onduleurs)
-                        if (item.prochaineMaintenance.isNotBlank()) append("\n- Prochaine maintenance : " + item.prochaineMaintenance)
+                        if (item.prochaineEffective().isNotBlank()) append("\n- Prochaine maintenance : " + item.prochaineEffective())
                         if (item.notes.isNotBlank()) append("\n- Notes : " + item.notes)
                     }
                 }
@@ -1209,9 +1211,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         if (all.isEmpty()) return ok("Aucune intervention photovoltaïque enregistrée pour les sites sélectionnés.")
         val today = LocalDate.now()
         val upcoming = all.filter { (_, _, intervention) ->
-            intervention.prochaineMaintenance.isNotBlank() &&
-                runCatching { !LocalDate.parse(intervention.prochaineMaintenance).isAfter(today.plusDays(30)) }.getOrDefault(false)
-        }.sortedBy { it.third.prochaineMaintenance }
+            intervention.prochaineEffective().isNotBlank() &&
+                runCatching { !LocalDate.parse(intervention.prochaineEffective()).isAfter(today.plusDays(30)) }.getOrDefault(false)
+        }.sortedBy { it.third.prochaineEffective() }
         val pending = all.filter { it.third.statut.equals("a_suivre", true) || it.third.statut.equals("en_attente", true) }
         val byCategory = all.groupingBy { it.third.categorie.ifBlank { "non précisée" } }.eachCount()
         val out = StringBuilder("# Bilan des interventions photovoltaïques\n\n")
@@ -1232,9 +1234,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         out.append("\n## Maintenances à échéance dans les 30 jours ou en retard\n")
         if (upcoming.isEmpty()) out.append("- Aucune date de prochaine maintenance dans les données sélectionnées.\n")
         else upcoming.forEach { (client, site, item) ->
-            val date = runCatching { LocalDate.parse(item.prochaineMaintenance) }.getOrNull()
+            val date = runCatching { LocalDate.parse(item.prochaineEffective()) }.getOrNull()
             val label = if (date != null && date.isBefore(today)) "EN RETARD" else "À VENIR"
-            out.append("- ${item.prochaineMaintenance} · $label · ${client.nom} / ${site.nom}\n")
+            out.append("- ${item.prochaineEffective()} · $label · ${client.nom} / ${site.nom}\n")
         }
         out.append("\n## Dernières interventions\n")
         all.sortedByDescending { it.third.date }.take(12).forEach { (client, site, item) ->
@@ -1243,7 +1245,7 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             if (item.actions.isNotBlank()) out.append("  Actions réalisées : ${item.actions.take(220)}\n")
             if (item.pieces.isNotBlank()) out.append("  Pièces : ${item.pieces.take(160)}\n")
             if (item.mesures.isNotBlank()) out.append("  Mesures relevées : ${item.mesures.take(180)}\n")
-            if (item.prochaineMaintenance.isNotBlank()) out.append("  Prochaine maintenance : ${item.prochaineMaintenance}\n")
+            if (item.prochaineEffective().isNotBlank()) out.append("  Prochaine maintenance : ${item.prochaineEffective()}\n")
         }
         out.append("\nBilan calculé uniquement à partir des interventions et dates effectivement enregistrées ; aucune mesure ni panne n'est déduite.")
         return ok(out.toString())

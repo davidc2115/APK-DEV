@@ -72,7 +72,7 @@ object Miroir {
 
     fun tableInterventions(d: SocieteData): String = csv(listOf(listOf("Date", "Client", "Installation", "Catégorie", "Description", "Actions", "Statut", "Prochaine maintenance")) +
         d.clients.flatMap { c -> c.sites.flatMap { s -> s.interventions.map { i -> Triple(c, s, i) } } }.sortedBy { it.third.date }.map { (c, s, i) ->
-            listOf(i.date, c.nom, s.nom.ifBlank { s.adresse }, i.categorie, i.description, i.actions, i.statut, i.prochaineMaintenance)
+            listOf(i.date, c.nom, s.nom.ifBlank { s.adresse }, i.categorie, i.description, i.actions, i.statut, i.prochaineEffective())
         })
 
     // ------------------------------------------------------------------ plan complet
