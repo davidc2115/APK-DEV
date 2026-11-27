@@ -135,8 +135,8 @@ dependencies {
 
     // Montage vidéo (assemble plusieurs clips générés par tiktok_video en une seule vidéo)
     // Version 1.4.x : compatible compileSdk 34 (les versions plus récentes de Media3 exigent compileSdk 35/36).
-    implementation("androidx.media3:media3-transformer:1.4.1")
-    implementation("androidx.media3:media3-common:1.4.1")
+    implementation("androidx.media3:media3-transformer:1.5.1")
+    implementation("androidx.media3:media3-common:1.5.1")
 
     // Index local du graphe de connaissances (les fichiers Markdown restent les sources de vérité)
     implementation("androidx.room:room-runtime:2.8.5")

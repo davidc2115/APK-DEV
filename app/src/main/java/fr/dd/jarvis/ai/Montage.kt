@@ -102,7 +102,6 @@ object Montage {
                                   val signature: String = "", val bandeau: String = "")
     /** Un morceau de la timeline : vidéo (de [debutMs], rognée à [dureeMs]) ou image affichée [dureeMs]. */
     private data class Segment(val fichier: File, val image: Boolean, val dureeMs: Long, val texte: String, val debutMs: Long = 0)
-    private val AUDIO = setOf("mp3", "m4a", "aac", "ogg", "oga", "wav", "flac", "opus")
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private const val NOTIF = 7310
@@ -185,7 +184,8 @@ object Montage {
         val ms = d.dureeS * 1000L
         // TikTok/Reels/Shorts sont toujours rendus en 9:16, même si le modèle transmet par erreur « horizontal ».
         val vertical = d.tiktok || !d.format.trim().lowercase().let { it.startsWith("hori") || it == "16:9" || it.startsWith("pays") }
-        val (largeur, hauteur) = if (vertical) 720 to 1280 else 1280 to 720
+        // TikTok : 1080 × 1920 (format recommandé par TikTok) ; sinon 720p. Repli en 720p si le téléphone refuse.
+        val (largeur, hauteur) = if (d.tiktok) 1080 to 1920 else if (vertical) 720 to 1280 else 1280 to 720
         val travail = File(app.cacheDir, "montage_${System.currentTimeMillis()}").apply { mkdirs() }
 
         // 1. Scénario : plans (visuel + texte à l'écran), voix off, musique, paroles, légende.
@@ -231,7 +231,9 @@ object Montage {
         val pris = mutableSetOf<String>()
         val imagesParPlan = HashMap<Int, File>()
         suspend fun image(rang: Int, p: Plan): File? = imagesParPlan[rang] ?: runCatching {
-            ImageGen.generate(app, p.visuel + ", vertical portrait 9:16 composition, cinematic lighting, highly detailed, no text, no letters, no watermark").first
+            val prompt = p.visuel + ", vertical portrait 9:16 composition, cinematic lighting, highly detailed, no text, no letters, no watermark"
+            // Image directement verticale et nette (FLUX.2) ; sinon le modèle habituel (carré, recadré au montage).
+            runCatching { ImageGen.generate(app, prompt, "flux-2-klein", 768, 1344).first }.getOrElse { ImageGen.generate(app, prompt).first }
         }.onFailure { echecs += "image ${rang + 1} : ${it.message?.take(110)}" }.getOrNull()?.also { imagesParPlan[rang] = it }
         suspend fun reel(i: Int, p: Plan): File? {
             val requetes = listOf(p.recherche, Stock.motsCles(p.visuel), Stock.motsCles(p.visuel, 2)).filter { it.isNotBlank() }.distinct()
@@ -260,19 +262,29 @@ object Montage {
             }
             if (medias.isEmpty()) echecs += "aucune image ni aucun plan libre de droits obtenu"
         }
-        // 2b. Animation IA de la première image (Hugging Face, quota gratuit du jour) ; sinon elle sera animée au montage.
-        val premiere = medias.firstOrNull { it.image }
-        if (premiere != null && d.tiktok && app.store.huggingFaceToken.value.isNotBlank() && modePlans != "stock") {
-            progres("🎥 Animation de la première image (Hugging Face, quota gratuit)…")
-            val prompt = sb.plans.getOrNull((existants.size + premiere.i) % sb.plans.size)?.visuel.orEmpty() +
-                ". Animate this exact image: flames, feathers and smoke move, slow epic camera push-in, keep composition, no text."
-            val clip = withTimeoutOrNull(5 * 60_000L) {
-                runCatching { withContext(Dispatchers.IO) { VideoGen.genereClip(app, prompt, 4, vertical, image = premiere.fichier) } }
-                    .onFailure { echecs += "animation IA de l'image : ${it.message?.take(110)} (animée au montage à la place)" }.getOrNull()
-            }
-            if (clip != null && clip.size > 10_000) {
-                val f = File(travail, "anime_${premiere.i}.mp4").apply { writeBytes(clip) }
-                medias[medias.indexOf(premiere)] = premiere.copy(fichier = f, image = false)
+        // 2b. Vraie animation IA des images (Hugging Face Wan 2.2, quota GPU gratuit du jour : 3 images au plus, 10 min
+        // en tout) ; une image non animée l'est au montage (zoom / travelling).
+        val aAnimer = medias.filter { it.image }.take(3)
+        var animees = 0
+        if (aAnimer.isNotEmpty() && d.tiktok && modePlans != "stock") {
+            if (app.store.huggingFaceToken.value.isBlank()) echecs += "animation IA des images : ajoute ton jeton Hugging Face gratuit (Réglages › IA › Images & vidéo) pour de vraies images animées"
+            else {
+                val limite = System.currentTimeMillis() + 10 * 60_000L
+                for ((k, m) in aAnimer.withIndex()) {
+                    val reste = limite - System.currentTimeMillis()
+                    if (reste < 60_000L) break
+                    progres("🎥 Animation IA de l'image ${k + 1}/${aAnimer.size} (Hugging Face, quota gratuit)…")
+                    val prompt = sb.plans.getOrNull((existants.size + m.i) % sb.plans.size)?.visuel.orEmpty() +
+                        ". Animate this exact image: flames flicker, feathers and smoke move, embers fly, slow epic camera push-in, keep the composition, no text."
+                    val clip = withTimeoutOrNull(reste) {
+                        runCatching { withContext(Dispatchers.IO) { VideoGen.genereClip(app, prompt, 4, vertical, image = m.fichier) } }
+                            .onFailure { echecs += "animation IA de l'image ${k + 1} : ${it.message?.take(110)}" }.getOrNull()
+                    }
+                    if (clip == null || clip.size <= 10_000) break   // quota épuisé ou service indisponible : inutile d'insister
+                    val f = File(travail, "anime_${m.i}.mp4").apply { writeBytes(clip) }
+                    medias[medias.indexOf(m)] = m.copy(fichier = f, image = false)
+                    animees++
+                }
             }
         }
         // Plans trouvés (images ou réels) : ils couvrent toute la durée, sans compléter par une IA vidéo payante
@@ -396,7 +408,9 @@ object Montage {
         } else null
         // 2) Sinon la synthèse vocale du téléphone, phrase par phrase (durée exacte de chaque phrase).
         val voixPhrases = if (voixNaturelle == null && phrases.isNotEmpty()) { progres("🗣️ Voix off…"); synthesePhrases(app, phrases, travail) } else emptyList()
-        val voix: List<File> = voixNaturelle?.let { listOf(it.first) } ?: voixPhrases.map { it.first }.ifEmpty {
+        // 3) Dernier recours : voix de Google Traduction (gratuite), morceau par morceau.
+        val voixGoogle = if (voixNaturelle == null && voixPhrases.isEmpty() && phrases.isNotEmpty()) { progres("🗣️ Voix off (Google)…"); voixGoogle(phrases, travail) } else emptyList()
+        val voix: List<File> = voixNaturelle?.let { listOf(it.first) } ?: voixPhrases.map { it.first }.ifEmpty { voixGoogle.map { it.second } }.ifEmpty {
             if (texteVoix.isNotBlank()) listOfNotNull(synthese(app, texteVoix, File(travail, "voix.wav"))) else emptyList()
         }
         if (texteVoix.isNotBlank() && voix.isEmpty())
@@ -405,15 +419,16 @@ object Montage {
             !d.sousTitres || phrases.isEmpty() -> emptyList()
             voixNaturelle != null -> SousTitres.reperes(phrases, SousTitres.repartir(phrases, voixNaturelle.second))
             voixPhrases.size == phrases.size -> SousTitres.reperes(phrases, voixPhrases.map { it.second })
+            voixGoogle.isNotEmpty() -> SousTitres.reperes(voixGoogle.map { it.first }, voixGoogle.map { it.third })
             else -> emptyList()
         }
         val musique: File? = when (d.musique.trim().lowercase()) {
             "aucune", "non", "false", "sans" -> null
             else -> {
                 val existant = if (d.musique.isNotBlank() && d.musique.lowercase() != "auto") resoudreSources(app, d.musique, travail).firstOrNull()?.first else null
-                existant ?: if (!ImageToVideoGen.disponible(app)) musiqueLocale(app, travail).also {
-                    if (it == null) echecs += "musique : aucune (dépose des musiques libres de droits dans le dossier « Music » du téléphone ou « JARVIS/Musiques » du coffre, ou ajoute le son tendance dans TikTok)"
-                } else if (ImageToVideoGen.disponible(app)) {
+                // Pas de musique prise au hasard sur le téléphone : une musique donnée, ou générée (fal.ai), sinon aucune
+                // (le son tendance s'ajoute dans TikTok, sous la voix off).
+                existant ?: if (ImageToVideoGen.disponible(app)) {
                     progres(if (avecParoles) "🎤 Chanson avec paroles…" else "🎵 Musique…")
                     runCatching {
                         val desc = if (d.musique.isBlank() || d.musique.lowercase() == "auto") sb.musique else d.musique
@@ -430,19 +445,22 @@ object Montage {
         progres("🎞️ Montage…")
         val nom = (if (d.tiktok) "tiktok_" else "video_") + System.currentTimeMillis() + ".mp4"
         val sortie = File(dossier(app), nom)
-        val essais = listOf(
-            Triple(true, true, "complet"),
-            Triple(false, true, "sans texte à l'écran"),
-            Triple(false, false, "sans texte ni son")
+        data class Essai(val avecTexte: Boolean, val avecSon: Boolean, val l: Int, val h: Int, val libelle: String)
+        val (l720, h720) = if (vertical) 720 to 1280 else 1280 to 720
+        val essais = listOfNotNull(
+            Essai(true, true, largeur, hauteur, "complet"),
+            if (largeur != l720) Essai(true, true, l720, h720, "en 720p") else null,
+            Essai(false, true, l720, h720, "sans texte à l'écran"),
+            Essai(false, false, l720, h720, "sans texte ni son")
         )
         var abandons = ""
         var ok = false
-        for ((avecTexte, avecSon, libelle) in essais) {
+        for ((avecTexte, avecSon, l, h, libelle) in essais) {
             val r = runCatching {
-                exporter(app, segments, if (avecSon) voix else emptyList(), if (avecSon) musique else null, avecTexte, d.garderSon && avecSon, largeur, hauteur, avecParoles, sortie,
+                exporter(app, segments, if (avecSon) voix else emptyList(), if (avecSon) musique else null, avecTexte, d.garderSon && avecSon, l, h, avecParoles, sortie,
                     if (avecTexte && avecSon) reperes else emptyList(), tiktok = d.tiktok, bandeau = if (avecTexte && d.tiktok) sb.bandeau else "")
             }
-            if (r.isSuccess) { ok = true; if (libelle != "complet") abandons = libelle; break }
+            if (r.isSuccess) { ok = true; if (libelle != "complet" && libelle != "en 720p") abandons = libelle; break }
             echecs += "montage $libelle : ${r.exceptionOrNull()?.message?.take(140)}"
         }
         travail.deleteRecursively()
@@ -466,6 +484,7 @@ object Montage {
                 if (reperes.isNotEmpty() && abandons.isBlank()) "sous-titres" else null,
                 if (musique != null && abandons != "sans texte ni son") (if (avecParoles) "chanson avec paroles" else "musique") else null,
                 if (d.textes && abandons.isBlank()) "texte à l'écran" else null)
+            if (animees > 0) append(" · $animees image${if (animees > 1) "s" else ""} animée${if (animees > 1) "s" else ""} par IA")
             if (pistes.isNotEmpty()) append(" · " + pistes.joinToString(", "))
             append("\n\n[▶ Lire la vidéo](jarvis-video-ia:$nom)")
             if (loc.isNotBlank()) append("\n📁 $loc")
@@ -601,16 +620,6 @@ object Montage {
         if (octetsParSeconde <= 0) null else donnees * 1000 / octetsParSeconde
     }.getOrNull()
 
-    /** Une musique déposée par l'utilisateur : dossier « Music » du téléphone ou « JARVIS/Musiques » du coffre (au hasard). */
-    private fun musiqueLocale(app: JarvisApp, travail: File): File? {
-        val telephone = runCatching { File(Stockage.racine(), "Music").walkTopDown().maxDepth(2).filter { it.isFile && it.extension.lowercase() in AUDIO && it.length() > 50_000 }.toList() }
-            .getOrDefault(emptyList())
-        if (telephone.isNotEmpty()) return telephone.random()
-        val o = app.obsidian
-        val coffre = runCatching { o.chercherFichiers("JARVIS/Musiques/*", limite = 100).filter { it.substringAfterLast('.', "").lowercase() in AUDIO } }.getOrDefault(emptyList())
-        return coffre.randomOrNull()?.let { o.versFichierLocal(it, File(travail, "musique")) }
-    }
-
     // ------------------------------------------------------------------ voix off
 
     /** Synthèse vocale française du téléphone vers un fichier WAV (gratuit, hors ligne selon le moteur). */
@@ -634,6 +643,34 @@ object Montage {
                 cont.invokeOnCancellation { runCatching { tts?.shutdown() } }
             }
         }
+    }
+
+    /** Morceaux de 190 caractères au plus, coupés entre deux mots (limite de la voix Google Traduction). */
+    internal fun morceaux(phrases: List<String>, max: Int = 190): List<String> = phrases.flatMap { p ->
+        if (p.length <= max) listOf(p) else p.split(' ').fold(mutableListOf("")) { acc, mot ->
+            if ((acc.last() + " " + mot).trim().length > max) acc += mot else acc[acc.size - 1] = (acc.last() + " " + mot).trim()
+            acc
+        }
+    }.filter { it.isNotBlank() }
+
+    /** Voix de Google Traduction (gratuite, non officielle) : (texte, fichier mp3, durée) par morceau, ou liste vide. */
+    private suspend fun voixGoogle(phrases: List<String>, dossier: File): List<Triple<String, File, Long>> = withContext(Dispatchers.IO) {
+        val http = okhttp3.OkHttpClient.Builder().connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS).readTimeout(20, java.util.concurrent.TimeUnit.SECONDS).build()
+        val out = mutableListOf<Triple<String, File, Long>>()
+        for ((i, m) in morceaux(phrases).withIndex()) {
+            val url = "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=fr&q=" + java.net.URLEncoder.encode(m, "UTF-8")
+            val f = File(dossier, "voix_google_$i.mp3")
+            val ok = runCatching {
+                http.newCall(okhttp3.Request.Builder().url(url).header("User-Agent", "Mozilla/5.0 (Linux; Android 16)").build()).execute().use { r ->
+                    val b = r.body?.bytes()
+                    if (r.isSuccessful && b != null && b.size > 1_000) { f.writeBytes(b); true } else false
+                }
+            }.getOrDefault(false)
+            val duree = if (ok) dureeMs(f) else null
+            if (duree == null || duree <= 0) return@withContext emptyList()
+            out += Triple(m, f, duree)
+        }
+        out
     }
 
     /** Voix Gemini des montages : narrateur de bande-annonce, grave et intense. */
@@ -767,7 +804,7 @@ object Montage {
                 val dureeUs = s.dureeMs * 1000f
                 val horloge = Horloge(debutUs)
                 val mouvement = rang % 4
-                val ampleur = if (tiktok) 0.2f else 0.08f
+                val ampleur = if (tiktok) 0.25f else 0.08f
                 effets += MatrixTransformation { t ->
                     val p = (horloge.local(t) / dureeUs).coerceIn(0f, 1f)
                     Matrix().apply {
@@ -824,7 +861,15 @@ object Montage {
         if (sortie.exists()) sortie.delete()
         withContext(Dispatchers.Main) {
             suspendCancellableCoroutine<Unit> { cont ->
+                // Vrai portrait (pas une vidéo couchée + rotation, mal lue par TikTok), H.264, débit élevé (qualité TikTok).
+                val encodeur = androidx.media3.transformer.DefaultEncoderFactory.Builder(app)
+                    .setRequestedVideoEncoderSettings(androidx.media3.transformer.VideoEncoderSettings.Builder()
+                        .setBitrate(if (largeur * hauteur >= 1080 * 1920) 12_000_000 else 8_000_000).build())
+                    .setEnableFallback(true).build()
                 val transformer = Transformer.Builder(app)
+                    .setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264)
+                    .setPortraitEncodingEnabled(true)
+                    .setEncoderFactory(encodeur)
                     .addListener(object : Transformer.Listener {
                         override fun onCompleted(c: Composition, r: ExportResult) { if (cont.isActive) cont.resume(Unit) }
                         override fun onError(c: Composition, r: ExportResult, e: ExportException) { if (cont.isActive) cont.resumeWithException(e) }

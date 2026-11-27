@@ -28,13 +28,14 @@ object ImageGen {
         "@cf/lykon/dreamshaper-8-lcm"
     )
 
-    private fun genere(account: String, model: String, prompt: String): ByteArray {
+    private fun genere(account: String, model: String, prompt: String, largeur: Int = 0, hauteur: Int = 0): ByteArray {
         val (id, token) = account.split(":", limit = 2)
         // Les modèles flux-2-* (flux-2-dev, flux-2-klein) attendent du multipart/form-data, pas du JSON.
         val req = if (model.contains("flux-2")) {
             val form = MultipartBody.Builder().setType(MultipartBody.FORM)
                 .addFormDataPart("prompt", prompt)
                 .addFormDataPart("steps", "28")
+                .apply { if (largeur > 0 && hauteur > 0) { addFormDataPart("width", "$largeur"); addFormDataPart("height", "$hauteur") } }
                 .build()
             Request.Builder().url("https://api.cloudflare.com/client/v4/accounts/$id/ai/run/$model")
                 .header("Authorization", "Bearer $token").post(form).build()
@@ -84,7 +85,8 @@ object ImageGen {
     }
 
     /** Génère une image, la garde dans l'appli et dans Obsidian. Retourne (fichier, emplacement Obsidian). */
-    suspend fun generate(app: JarvisApp, prompt: String, modele: String = ""): Pair<File, String> = withContext(Dispatchers.IO) {
+    /** [largeur] × [hauteur] : format demandé (modèles FLUX.2 seulement, ex. 768 × 1344 pour un TikTok vertical). */
+    suspend fun generate(app: JarvisApp, prompt: String, modele: String = "", largeur: Int = 0, hauteur: Int = 0): Pair<File, String> = withContext(Dispatchers.IO) {
         val list = app.store.cfAccounts.filter { it.contains(':') }
         if (list.isEmpty()) throw IllegalStateException("Aucun compte Cloudflare : ajoute « idCompte:jeton » dans Réglages › IA › Images & vidéo.")
         val model = modele.trim().let { if (it.isBlank()) app.store.cfModel.value.ifBlank { MODELES[0] } else alias(it) }
@@ -94,7 +96,7 @@ object ImageGen {
         var last: Exception? = null
         for (i in ready + cooling) {
             try {
-                val bytes = genere(list[i], model, prompt)
+                val bytes = genere(list[i], model, prompt, largeur, hauteur)
                 next = (i + 1) % list.size
                 // Nom daté + quelques mots de la description : l'image se retrouve aussi par son sujet (dans Obsidian comme par JARVIS).
                 val sujet = java.text.Normalizer.normalize(prompt.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")

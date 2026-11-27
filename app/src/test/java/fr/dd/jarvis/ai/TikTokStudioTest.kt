@@ -187,4 +187,13 @@ class TikTokStudioTest {
         assertEquals(1000L, Montage.dureeWav(f))
         f.delete()
     }
+
+    /** Voix Google Traduction (dernier recours) : morceaux de 190 caractères au plus, coupés entre deux mots. */
+    @Test fun morceauxPourLaVoixDeSecours() {
+        val longue = "Le Phénix renaît de ses cendres " + "et la France se relève ".repeat(12)
+        val m = Montage.morceaux(listOf("Court.", longue))
+        assertEquals("Court.", m.first())
+        assertTrue(m.toString(), m.all { it.length <= 190 } && m.size >= 3)
+        assertEquals(("Court. " + longue).replace(Regex("\\s+"), " ").trim(), m.joinToString(" "))
+    }
 }
