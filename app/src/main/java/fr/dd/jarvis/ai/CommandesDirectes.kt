@@ -410,7 +410,7 @@ object CommandesDirectes {
         val appli = when { Regex("\\bwaze\\b").containsMatchIn(p) -> "Waze"; Regex("\\b(google maps|maps)\\b").containsMatchIn(p) -> "Google Maps"; else -> "" }
         if (dest.isBlank()) return null
         val lieu = when {
-            Regex("^(?:(?:la|ma|notre) )?(?:maison|domicile)$|^chez (?:moi|nous)$").matches(n) -> "maison"
+            Regex("^(?:(?:la|ma|mon|notre) )?(?:maison|domicile)$|^chez (?:moi|nous)$").matches(n) -> "maison"
             Regex("^(?:(?:le|mon) )?(?:travail|boulot|bureau)$").matches(n) -> "travail"
             else -> dest
         }

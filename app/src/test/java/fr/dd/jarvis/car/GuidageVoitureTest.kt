@@ -4,15 +4,16 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import fr.dd.jarvis.societe.Geo.Precision as P
 
 class GuidageVoitureTest {
     @Test fun adresseAuFormatAndroidAuto() {
         assertEquals("12+rue+de+la+Paix,+Dijon", GuidageVoiture.requete("12 rue de la Paix,  Dijon"))
         assertEquals("%C3%89glise+Saint-B%C3%A9nigne", GuidageVoiture.requete("Église Saint-Bénigne"))
         assertEquals("geo:0,0?q=8+place+d%27Arcy,+21000+Dijon", GuidageVoiture.geo("8 place d'Arcy, 21000 Dijon", null))
-        // Même avec un point GPS exact, ACTION_NAVIGATE doit demander une recherche/route, pas seulement une épingle.
-        assertEquals("geo:0,0?q=8+place+d%27Arcy,+Dijon", GuidageVoiture.geo("8 place d'Arcy, Dijon", 47.322047 to 5.04148))
-        assertEquals("geo:0,0?q=47.322047,5.041480", GuidageVoiture.geo("", 47.322047 to 5.04148))
+        // Point GPS vérifié : avec l'action NAVIGATE, « geo:lat,lon » démarre la navigation (l'épingle seule, c'est VIEW).
+        assertEquals("geo:47.322047,5.041480", GuidageVoiture.geo("8 place d'Arcy, Dijon", 47.322047 to 5.04148))
+        assertEquals("geo:47.322047,5.041480", GuidageVoiture.geo("", 47.322047 to 5.04148))
     }
 
     @Test fun seuleUneNotificationExplicitementNavigationConfirmeLeDepart() {
@@ -73,5 +74,45 @@ class MicroVoitureSensibleTest {
         repeat(80) { g2.appliquer(fort, fort.size) }
         assertTrue(g2.gain < 1.05)                                            // jamais d'amplification d'un son fort
         assertTrue(fr.dd.jarvis.voice.VoskWake.FENETRE_MUSIQUE == 30)
+    }
+}
+
+/** Le guidage part tout seul : coordonnées vérifiées, lieux « une école primaire », appui sur « Y aller ». */
+class GuidageDirectTest {
+    private fun loc(p: fr.dd.jarvis.societe.Geo.Precision, trouve: String = "") = fr.dd.jarvis.societe.Geo.Localisation(fr.dd.jarvis.societe.Geo.Point(47.39, 4.54), p, trouve)
+
+    @Test fun androidAutoGuideSurLesCoordonnees() {
+        // Action NAVIGATE : geo:lat,lon = navigation directe (pas de recherche à refaire dans Waze / Maps).
+        assertEquals("geo:47.397712,4.546730", GuidageVoiture.geo("21 rue de Massingy, Vitteaux", 47.397712 to 4.54673))
+        assertEquals("geo:0,0?q=Vitteaux", GuidageVoiture.geo("Vitteaux", null))
+    }
+
+    @Test fun pointAssezPrecis() {
+        assertTrue(GuidageVoiture.pointFiable("21 rue de Massingy à Vitteaux", loc(P.NUMERO)))
+        assertTrue(!GuidageVoiture.pointFiable("21 rue de Massingy à Vitteaux", loc(P.RUE)))       // numéro demandé, rue seule trouvée
+        assertTrue(GuidageVoiture.pointFiable("rue de Massingy, Vitteaux", loc(P.RUE)))
+        assertTrue(GuidageVoiture.pointFiable("Vitteaux", loc(P.COMMUNE, "21350 Vitteaux")))
+        assertTrue(!GuidageVoiture.pointFiable("Leclerc Montbard", loc(P.COMMUNE, "21500 Montbard")))  // le magasin, pas le centre-ville
+        assertTrue(GuidageVoiture.pointFiable("ferme de la Grange", loc(P.LIEU_DIT)))
+        assertTrue(!GuidageVoiture.pointFiable("Dijon", null))
+    }
+
+    @Test fun boutonsDeDepart() {
+        listOf("Y aller", "Démarrer", "Go", "Démarrer la navigation", "C'est parti !").forEach { assertTrue(it, GuidageVoiture.boutonDepart(it)) }
+        listOf("Partir plus tard", "Itinéraires", "Annuler", "Enregistrer").forEach { assertTrue(it, !GuidageVoiture.boutonDepart(it)) }
+    }
+}
+
+class LieuProcheTest {
+    @Test fun sorteDeLieu() {
+        val g = fr.dd.jarvis.societe.Geo
+        assertEquals("ecole primaire", g.categorieProche("une école primaire"))
+        assertEquals("pharmacie", g.categorieProche("la pharmacie la plus proche"))
+        assertEquals("station essence", g.categorieProche("une station essence près d'ici"))
+        assertEquals("boulangerie", g.categorieProche("la boulangerie du coin"))
+        assertNull(g.categorieProche("21 rue de Massingy à Vitteaux"))
+        assertNull(g.categorieProche("Dijon"))
+        assertNull(g.categorieProche("la gare de Dijon"))
+        assertNull(g.categorieProche("une rue de Dijon"))
     }
 }

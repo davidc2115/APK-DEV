@@ -474,6 +474,53 @@ object Geo {
         best?.loc?.also { cache[cle] = it }
     }
 
+    // ================================================================================== lieux proches (« une école primaire »)
+
+    private val PRES = Regex("\\s*\\b(?:(?:le|la|les) plus proches?|pres d ici|pres de moi|pres de chez moi|a proximite|autour de moi|autour d ici|dans le coin|dans les environs|pas loin(?: d ici)?|du coin|d a cote|a cote)\\b")
+    private val INDEFINI = Regex("^(?:un|une|des|du|de la|n importe quel|n importe quelle|quelque)\\s+")
+
+    /**
+     * Destination qui désigne une SORTE de lieu plutôt qu'une adresse : « une école primaire », « la pharmacie la plus
+     * proche », « une station essence près d'ici » → ce qu'il faut chercher autour de soi (« école primaire »), ou null.
+     * Une adresse (numéro, rue…) ou un nom propre précis n'en est pas une.
+     */
+    fun categorieProche(destination: String): String? {
+        val n = sansAccents(destination.lowercase(Locale.FRENCH)).replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+        if (n.isBlank() || Regex("\\d").containsMatchIn(n)) return null
+        if (Regex("\\b(rue|avenue|boulevard|chemin|route|impasse|allee|place|quai|lieu dit)\\b").containsMatchIn(n)) return null
+        val proche = PRES.containsMatchIn(n)
+        val indefini = INDEFINI.containsMatchIn(n)
+        if (!proche && !indefini) return null
+        val cat = PRES.replace(INDEFINI.replace(n, ""), "").replace(Regex("^(?:le|la|les|l)\\s+"), "").trim()
+        return cat.takeIf { it.length >= 3 && it.split(' ').size <= 5 }
+    }
+
+    /**
+     * Le lieu de cette sorte le plus proche de ([lat], [lon]) d'après OpenStreetMap (recherche limitée autour de la
+     * position, élargie une fois si rien n'est trouvé). Null si rien dans ~40 km.
+     */
+    suspend fun lieuProche(categorie: String, lat: Double, lon: Double): Localisation? = withContext(Dispatchers.IO) {
+        val ici = Point(lat, lon)
+        for (rayon in listOf(0.12, 0.4)) {
+            val url = "https://nominatim.openstreetmap.org/search".toHttpUrl().newBuilder()
+                .addQueryParameter("format", "jsonv2").addQueryParameter("addressdetails", "1").addQueryParameter("limit", "20")
+                .addQueryParameter("countrycodes", "fr").addQueryParameter("q", categorie)
+                .addQueryParameter("viewbox", "${f6(lon - rayon * 1.5)},${f6(lat + rayon)},${f6(lon + rayon * 1.5)},${f6(lat - rayon)}")
+                .addQueryParameter("bounded", "1").build()
+            val arr = runCatching { JSONArray(getOsm(url.toString()) ?: "[]") }.getOrNull() ?: continue
+            val proche = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+                .mapNotNull { o -> valide(o.optString("lat").toDoubleOrNull(), o.optString("lon").toDoubleOrNull())?.let { o to it } }
+                .minByOrNull { haversine(ici, it.second) } ?: continue
+            if (haversine(ici, proche.second) > 45.0) continue
+            val (o, pt) = proche
+            val a = o.optJSONObject("address")
+            val nom = o.optString("name").ifBlank { categorie.replaceFirstChar { it.uppercase() } }
+            val ville = villeOsm(a)
+            return@withContext Localisation(pt, Precision.LIEU_DIT, listOf(nom, ville).filter { it.isNotBlank() }.distinct().joinToString(", "), "OpenStreetMap")
+        }
+        null
+    }
+
     /** Adresse postale retrouvée à partir d'un point GPS ([distance] = écart en mètres avec le point d'adresse). */
     data class Adresse(val libelle: String, val numero: String, val rue: String, val codePostal: String, val ville: String, val distance: Int?, val source: String)
 

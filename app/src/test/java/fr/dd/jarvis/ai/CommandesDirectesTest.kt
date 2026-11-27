@@ -126,6 +126,9 @@ class CommandesDirectesTest {
         assertEquals("Saint-Martin-et-Puisaye", dest("lance la navigation vers Saint-Martin-et-Puisaye"))
         assertEquals("maison", dest("je voudrais rentrer à la maison"))
         assertEquals("maison", dest("navigation vers chez moi"))
+        assertEquals("maison", dest("lance la navigation vers mon domicile"))
+        assertEquals("une école primaire", dest("lance la navigation vers une école primaire"))
+        assertEquals("21 rue de Massingy à Vitteaux", dest("emmène-moi au 21 rue de Massingy à Vitteaux"))
         i("lance la navigation avec Waze vers Dijon")!!.let { assertEquals("Dijon", it.args.getString("destination")); assertEquals("Waze", it.args.getString("appli")) }
         assertNull(dest("je veux aller au lit"))
         assertNull(dest("je veux aller dormir"))

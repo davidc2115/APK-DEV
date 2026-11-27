@@ -622,6 +622,9 @@ class PhoneControl(private val ctx: Context) {
         else "❌ Android n'a pas réussi à ouvrir $nom. Vérifie que l'application est à jour et autorisée à s'ouvrir depuis JARVIS."
     }
 
+    /** Waze vers son favori « Domicile » (quand JARVIS ne connaît pas l'adresse de la maison). */
+    fun wazeDomicile(): String = ouvrirNavigation("waze://?favorite=home&navigate=yes", "com.waze", "Waze", "ton domicile (favori Waze)")
+
     /** Lance la navigation vers une destination dans l'application [appli] (Waze, Google Maps ou autre ; vide = Google Maps). */
     fun navigate(dest: String, mode: String, appli: String = "", point: Pair<Double, Double>? = null): String {
         val m = when (mode.trim().lowercase()) { "marche", "a pied", "à pied", "walking", "w" -> "w"; "velo", "vélo", "bicycling", "b" -> "b"; else -> "d" }
@@ -635,7 +638,8 @@ class PhoneControl(private val ctx: Context) {
             val geo = if (point != null) "geo:${point.first},${point.second}?q=${point.first},${point.second}(${Uri.encode(dest)})" else "geo:0,0?q=" + Uri.encode(dest)
             return ouvrirNavigation(geo, pkg, label, dest)
         }
-        val uri = "google.navigation:q=" + Uri.encode(dest) + "&mode=$m"
+        // Point vérifié (adresse au numéro, lieu trouvé) : Maps guide dessus au lieu de refaire sa propre recherche.
+        val uri = "google.navigation:q=" + (point?.let { "${it.first},${it.second}" } ?: Uri.encode(dest)) + "&mode=$m"
         return ouvrirNavigation(uri, "com.google.android.apps.maps", "Google Maps", dest)
     }
 

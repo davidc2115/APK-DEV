@@ -1086,16 +1086,38 @@ class ToolBox(
                 if (appli.isBlank()) appli = if (enVoiture) dispo.firstOrNull { it.contains("Waze") } ?: dispo.firstOrNull().orEmpty()
                     else dispo.firstOrNull().orEmpty()
                 if (toujours && a.optString("appli").isNotBlank()) app.store.setAppPref("navigation", a.optString("appli").trim())
-                val destination = a.optString("destination").trim()
+                var destination = a.optString("destination").trim()
                 if (dispo.isEmpty()) ToolResult("❌ Aucune application de navigation compatible (Waze ou Google Maps) n'est installée.")
                 else {
-                    val pt = if (appli.lowercase().contains("waze") || !appli.lowercase().contains("google")) runCatching {
-                        val loc = fr.dd.jarvis.societe.Geo.localiser(destination)
-                        val numeroDemande = Regex("""(?:^|[\s,])\d{1,4}(?:\s*(?:bis|ter|quater|[a-d])\b)?(?=[\s,]+[^\d\s,])""", RegexOption.IGNORE_CASE).containsMatchIn(destination)
-                        loc?.takeIf { it.precision == fr.dd.jarvis.societe.Geo.Precision.NUMERO ||
-                            (!numeroDemande && it.precision == fr.dd.jarvis.societe.Geo.Precision.RUE) }?.point
-                    }.getOrNull() else null
-                    ToolResult(fr.dd.jarvis.car.GuidageVoiture.lancer(app, destination, pt?.let { it.lat to it.lon }, appli), direct = true)
+                    // Point GPS vérifié pour TOUTES les applis (Waze, Maps, Android Auto) : guidage direct, sans recherche à
+                    // refaire dans l'appli (liste de résultats à toucher, ou mauvaise commune).
+                    var pt: fr.dd.jarvis.societe.Geo.Point? = null
+                    val categorie = fr.dd.jarvis.societe.Geo.categorieProche(destination)
+                    val domicile = fr.dd.jarvis.device.Faits.nomLieu(destination) == "domicile"
+                    when {
+                        // « une école primaire », « la pharmacie la plus proche » : le lieu de ce type le plus proche.
+                        categorie != null -> {
+                            val ici = runCatching { fr.dd.jarvis.device.Locator.precise(app, 6000) }.getOrNull()
+                            val lieu = ici?.let { l -> runCatching { fr.dd.jarvis.societe.Geo.lieuProche(categorie, l.latitude, l.longitude) }.getOrNull() }
+                            if (lieu != null) { pt = lieu.point; destination = lieu.trouve.ifBlank { destination } }
+                            fr.dd.jarvis.voice.JournalVoix.noter("voiture", "lieu le plus proche pour « $categorie » : ${lieu?.trouve ?: if (ici == null) "position inconnue" else "rien trouvé"}")
+                        }
+                        // « à la maison » sans adresse de domicile enregistrée : la zone « home » de Home Assistant.
+                        domicile -> pt = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            JSONObject(Serveur.ha(app, "GET", "/api/states/zone.home")).optJSONObject("attributes")?.let { at ->
+                                at.optDouble("latitude").takeIf { !it.isNaN() }?.let { la -> at.optDouble("longitude").takeIf { !it.isNaN() }?.let { fr.dd.jarvis.societe.Geo.Point(la, it) } }
+                            }
+                        } }.getOrNull()?.also { destination = "domicile" }
+                        else -> pt = runCatching { fr.dd.jarvis.societe.Geo.localiser(destination) }.getOrNull()
+                            ?.takeIf { fr.dd.jarvis.car.GuidageVoiture.pointFiable(destination, it) }?.point
+                    }
+                    // Domicile introuvable partout : le favori « Domicile » de Waze.
+                    if (domicile && pt == null && appli.lowercase().contains("waze") && fr.dd.jarvis.car.NavigationVoiture.contexte == null)
+                        ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.wazeDomicile() } +
+                            " (enregistre ton adresse — « mon adresse est … » — pour que je guide aussi par Android Auto).", direct = true)
+                    else if (domicile && pt == null)
+                        ToolResult("📍 Je ne connais pas encore l'adresse de ton domicile : dis-moi « mon adresse est … » une fois, et je t'y guiderai directement.", direct = true)
+                    else ToolResult(fr.dd.jarvis.car.GuidageVoiture.lancer(app, destination, pt?.let { it.lat to it.lon }, appli), direct = true)
                 }
             }
         }

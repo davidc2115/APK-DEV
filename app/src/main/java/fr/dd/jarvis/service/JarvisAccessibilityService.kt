@@ -255,6 +255,28 @@ class JarvisAccessibilityService : AccessibilityService() {
         return false
     }
 
+    /**
+     * Appuie sur le bouton de départ du guidage (« Y aller », « Démarrer », « Go »…) de Waze / Google Maps s'il est
+     * affiché sur le téléphone — l'itinéraire est calculé mais attend ce bouton. Rend le libellé appuyé, ou null.
+     */
+    fun cliquerDepartGuidage(paquets: Set<String>): String? {
+        val racines = (runCatching { windows.mapNotNull { it.root } }.getOrDefault(emptyList()) + listOfNotNull(runCatching { rootInActiveWindow }.getOrNull()))
+            .filter { it.packageName?.toString() in paquets }
+        for (r in racines) {
+            val n = chercher(r) { x ->
+                x.isVisibleToUser && (fr.dd.jarvis.car.GuidageVoiture.boutonDepart(x.text?.toString().orEmpty()) ||
+                    fr.dd.jarvis.car.GuidageVoiture.boutonDepart(x.contentDescription?.toString().orEmpty()))
+            } ?: continue
+            val libelle = (n.text ?: n.contentDescription ?: "").toString().trim()
+            var cur: AccessibilityNodeInfo? = n
+            while (cur != null) {
+                if (cur.isClickable) return if (cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)) libelle else null
+                cur = cur.parent
+            }
+        }
+        return null
+    }
+
     fun clickText(text: String): Boolean {
         val root = rootInActiveWindow ?: return false
         val nodes = root.findAccessibilityNodeInfosByText(text)

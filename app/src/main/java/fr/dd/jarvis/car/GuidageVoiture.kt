@@ -12,6 +12,7 @@ import android.provider.Settings
 import android.net.Uri
 import androidx.core.app.NotificationCompat
 import fr.dd.jarvis.JarvisApp
+import fr.dd.jarvis.societe.Geo.Precision as P
 import kotlinx.coroutines.delay
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -119,11 +120,39 @@ object GuidageVoiture {
 
     private fun etat(b: Boolean?) = when (b) { true -> "oui"; false -> "NON"; null -> "inconnu" }
 
-    /** URI de recherche pour Android Auto : geo:lat,lon peut ouvrir une simple épingle sans calculer l'itinéraire.
-     * Le paramètre q demande à l'application GPS de rechercher la destination textuelle ou les coordonnées. */
-    fun geo(destination: String, point: Pair<Double, Double>?): String {
-        val cible = destination.trim().ifBlank { point?.let { "${coord(it.first)},${coord(it.second)}" }.orEmpty() }
-        return "geo:0,0?q=" + requete(cible)
+    /**
+     * URI de l'intent NAVIGATE d'Android Auto. Avec l'action NAVIGATE, « geo:lat,lon » et « geo:0,0?q=… » démarrent
+     * tous deux la NAVIGATION (une simple épingle, c'est l'action VIEW) — documentation Android « intents des applis de
+     * navigation ». Les coordonnées vérifiées passent donc en priorité : avec le texte seul, Waze ou Maps refaisaient
+     * une recherche (liste de résultats à toucher, ou mauvaise commune : « rue de Massingy à Vitteaux » →
+     * Massingy-lès-Vitteaux) et le guidage ne partait pas.
+     */
+    fun geo(destination: String, point: Pair<Double, Double>?): String =
+        if (point != null) "geo:${coord(point.first)},${coord(point.second)}" else "geo:0,0?q=" + requete(destination.trim())
+
+    private val R_NUMERO = Regex("""(?:^|[\s,])\d{1,4}(?:\s*(?:bis|ter|quater|[a-d])\b)?(?=[\s,]+[^\d\s,])""", RegexOption.IGNORE_CASE)
+    private val R_VOIE = Regex("\\b(rue|avenue|av|boulevard|bd|chemin|route|impasse|allee|place|quai|cours|lotissement|residence|faubourg|promenade|square)\\b")
+
+    /**
+     * La position trouvée correspond-elle assez à ce qui a été demandé pour guider directement dessus ? Numéro demandé →
+     * au numéro près ; rue demandée → la rue ; lieu-dit, établissement → le lieu ; une commune seule → son centre.
+     */
+    internal fun pointFiable(destination: String, loc: fr.dd.jarvis.societe.Geo.Localisation?): Boolean {
+        loc ?: return false
+        val n = fr.dd.jarvis.societe.core.normaliser(destination)
+        return when {
+            loc.precision == P.MANUELLE -> true
+            R_NUMERO.containsMatchIn(destination) -> loc.precision == P.NUMERO
+            R_VOIE.containsMatchIn(n) -> loc.precision.rang >= P.RUE.rang
+            loc.precision.rang >= P.LIEU_DIT.rang -> true
+            // Commune seule (« Dijon », « à Vitteaux ») : tous les mots demandés sont dans la commune trouvée.
+            loc.precision == P.COMMUNE -> {
+                val demandes = n.split(' ').filter { it.length >= 3 && it !in setOf("les", "des", "sur", "sous", "pres", "ville", "centre") }
+                val trouve = " " + fr.dd.jarvis.societe.core.normaliser(loc.trouve) + " "
+                demandes.isNotEmpty() && demandes.all { trouve.contains(" $it ") }
+            }
+            else -> false
+        }
     }
 
     /**
@@ -180,12 +209,17 @@ object GuidageVoiture {
         if (r.startsWith("🧭")) {
             // Waze démarré à froid met plusieurs secondes à calculer l'itinéraire.
             val nomAppli = choix.ifBlank { "Google Maps" }
-            when (attendre(t1, 10_000, app)) {
+            // Premier contrôle court : souvent l'appli s'ouvre sur l'itinéraire calculé et attend « Y aller » / « Démarrer ».
+            when (attendre(t1, 6_000, app)) {
                 true -> { journal.noter("voiture", "guidage démarré par $nomAppli vers $nom"); return "🧭 Itinéraire vers $nom lancé dans $nomAppli." }
                 null -> {
                     val ouverte = attendreOuverture(t1, 6_000)
-                    return if (ouverte) "⚠️ $nomAppli s'est ouvert pour $nom, mais l'accès aux notifications ne permet pas de confirmer le guidage. Vérifie que l'itinéraire a bien démarré."
-                    else "⚠️ La demande a été transmise à $nomAppli, mais je ne peux pas vérifier que l'application ou le guidage s'est ouvert. Active l'accès aux notifications et l'accessibilité de JARVIS pour un contrôle fiable."
+                    val appui = if (ouverte) appuyerDepart(journal, nomAppli) else null
+                    return when {
+                        appui != null -> "🧭 Itinéraire vers $nom lancé dans $nomAppli (j'ai appuyé sur « $appui »)."
+                        ouverte -> "⚠️ $nomAppli s'est ouvert pour $nom, mais l'accès aux notifications ne permet pas de confirmer le guidage. Vérifie que l'itinéraire a bien démarré."
+                        else -> "⚠️ La demande a été transmise à $nomAppli, mais je ne peux pas vérifier que l'application ou le guidage s'est ouvert. Active l'accès aux notifications et l'accessibilité de JARVIS pour un contrôle fiable."
+                    }
                 }
                 false -> {
                     val ouverte = attendreOuverture(t1, 6_000)
@@ -194,8 +228,17 @@ object GuidageVoiture {
                         journal.noter("voiture", "$nomAppli : aucune ouverture d'application détectée après l'intent")
                         return "⚠️ Android a accepté la demande pour $nomAppli, mais l'application GPS ne s'est pas ouverte. Le guidage n'a donc pas démarré. ${blocage ?: "Vérifie l'autorisation de lancement en arrière-plan et que l'application est installée."}"
                     }
-                    journal.noter("voiture", "$nomAppli : application ouverte, mais aucun signal de guidage après 10 s")
-                    return "⚠️ $nomAppli s'est bien ouvert pour $nom, mais je ne détecte pas le démarrage de l'itinéraire. Je ne vais pas annoncer que le guidage est lancé : vérifie le bouton « Démarrer / Y aller » dans l'application."
+                    // Ouverte mais pas partie : JARVIS appuie lui-même sur le bouton de départ, puis revérifie.
+                    val appui = appuyerDepart(journal, nomAppli)
+                    val t2 = System.currentTimeMillis()
+                    if (appui != null && attendre(t2 - 500, 7_000, app) == true) {
+                        journal.noter("voiture", "guidage démarré par $nomAppli vers $nom après appui sur « $appui »")
+                        return "🧭 Itinéraire vers $nom lancé dans $nomAppli."
+                    }
+                    if (attendre(t1, 4_000, app) == true) return "🧭 Itinéraire vers $nom lancé dans $nomAppli."
+                    journal.noter("voiture", "$nomAppli : application ouverte, mais aucun signal de guidage" + (appui?.let { " (même après appui sur « $it »)" } ?: " (bouton de départ non trouvé à l'écran)"))
+                    return "⚠️ $nomAppli s'est bien ouvert pour $nom, mais je ne détecte pas le démarrage de l'itinéraire" +
+                        (if (appui != null) " (j'ai pourtant appuyé sur « $appui »)" else "") + ". Vérifie le bouton « Démarrer / Y aller » dans l'application."
                 }
             }
         } else echecs += r.removePrefix("❌ ").take(120)
@@ -210,6 +253,17 @@ object GuidageVoiture {
                 "Pour que je le lance tout seul : autorise « Afficher par-dessus les autres applis » pour JARVIS" +
                     (if (fr.dd.jarvis.service.JarvisAccessibilityService.instance == null) ", ou active son service d'accessibilité" else "") + "."
             }
+    }
+
+    /** Bouton de départ de Waze / Maps touché par le service d'accessibilité (jusqu'à ~4 s d'attente de son affichage). */
+    private suspend fun appuyerDepart(journal: fr.dd.jarvis.voice.JournalVoix, nomAppli: String): String? {
+        val acc = fr.dd.jarvis.service.JarvisAccessibilityService.instance ?: return null
+        repeat(8) {
+            val l = runCatching { acc.cliquerDepartGuidage(PAQUETS) }.getOrNull()
+            if (l != null) { journal.noter("voiture", "$nomAppli : bouton « $l » appuyé pour démarrer le guidage"); return l }
+            delay(500)
+        }
+        return null
     }
 
     /** Notification « Itinéraire vers … » : un toucher ouvre le guidage (lancement autorisé par Android). */
