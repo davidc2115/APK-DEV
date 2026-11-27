@@ -327,15 +327,25 @@ object Rendu {
         val mes = MesuresSeries.analyser(sourceMesures)
         // Séries par onduleur : dans les mesures, sinon dans les actions (l'IA y range parfois « Onduleur 5 : 5 séries de 517 V »).
         val (parOnduleur, seriesDansActions) = groupesSeries(i)
-        val lignesActions = ListesRapport.elements(i.actions).let { if (seriesDansActions) OnduleursIntervention.horsBlocs(it) else it }
-        val actions = lignesActions.map { action ->
+        // Actions : la liste détaillée écrite par l'utilisateur (dans la dictée) si l'IA l'a résumée ; sans les blocs
+        // d'onduleurs dès que leurs séries sont présentées en tableaux.
+        val tableaux = parOnduleur.any { it.second.series.isNotEmpty() } || seriesDansActions
+        fun net(l: List<String>) = if (tableaux) OnduleursIntervention.horsBlocs(l) else l
+        val saisies = net(ListesRapport.elements(i.actions))
+        val detail = net(ActionsDetaillees.extraire(i.mesures))
+        val lignesActions = if (detail.size >= 3 && detail.size > saisies.size) detail else saisies
+        val actions = lignesActions.map { brute ->
+            // Rubrique (« Coffret AC : ») en gras, ses contrôles dessous.
+            val action = if (ActionsDetaillees.rubrique(brute)) "**" + brute.trimEnd().removeSuffix(":").trim() + "**" else brute
             val n = Fidelite.normaliser(action)
             val emoji = when {
                 "pdl" in n -> "📍"
                 "coffret" in n || "sectionneur" in n || "disjoncteur" in n || "parafoudre" in n -> "⚡"
+                "nettoy" in n || "aeration" in n || "ventilation" in n -> "🧹"
                 "onduleur" in n -> "🔌"
                 "mesure" in n || "tension" in n || "serie" in n -> "📏"
-                "nettoy" in n || "aeration" in n || "ventilation" in n -> "🧹"
+                "linky" in n || "compteur" in n || "production" in n || "conso" in n -> "📟"
+                "terre" in n -> "🌍"
                 "remise en service" in n || "redemarrage" in n -> "▶️"
                 "serrage" in n || "resserrage" in n -> "🔧"
                 "controle" in n || "verification" in n -> "🔍"
@@ -396,10 +406,20 @@ object Rendu {
      */
     private fun groupesSeries(i: Intervention): Pair<List<Pair<String, MesuresSeries.Resultat>>, Boolean> {
         val mesures = MesuresSeries.parOnduleur(i.mesures.ifBlank { i.onduleurs })
-        if (mesures.any { it.second.series.isNotEmpty() }) return mesures to false
         val actions = MesuresSeries.parOnduleur(i.actions)
-        if (actions.any { it.second.series.isNotEmpty() }) return actions to true
-        return mesures to false
+        // Réunion par numéro d'onduleur : un onduleur absent des mesures (ou sans séries) est pris dans les actions.
+        val parNumero = sortedMapOf<Int, Pair<String, MesuresSeries.Resultat>>()
+        fun num(nom: String) = Regex("""\d+""").find(nom)?.value?.toIntOrNull() ?: 0
+        mesures.forEach { parNumero[num(it.first)] = it }
+        var depuisActions = false
+        actions.forEach { g ->
+            val deja = parNumero[num(g.first)]
+            if (deja == null || (deja.second.series.isEmpty() && g.second.series.isNotEmpty())) {
+                parNumero[num(g.first)] = g
+                if (g.second.series.isNotEmpty()) depuisActions = true
+            }
+        }
+        return parNumero.values.toList() to depuisActions
     }
 
     /** « Onduleur 2 » → « Onduleur 2 · SMA » quand sa marque / son modèle sont connus. */

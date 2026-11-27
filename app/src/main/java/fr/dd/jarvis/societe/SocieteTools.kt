@@ -296,9 +296,9 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
             "categorie" to prop("maintenance | panne | diagnostic | nettoyage | remplacement | contrôle | autre."),
             "description" to prop("Résumé de ce que l'utilisateur a dit de l'intervention (une ou deux phrases, sans rien ajouter)."),
             "diagnostic" to prop("Constat donné par l'utilisateur, seulement s'il en a donné un ; sinon vide."),
-            "actions" to prop("Conserver les rubriques dictées (PDL, coffret AC, partie AC onduleur…), puis une puce par action, sans fusionner les contrôles ; aucune action supposée."),
+            "actions" to prop("Liste DÉTAILLÉE, jamais résumée en une phrase : chaque rubrique dictée sur sa ligne (« Coffret AC : », « Coffret Enedis : », « Vérification de terre : », « Nettoyage et maintenance : », « Compteur Linky : »…) puis chaque contrôle avec son résultat sur sa ligne (« Serrage : OK », « Parafoudre : OK », « Production : 1021418 »). Les séries des onduleurs vont dans « mesures ». Aucune action supposée."),
             "pieces" to prop("Pièces remplacées dites par l'utilisateur, une par ligne (références et quantités s'il les donne)."),
-            "mesures" to prop("Mesures avec unités et blocs « Onduleur 1 », « Onduleur 2 », etc. strictement séparés. Conserver chaque quantité, toutes les séries et chaque tension dans le bon onduleur, y compris les nombres dictés en lettres. Aucune valeur supposée."),
+            "mesures" to prop("Mesures avec unités et blocs « Onduleur 1 », « Onduleur 2 », etc. strictement séparés, TOUS les onduleurs cités (jamais d'oubli du dernier). Conserver chaque quantité, toutes les séries et chaque tension dans le bon onduleur (« Séries : 352, 352 V et 377, 358 V » tel quel), y compris les nombres dictés en lettres. Aucune valeur supposée."),
             "onduleurs" to prop("Liste exhaustive et ordonnée : « Onduleur 1 : ... », « Onduleur 2 : ... », « Onduleur 3 : ... », etc. Conserver chaque marque, modèle et numéro de série cité, un par ligne, sans fusion ni omission."),
             "statut" to prop("terminee | a_suivre | en_attente."),
             "prochaine_maintenance" to prop("Date yyyy-MM-dd UNIQUEMENT si l'utilisateur l'a demandée."), "notes" to prop("Remarques dites par l'utilisateur, sinon vide.")
@@ -1051,6 +1051,13 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         }
     }
 
+    /** Dernier message de l'utilisateur (4 h) qui contient une liste d'actions structurée (« Coffret AC : … »), ou "". */
+    private fun derniereListeStructuree(): String {
+        val limite = System.currentTimeMillis() - 4 * 3_600_000L
+        val msgs = runCatching { app.chat.toList() }.getOrDefault(emptyList()) + fr.dd.jarvis.service.CarBridge.contexte()
+        return msgs.filter { it.fromUser && it.ts >= limite }.lastOrNull { ActionsDetaillees.extraire(it.text).isNotEmpty() }?.text.orEmpty()
+    }
+
     /** Ce que l'utilisateur a dit récemment (messages de l'appli, de la voiture) : la seule source admise d'un rapport. */
     private fun paroles(): String {
         val limite = System.currentTimeMillis() - 4 * 3_600_000L
@@ -1096,12 +1103,20 @@ Module SOCIÉTÉ (maintenance et entretien d'installations photovoltaïques). Tu
         gardes["onduleurs"] = OnduleursIntervention.completer(gardes["onduleurs"].orEmpty(), source)
         // Conserver la dictée brute pour reconstruire les blocs et séries de chaque onduleur au rendu.
         val mesuresIA = gardes["mesures"].orEmpty()
-        val seriesIA = MesuresSeries.parOnduleur(mesuresIA).any { it.second.series.isNotEmpty() } || MesuresSeries.analyser(mesuresIA).series.isNotEmpty()
+        // Onduleurs dits dans le chat mais absents (ou sans séries) dans les mesures de l'IA : ajoutés, un par un.
+        val blocsIA = OnduleursIntervention.blocs(mesuresIA).associateBy { it.numero }
+        val manquants = OnduleursIntervention.blocs(blocsChat).filter { b ->
+            val ia = blocsIA[b.numero]
+            ia == null || (MesuresSeries.analyser(ia.contenu).series.isEmpty() && MesuresSeries.analyser(b.contenu).series.isNotEmpty())
+        }
         gardes["mesures"] = when {
             dictee.isNotBlank() -> dictee
-            seriesIA || blocsChat.isBlank() -> mesuresIA
-            else -> listOf(mesuresIA, blocsChat).filter { it.isNotBlank() }.joinToString("\n")
+            manquants.isEmpty() -> mesuresIA
+            else -> (listOf(mesuresIA) + manquants.map { "Onduleur ${it.numero} : ${it.contenu}" }).filter { it.isNotBlank() }.joinToString("\n")
         }.trim()
+        // Liste détaillée des actions (« Coffret AC : », « Serrage : OK »…) écrite par l'utilisateur, si l'IA l'a résumée.
+        val detail = ActionsDetaillees.extraire(dictee.ifBlank { derniereListeStructuree() })
+        if (detail.size > ListesRapport.elements(gardes["actions"].orEmpty()).size) gardes["actions"] = detail.joinToString("\n")
         return Garde(gardes, retires, true)
     }
 

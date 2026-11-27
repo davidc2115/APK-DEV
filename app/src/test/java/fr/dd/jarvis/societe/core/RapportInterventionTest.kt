@@ -349,4 +349,92 @@ class RapportInterventionTest {
         // « Série 7 : 320 V » reste une seule série.
         assertEquals(listOf(7), MesuresSeries.analyser("Série 7 : 320 V").series.map { it.numero })
     }
+
+    /** Bon de lapree du 27/11 : texte complet de Dd, actions résumées par l'IA en une phrase. */
+    private val TEXTE_LAPREE = """Actions: Coffret AC:
+
+Serrage: OK
+
+• Parafoudre: OK
+
+Coffret Enedis:
+
+• Serrage: OK
+
+• Disjoncteur: OK
+
+Vérification de terre:
+
+• Pas de défaut de terre
+
+Onduleur 1
+
+6 séries de 520 V
+
+Poignée ESS: OK Onduleur 2:
+
+• 6 séries de 500 V
+
+Poignée ESS: OK
+
+Onduleur 3:
+
+5 séries de 520 V
+
+Poignée ESS: OK Onduleur 4:
+
+5 séries de 520 V
+
+Poignée ESS: OK
+
+Onduleur 5:
+
+• 5 séries de 517 V
+
+• Poignée ESS: OK
+
+Onduleur 6:
+
+Séries: 352, 352 V et 377, 358 V
+Poignée ESS: OK
+
+Nettoyage et maintenance:
+
+Nettoyage des ventilateurs : OK
+
+• Nettoyage des onduleurs: OK
+
+Remise en service: OK
+
+Compteur Linky:
+
+• Production: 1021418
+
+• Non conso: 0"""
+
+    @Test fun bonCompletAvecLesSixOnduleursEtLeDetailDesActions() {
+        val site = Site("s2", "Installation 2", kwc = 100.0)
+        val client = Client("c", "lapree", sites = listOf(site))
+        val inter = Intervention("i", "2026-11-27", "maintenance", "Intervention de maintenance préventive",
+            actions = "Contrôle des coffrets (AC et Enedis), vérification de la terre, contrôle et mesures des 6 onduleurs, nettoyage des ventilateurs et onduleurs, remise en service",
+            mesures = TEXTE_LAPREE, onduleurs = (1..6).joinToString("\n") { "Onduleur $it : SMA" })
+        val r = Rendu.rendreIntervention(SocieteData(clients = listOf(client)), client, site, inter)
+        for (n in 1..6) assertTrue("Onduleur $n absent", r.contains("### 🔌 Onduleur $n · SMA"))
+        assertTrue(r, r.contains("| Série 3 | 377 V | Série 4 | 358 V |"))
+        // Observation de chaque onduleur, telle qu'écrite (y compris « Poignée ESS: OK Onduleur 2: » sur une ligne).
+        assertEquals(r, 6, Regex("📝 Poignée ESS: OK").findAll(r).count())
+        // Détail complet des actions, sans les séries déjà en tableaux.
+        listOf("**Coffret AC**", "**Coffret Enedis**", "Disjoncteur: OK", "**Vérification de terre**", "Pas de défaut de terre",
+            "Nettoyage des ventilateurs : OK", "Remise en service: OK", "**Compteur Linky**", "Production: 1021418", "Non conso: 0")
+            .forEach { assertTrue("« $it » absent", r.contains(it)) }
+        val actions = r.substring(r.indexOf("## 🛠️"), r.indexOf("## ⚡ Mesures par onduleur"))
+        assertTrue(actions, !actions.contains("séries") && !actions.contains("Séries") && !actions.contains("Onduleur 1"))
+        assertTrue(actions, !actions.contains("Contrôle des coffrets (AC et Enedis)"))
+    }
+
+    @Test fun observationApresLaDerniereValeurGardeeTelleQuEcrite() {
+        val g = MesuresSeries.parOnduleur("Onduleur 1 : 6 séries de 520 V, Poignée ESS OK").single().second
+        assertEquals(6, g.series.size)
+        assertEquals(listOf("Poignée ESS OK"), g.autres)
+    }
 }

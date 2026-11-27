@@ -277,16 +277,18 @@ object GuidageVoiture {
                     return "🧭 Itinéraire vers $nom lancé dans $nomAppli."
                 }
             } else {
-                if (premier == null) return "⚠️ $nomAppli s'est ouvert pour $nom, mais l'accès aux notifications ne permet pas de confirmer le guidage. Vérifie que l'itinéraire a bien démarré."
-                if (attendre(t1, 3_000, app) == true) return "🧭 Itinéraire vers $nom lancé dans $nomAppli."
+                // Aucun bouton « Y aller » à l'écran pendant 12 s : Waze a sauté l'aperçu et guide déjà (sur le téléphone
+                // ou sur l'écran de la voiture). C'est le cas courant ; seul un aperçu resté bloqué mérite une alerte.
+                journal.noter("voiture", "$nomAppli ouvert sans bouton de départ : guidage direct supposé" +
+                    " · téléphone verrouillé : ${etat(verrou)} · écran : ${diagnosticEcran()}")
+                return if (fr.dd.jarvis.service.JarvisAccessibilityService.instance == null) "🧭 Itinéraire vers $nom envoyé à $nomAppli."
+                    else "🧭 Itinéraire vers $nom lancé dans $nomAppli."
             }
-            journal.noter("voiture", "$nomAppli : application ouverte, mais aucun signal de guidage" +
-                (appui?.let { " (même après appui sur « $it »)" } ?: " (bouton de départ non trouvé à l'écran)") +
+            // Ici seulement : le bouton « Y aller » est resté affiché malgré deux appuis.
+            journal.noter("voiture", "$nomAppli : aperçu toujours affiché après appui sur « $appui »" +
                 " · téléphone verrouillé : ${etat(verrou)} · écran : ${diagnosticEcran()}")
             val secours = notifier(app, destination, point, choix)
-            return if (appui != null) "⚠️ J'ai appuyé sur « $appui » dans $nomAppli pour $nom, mais le guidage ne démarre pas. " + phraseSecours(secours)
-            else "⚠️ $nomAppli s'est ouvert pour $nom, mais je n'ai pas trouvé son bouton « Y aller » pour démarrer le guidage" +
-                (if (verrou) " : le téléphone est verrouillé, je ne vois pas l'écran de $nomAppli" else "") + ". " + phraseSecours(secours)
+            return "⚠️ J'ai appuyé sur « $appui » dans $nomAppli pour $nom, mais l'aperçu de l'itinéraire est toujours affiché. " + phraseSecours(secours)
         } else echecs += r.removePrefix("❌ ").take(120)
 
         // 3. Rien de vérifié : itinéraire prêt dans une notification à toucher, et réponse honnête.

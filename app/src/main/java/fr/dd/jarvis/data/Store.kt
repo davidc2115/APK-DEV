@@ -433,6 +433,8 @@ class Store(context: Context) {
     val rapportsOnduleursV1 = BPref("rapportsOnduleursV1", false)
     /** Une fois : séries par onduleur en tableaux (aussi depuis les actions), demandes du chat retirées des mesures. */
     val rapportsSeriesV2 = BPref("rapportsSeriesV2", false)
+    /** Une fois : actions détaillées reprises de la dictée, tous les onduleurs, observations telles qu'écrites. */
+    val rapportsDetailV3 = BPref("rapportsDetailV3", false)
     /** Rapports d'intervention régénérés une fois avec la nouvelle présentation (emojis, tableau des séries). */
     val rapportsV3 = BPref("rapportsV3", false)
     /** Modes automatiques (voiture, chantier, nuit, maison) et mode forcé (redevient automatique au bout de 4 h). */

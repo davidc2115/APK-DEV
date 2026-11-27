@@ -56,6 +56,9 @@ object OnduleursIntervention {
                 courant?.let { n -> contenus.getOrPut(n) { StringBuilder() }.append("\n").append(ligne.trim()) }
                 continue
             }
+            // « Poignée ESS: OK Onduleur 2: » : ce qui précède le marqueur termine le bloc en cours.
+            val avant = ligne.substring(0, matches.first().first.range.first).trim().trim(',', ';', ':', '-', '–', '.', ' ', '•')
+            if (avant.isNotBlank() && !FIN_BLOC.containsMatchIn(avant)) courant?.let { n -> contenus.getOrPut(n) { StringBuilder() }.append("\n").append(avant) }
             for ((index, mn) in matches.withIndex()) {
                 val (match, numero) = mn
                 if (numero !in 1..100) continue
@@ -220,6 +223,25 @@ object ProchaineMaintenance {
 fun Intervention.prochaineEffective(): String = ProchaineMaintenance.effective(date, prochaineMaintenance)
 
 /**
+ * Liste DÉTAILLÉE des actions écrite ou dictée par l'utilisateur (« Coffret AC : », « Serrage : OK », « Vérification de
+ * terre : »…) : l'IA la résumait parfois en une phrase. Les blocs « Onduleur N » restent dans la liste (le rendu les
+ * retire quand les séries sont présentées en tableaux).
+ */
+object ActionsDetaillees {
+    private val ENTETE = Regex("""(?i)^\s*actions?(?:\s+r[ée]alis[ée]es?)?\s*:\s*""")
+    private val ACTION = Regex("""(?i)(:|\bok\b|effectu|r[ée]alis|contr[oô]l|v[ée]rifi|nettoy|serrage|resserr|remise en service|d[ée]faut|remplac|changement|\btest|mesur|production|conso|disjonct|parafoudre|sectionneur|coffret|onduleur)""")
+
+    /** Lignes d'action d'un texte structuré (au moins 4), sinon vide (texte libre, dictée d'une traite). */
+    fun extraire(texte: String): List<String> {
+        val lignes = ListesRapport.elements(texte).map { it.replace(ENTETE, "").trim() }.filter { it.isNotBlank() && it.length <= 160 }
+        return if (lignes.count { ACTION.containsMatchIn(it) } >= 4 && lignes.size >= 4) lignes else emptyList()
+    }
+
+    /** Rubrique (« Coffret AC : », « Nettoyage et maintenance : ») : titre sans contenu après les deux-points. */
+    fun rubrique(ligne: String): Boolean = ligne.trimEnd().endsWith(":") && ligne.length <= 60
+}
+
+/**
  * Mesures par série (string) : « 20 séries à environ 500 V » → Série 1 … Série 20 à ≈ 500 V ; « séries 1 à 10 : 480 V »,
  * « série 7 : 320 V », « S3 = 512 V / 9,1 A » précisent ou corrigent. Le reste (température, isolement…) reste tel quel.
  */
@@ -235,6 +257,7 @@ object MesuresSeries {
     private val GROUPE = Regex("""(?i)\b(\d{1,3})\s*$SERIE\b[^\d\n]{0,25}?$VALEUR""")
     private val PLAGE = Regex("""(?i)\b$SERIE\s*(?:n°\s*)?(\d{1,3})\b\s*(?:à|a|au|-|–)\s*(\d{1,3})\b\s*[:=]?\s*[^\d\n]{0,12}?$VALEUR""")
     private val UNE = Regex("""(?i)(?:\b$SERIE|\bS)\s*(?:n°\s*)?(\d{1,3})\b\s*[:=]?\s*[^\d\n]{0,12}?$VALEUR""")
+    private val VALEUR_ORIGINALE = Regex("""(?i)\d+(?:[.,]\d+)?\s*(?:kV|mV|mA|volts?|V|A|W|kW|Ω|MΩ|ohms?)(?![\p{L}])""")
     /** « Séries : 352, 352 V et 377, 358 V » (deux-points obligatoire : « série 7 : 320 V » est une seule série). */
     private val LISTE = Regex("""(?i)\bs[ée]ries\s*:\s*((?:\d{2,4}(?:,\d{1,2})?\s*(?:v|volts?)?\s*(?:,|;|/|\bet\b)\s*)+\d{2,4}(?:,\d{1,2})?)\s*(?:v|volts?)\b""")
     private val ETIQUETTE = Regex("""(?i)^(?:tensions?|courants?|mesures?|valeurs?)?\s*(?:relev[ée]e?s?|mesur[ée]e?s?)?\s*[:\-–]?\s*""")
@@ -323,7 +346,11 @@ object MesuresSeries {
             }
             // Rien de mesuré sur la ligne : gardée telle qu'écrite (accents, majuscules), pas sous sa forme normalisée.
             if (!trouve) { autres += origine; continue }
-            // Ce qui reste d'utile sur la ligne (ex. « isolement OK ») est gardé à part.
+            // Ce qui suit la dernière valeur (« 6 séries de 520 V, poignée ESS OK ») est gardé tel qu'écrit.
+            val apres = VALEUR_ORIGINALE.findAll(origine).lastOrNull()?.let { origine.substring(it.range.last + 1) }
+                ?.trim(' ', ',', ';', ':', '-', '–', '.', '•', ')')
+            if (apres != null && apres.count { it.isLetter() } >= 4 && !Regex("""(?i)s[ée]ries?|\d""").containsMatchIn(apres)) { autres += apres; continue }
+            // Sinon, ce qui reste d'utile sur la ligne (ex. « isolement OK ») est gardé à part.
             val r = reste.replace(Regex("""\s+"""), " ").trim(' ', ',', ';', ':', '-', '–', '.').replace(ETIQUETTE, "").trim(' ', ',', ':', '-')
             if (r.count { it.isLetter() } >= 4) autres += r
         }
