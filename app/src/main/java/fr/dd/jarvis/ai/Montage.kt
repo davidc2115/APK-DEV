@@ -160,7 +160,7 @@ object Montage {
         if (position > 1) return "⏳ Un montage vidéo est déjà en cours : celui-ci (${if (n > 1) "$n vidéos" else "1 vidéo"} de $duree s) démarrera juste après " +
             "(position $position dans la file). Les vidéos sont générées l'une après l'autre pour ne pas saturer fal.ai. Dis « annule la vidéo » pour tout arrêter."
         return "🎬 Montage lancé : ${if (n > 1) "$n vidéos" else "1 vidéo"} de $duree s" +
-            (if (!sansIa) " (≈ $plans plans IA par vidéo)" else "") + ".\n" +
+            (if (Stock.disponible(app) && d.plans.lowercase() != "ia") " (plans libres de droits Pexels / Pixabay)" else if (!sansIa) " (≈ $plans plans IA par vidéo)" else "") + ".\n" +
             "✍️ D'abord $agent analyse ta demande et écrit le scénario, puis un prompt précis pour chaque plan (mêmes personnages, décor et style d'un plan à l'autre) ; " +
             "ensuite les plans sont générés et montés à la durée exacte. Ça prend quelques minutes : je t'envoie le résultat ici (suivi dans la notification)." +
             (fr.dd.jarvis.work.SuiviTaches.bloquees(app)?.let { "\n$it" } ?: "")
@@ -208,12 +208,16 @@ object Montage {
                 val p = sb.plans[(existants.size + i) % sb.plans.size]
                 val requetes = listOf(p.recherche, Stock.motsCles(p.visuel), Stock.motsCles(p.visuel, 2)).filter { it.isNotBlank() }.distinct()
                 val clip = requetes.firstNotNullOfOrNull { q -> Stock.chercher(app, q, vertical, pris) }
+                    // Rien en anglais : mots du sujet en français (Pixabay et Pexels cherchent aussi en français).
+                    ?: Stock.motsClesFr(d.sujet).let { mots -> listOf(mots.joinToString(" "), mots.firstOrNull().orEmpty()) }
+                        .filter { it.isNotBlank() }.distinct().firstNotNullOfOrNull { q -> Stock.chercher(app, q, vertical, pris, francais = true) }
                 val f = clip?.let { Stock.telecharger(it, File(travail, "stock_$i.mp4")) }
                 if (clip != null && f != null) { credits += clip; Triple(i, f, p.texte) } else null
             }.also { if (it.isEmpty()) echecs += "aucun plan libre de droits trouvé (Pexels / Pixabay)" }
         } else emptyList()
-        val dureeStock = clipsStock.sumOf { (_, f, _) -> min(dureeMs(f) ?: 0L, 4000L) }
-        val manque = if (modePlans == "stock") 0L else (manqueTotal - dureeStock).coerceAtLeast(0)
+        // Plans libres de droits trouvés : ils couvrent toute la durée (coupés et enchaînés), sans compléter par l'IA —
+        // payante (fal.ai) ou sans quota gratuit (Gemini). L'IA ne sert qu'en l'absence de tout plan libre de droits.
+        val manque = if (modePlans == "stock" || (modePlans == "auto" && clipsStock.isNotEmpty())) 0L else manqueTotal
         val iaPossible = ImageToVideoGen.disponible(app) || app.store.huggingFaceToken.value.isNotBlank() || VideoProviderGen.disponible(app)
         val clipsIa = if (manque > 0 && iaPossible) {
             val nb = max(1, ceil(manque / 5000.0).toInt())
@@ -236,7 +240,7 @@ object Montage {
                 val ecoule = (t - debutPlans) / 1000
                 val actuel = etats.entries.firstOrNull { it.value == "en cours" || it.value.startsWith("file") }
                 progres("🎥 Plans IA : ${v.count { it == "ok" }}/$nb terminés" +
-                    (actuel?.let { " · plan ${it.key + 1} " + (if (it.value == "en cours") "en génération" else "en file d'attente fal.ai") } ?: "") +
+                    (actuel?.let { " · plan ${it.key + 1} " + (if (it.value == "en cours") "en génération" else "en file d'attente") } ?: "") +
                     v.count { it == "échec" }.let { if (it > 0) " · $it échec(s)" else "" } +
                     " · ${ecoule / 60} min ${"%02d".format(ecoule % 60)}" +
                     (if (dernierEchec.isNotBlank()) "\nDernier échec : ${dernierEchec.take(140)}" else ""))

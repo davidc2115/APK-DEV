@@ -564,6 +564,8 @@ class Store(context: Context) {
     val tiktokHebdoFait = SPref("tiktokHebdoFait", "")
     // ---- Images et vidéos libres de droits (gratuites) pour le montage
     val pexelsKey = SecretPref("pexelsKey")
+    /** Gemini Omni (vidéo) sans quota : pas de nouvel essai avant cette heure (epoch ms). */
+    val geminiVideoPauseJusqua = SPref("geminiVideoPauseJusqua", "0")
     val pixabayKey = SecretPref("pixabayKey")
 
     // ---- Annonces vocales (SMS, mails, notifications) : mode par catégorie (off | annonce | lecture) et sonnerie (URI, « default » ou vide = aucune)

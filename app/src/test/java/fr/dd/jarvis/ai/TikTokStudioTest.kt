@@ -147,4 +147,11 @@ class TikTokStudioTest {
         val complet = JSONObject().put("display_name", "Dd").put("follower_count", 250).put("likes_count", 1200).put("video_count", 12)
         assertEquals("Dd — 250 abonnés, 1200 likes, 12 vidéos", TikTok.resumeProfil(complet))
     }
+
+    /** Montage « avec Pixabay » : Gemini Omni sans quota gratuit (« limit: 0 ») n'est plus retenté à chaque plan. */
+    @Test fun quotaVideoNulEtRechercheEnFrancais() {
+        assertTrue(VideoProviderGen.sansQuota("HTTP 429 : Rate limit exceeded for model gemini-omni-1.2-flash (limit: 0 requests per day)"))
+        assertFalse(VideoProviderGen.sansQuota("HTTP 429 : Rate limit exceeded (limit: 10 requests per minute)"))
+        assertEquals(listOf("patriotisme", "enraciné", "hommage"), Stock.motsClesFr("niche du compte : patriotisme enraciné, hommage aux forces vives"))
+    }
 }

@@ -24,6 +24,13 @@ object Stock {
     private val VIDES = setOf("a", "an", "the", "of", "in", "on", "with", "and", "at", "to", "for", "by", "from", "shot", "camera", "close", "up",
         "cinematic", "realistic", "lighting", "light", "style", "scene", "view", "angle", "different", "slow", "motion", "vertical", "frame")
 
+    private val VIDES_FR = setOf("les", "des", "une", "dans", "avec", "pour", "sur", "par", "aux", "son", "ses", "leur", "leurs", "est", "sont", "qui", "que",
+        "niche", "compte", "video", "vidéo", "tiktok", "lien", "direct", "mon", "ma", "mes", "ton", "ta", "tes", "du", "de", "la", "le", "et", "en")
+
+    /** Mots-clés français d'un sujet (« niche du compte : patriotisme, hommage aux forces vives ») pour une recherche en français. */
+    fun motsClesFr(sujet: String, max: Int = 3): List<String> = sujet.lowercase().split(Regex("[^\\p{L}0-9]+"))
+        .filter { it.length > 3 && it !in VIDES_FR }.distinct().take(max)
+
     /** Mots-clés de recherche tirés d'un prompt de plan (en anglais) quand le scénario n'en donne pas. */
     fun motsCles(visuel: String, max: Int = 4): String = visuel.lowercase().replace(Regex("[^a-z0-9 ]"), " ").split(' ')
         .filter { it.length > 2 && it !in VIDES }.distinct().take(max).joinToString(" ")
@@ -52,11 +59,12 @@ object Stock {
     }.getOrNull()
 
     /** Premier plan libre de droits pour [requete] (anglais), pas encore utilisé dans ce montage ([pris]). */
-    suspend fun chercher(app: JarvisApp, requete: String, vertical: Boolean, pris: MutableSet<String>): Clip? = withContext(Dispatchers.IO) {
+    suspend fun chercher(app: JarvisApp, requete: String, vertical: Boolean, pris: MutableSet<String>, francais: Boolean = false): Clip? = withContext(Dispatchers.IO) {
         val q = java.net.URLEncoder.encode(requete.trim().ifBlank { return@withContext null }, "UTF-8")
         val pexels = app.store.pexelsKey.value.trim()
         if (pexels.isNotBlank()) {
-            val j = get("https://api.pexels.com/videos/search?query=$q&orientation=${if (vertical) "portrait" else "landscape"}&size=medium&per_page=15", "Authorization" to pexels)
+            val j = get("https://api.pexels.com/videos/search?query=$q&orientation=${if (vertical) "portrait" else "landscape"}&size=medium&per_page=15" +
+                (if (francais) "&locale=fr-FR" else ""), "Authorization" to pexels)
             val vids = j?.optJSONArray("videos")
             if (vids != null) for (i in 0 until vids.length()) {
                 val v = vids.optJSONObject(i) ?: continue
@@ -69,7 +77,7 @@ object Stock {
         }
         val pixabay = app.store.pixabayKey.value.trim()
         if (pixabay.isNotBlank()) {
-            val j = get("https://pixabay.com/api/videos/?key=${java.net.URLEncoder.encode(pixabay, "UTF-8")}&q=$q&per_page=15&safesearch=true")
+            val j = get("https://pixabay.com/api/videos/?key=${java.net.URLEncoder.encode(pixabay, "UTF-8")}&q=$q&per_page=20&safesearch=true" + (if (francais) "&lang=fr" else ""))
             val hits = j?.optJSONArray("hits")
             if (hits != null) for (i in 0 until hits.length()) {
                 val h = hits.optJSONObject(i) ?: continue

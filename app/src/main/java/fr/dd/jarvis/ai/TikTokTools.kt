@@ -95,6 +95,12 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
         catch (e: Exception) { ToolResult("❌ ${e.message ?: e.javaClass.simpleName}") }
     }
 
+    /** Dernière phrase de l'utilisateur (appli ou voiture, 15 min). */
+    private fun derniereDemande(): String = runCatching {
+        val limite = System.currentTimeMillis() - 15 * 60_000L
+        (app.chat.toList() + fr.dd.jarvis.service.CarBridge.contexte()).filter { it.fromUser && it.ts >= limite }.maxByOrNull { it.ts }?.text
+    }.getOrNull().orEmpty()
+
     private fun vraiArg(a: JSONObject, k: String) = a.optString(k).trim().lowercase() in setOf("true", "oui", "1", "yes")
 
     /** Vidéo à envoyer : la dernière montée par JARVIS (TikTok d'abord), un fichier jarvis-video-ia:…, ou un chemin du téléphone. */
@@ -209,7 +215,10 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                     garderSon = vrai("garder_son", false),
                     tiktok = name == "tiktok_video",
                     // « Avec Pixabay / Pexels / libres de droits » dans la demande : uniquement des plans libres de droits.
-                    plans = a.optString("plans").ifBlank { if (Regex("(?i)pixabay|pexels|libres? de droits").containsMatchIn(brut + " " + script)) "stock" else "auto" },
+                    // « Avec Pixabay / Pexels / libres de droits » dans TA phrase (pas seulement dans le sujet rédigé par l'IA) :
+                    // uniquement des plans libres de droits.
+                    plans = if (Regex("(?i)pixabay|pexels|libres? de droits").containsMatchIn(brut + " " + script + " " + derniereDemande())) "stock"
+                        else a.optString("plans").ifBlank { "auto" },
                     sousTitres = vrai("sous_titres", true),
                     // Brouillons TikTok : automatique dès que la publication est activée et autorisée sur le compte.
                     brouillon = name == "tiktok_video" && app.store.tiktokPublication.value && TikTok.envoiAutorise(app)

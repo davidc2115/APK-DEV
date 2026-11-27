@@ -24,7 +24,15 @@ object VideoProviderGen {
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
     fun dreaminaDisponible(app: JarvisApp) = app.store.dreaminaApiKey.value.isNotBlank()
-    fun geminiDisponible(app: JarvisApp) = app.store.geminiKeys.any { !KeyRing.estCleOpenAi(it) }
+    /**
+     * Gemini Omni (vidéo) : seulement si une clé Google existe ET que Google n'a pas répondu « limit: 0 » (aucun quota
+     * vidéo gratuit) dans les dernières 24 h — inutile alors de retenter à chaque plan.
+     */
+    fun geminiDisponible(app: JarvisApp) = app.store.geminiKeys.any { !KeyRing.estCleOpenAi(it) } &&
+        System.currentTimeMillis() > (app.store.geminiVideoPauseJusqua.value.toLongOrNull() ?: 0L)
+
+    /** « limit: 0 » / quota nul : le projet n'a aucun quota vidéo (offre gratuite). */
+    internal fun sansQuota(message: String) = Regex("(?i)limit:\\s*0\\b|quota.{0,40}\\b0\\b|free.?tier.{0,60}not (available|supported)").containsMatchIn(message)
     fun disponible(app: JarvisApp) = geminiDisponible(app) || dreaminaDisponible(app)
 
     /** Gemini Omni 1.2 est essayé en premier avec les clés Google déjà enregistrées dans Réglages. */
@@ -33,7 +41,10 @@ object VideoProviderGen {
         if (geminiDisponible(app)) {
             try { return genererGemini(app, prompt, duration, vertical) }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            catch (e: Exception) { erreurs += "Gemini Omni : " + (e.message ?: e.javaClass.simpleName) }
+            catch (e: Exception) {
+                erreurs += "Gemini Omni : " + (e.message ?: e.javaClass.simpleName)
+                if (sansQuota(e.message.orEmpty())) app.store.geminiVideoPauseJusqua.set((System.currentTimeMillis() + 24 * 3_600_000L).toString())
+            }
         }
         if (dreaminaDisponible(app)) {
             try { return genererDreamina(app, prompt, duration, vertical) }
