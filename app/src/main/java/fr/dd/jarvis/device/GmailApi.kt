@@ -460,6 +460,43 @@ object GmailApi {
         }
     }
 
+    /** Un agenda Google où le compte peut écrire (propriétaire ou modification autorisée). */
+    data class AgendaGoogle(val compte: String, val id: String, val nom: String, val couleur: Int, val principal: Boolean)
+
+    /** Agendas Google modifiables de [account], y compris ceux que le téléphone ne synchronise pas (liste vide si non autorisé). */
+    suspend fun agendasGoogle(ctx: Context, account: String): List<AgendaGoogle> = try {
+        val auth = authorize(ctx, account)
+        val token = auth.accessToken
+        if (auth.hasResolution() || token == null) emptyList() else withContext(Dispatchers.IO) {
+            val r = get(token, "https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=writer&maxResults=250")
+            val items = r.optJSONArray("items") ?: org.json.JSONArray()
+            (0 until items.length()).map { items.getJSONObject(it) }.filter { !it.optBoolean("deleted") }.map { o ->
+                AgendaGoogle(account, o.optString("id"), o.optString("summaryOverride").ifBlank { o.optString("summary") }.ifBlank { o.optString("id") },
+                    runCatching { android.graphics.Color.parseColor(o.optString("backgroundColor")) }.getOrDefault(0xFF039BE5.toInt()), o.optBoolean("primary"))
+            }
+        }
+    } catch (e: Exception) { emptyList() }
+
+    /**
+     * Rendez-vous créé DIRECTEMENT dans Google Agenda (visible tout de suite sur tous les appareils, sans attendre la
+     * synchronisation du téléphone). Retourne null si OK, sinon l'erreur.
+     */
+    suspend fun creerEvenementGoogle(ctx: Context, account: String, calendarId: String, titre: String, debut: java.time.LocalDateTime,
+                                     fin: java.time.LocalDateTime, lieu: String, description: String): String? = try {
+        val auth = authorize(ctx, account)
+        val token = auth.accessToken
+        if (auth.hasResolution()) "Autorisation Google Agenda à donner : Réglages › Comptes › Mails › retire puis ajoute le compte Google."
+        else if (token == null) "Jeton Google indisponible."
+        else withContext(Dispatchers.IO) {
+            val zone = java.time.ZoneId.systemDefault()
+            fun quand(t: java.time.LocalDateTime) = JSONObject().put("dateTime", t.atZone(zone).toOffsetDateTime().toString()).put("timeZone", zone.id)
+            val corps = JSONObject().put("summary", titre).put("start", quand(debut)).put("end", quand(fin))
+                .apply { if (lieu.isNotBlank()) put("location", lieu); if (description.isNotBlank()) put("description", description) }
+            val r = post(token, "https://www.googleapis.com/calendar/v3/calendars/${java.net.URLEncoder.encode(calendarId, "UTF-8")}/events", corps)
+            if (r.optString("id").isBlank()) "Google Agenda n'a pas confirmé la création." else null
+        }
+    } catch (e: Exception) { (e.message ?: e.javaClass.simpleName).let { if (it.contains("403")) "$it (active « Google Calendar API » dans ton projet Google Cloud)" else it } }
+
     /** Change la couleur d'un agenda côté Google (liste d'agendas) : visible ensuite sur tous les appareils. Retourne null si OK, sinon l'erreur. */
     suspend fun setCalendarColor(ctx: Context, account: String, googleCalId: String, rgb: Int): String? = try {
         val auth = authorize(ctx, account)

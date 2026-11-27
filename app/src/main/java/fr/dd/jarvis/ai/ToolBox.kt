@@ -1445,10 +1445,18 @@ class ToolBox(
                     if (e == null) ToolResult("Aucun rendez-vous détecté à ajouter.")
                     else {
                         // Agenda dit (« dans le planning Super U ») et retenu ; sinon celui déjà choisi pour ce classement.
-                        val dit = a.optString("agenda").trim().takeIf { it.isNotBlank() }
-                            ?.let { q -> app.calendar.findCalendar(q, writableOnly = true)?.let { app.calendar.displayName(it) } }
-                        if (dit != null) C.retenirAgenda(app, e, dit)
-                        execute("create_event", C.argsEvenement(e, agenda = dit ?: C.agendaRetenu(app, e))).also { r -> if (Regex("\\(#\\d+\\)").containsMatchIn(r.text)) C.marquer(app, e.id) }
+                        // Agenda Google : créé par l'API Google Agenda (visible tout de suite partout).
+                        val agendas = fr.dd.jarvis.device.AgendasCourrier.liste(app)
+                        val q = fr.dd.jarvis.societe.core.normaliser(a.optString("agenda"))
+                        val dit = if (q.isBlank()) null else agendas.firstOrNull { fr.dd.jarvis.societe.core.normaliser(it.nom) == q }
+                            ?: agendas.firstOrNull { fr.dd.jarvis.societe.core.normaliser(it.nom).contains(q) }
+                        if (dit != null) C.retenirAgenda(app, e, fr.dd.jarvis.device.AgendasCourrier.memoire(dit))
+                        val choix = dit ?: fr.dd.jarvis.device.AgendasCourrier.retrouver(agendas, C.agendaRetenu(app, e))
+                        if (choix == null) execute("create_event", C.argsEvenement(e)).also { r -> if (Regex("\\(#\\d+\\)").containsMatchIn(r.text)) C.marquer(app, e.id) }
+                        else {
+                            val debut = java.time.Instant.ofEpochMilli(e.dateRdv ?: System.currentTimeMillis()).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
+                            ToolResult(fr.dd.jarvis.device.AgendasCourrier.creer(app, choix, e, debut)).also { r -> if (r.text.startsWith("Événement")) C.marquer(app, e.id) }
+                        }
                     }
                 }
                 else -> ToolResult(C.texte(app, fr.dd.jarvis.device.Courrier.Intention.ATraiter), direct = true)

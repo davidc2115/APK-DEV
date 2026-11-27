@@ -69,17 +69,17 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     var smsProbleme by remember { mutableStateOf(Courrier.problemeSms(app)) }
     // Rendez-vous en cours d'ajout : on choisit d'abord l'agenda (retenu pour le même classement Société / Perso).
     var rdvAgenda by remember { mutableStateOf<Courrier.Element?>(null) }
-    fun ajouterAuPlanning(e: Courrier.Element, agenda: String) {
+    fun ajouterAuPlanning(e: Courrier.Element, agenda: fr.dd.jarvis.device.AgendasCourrier.Choix) {
         val initial = e.dateRdv?.let { java.time.Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDateTime() }
             ?: LocalDate.now().plusDays(1).atTime(9, 0)
         fun creerEvenement(debut: LocalDateTime) {
             scope.launch {
-                val result = withContext(Dispatchers.IO) {
-                    runCatching { fr.dd.jarvis.ai.ToolBox(app) { _, _ -> true }.execute("create_event", Courrier.argsEvenement(e, debut, agenda)) }
-                        .getOrElse { fr.dd.jarvis.ai.ToolResult("Échec de création : " + (it.message ?: "erreur inconnue")) }
+                val texte = withContext(Dispatchers.IO) {
+                    runCatching { fr.dd.jarvis.device.AgendasCourrier.creer(app, agenda, e, debut) }
+                        .getOrElse { "Échec de création : " + (it.message ?: "erreur inconnue") }
                 }
-                actionInfo = result.text
-                if (result.text.startsWith("Événement «")) {
+                actionInfo = texte
+                if (texte.startsWith("Événement")) {
                     Courrier.marquer(app, e.id)
                     version++
                 }
@@ -99,7 +99,7 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     }
     rdvAgenda?.let { e ->
         ChoixAgenda(app, retenu = Courrier.agendaRetenu(app, e), titre = Courrier.ligne(e).removePrefix("📅 "),
-            onChoix = { agenda -> rdvAgenda = null; Courrier.retenirAgenda(app, e, agenda); ajouterAuPlanning(e, agenda) },
+            onChoix = { agenda -> rdvAgenda = null; Courrier.retenirAgenda(app, e, fr.dd.jarvis.device.AgendasCourrier.memoire(agenda)); ajouterAuPlanning(e, agenda) },
             onAnnuler = { rdvAgenda = null })
     }
     LaunchedEffect(app) {
@@ -189,15 +189,20 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     }
 }
 
-/** Choix de l'agenda (agendas modifiables du téléphone, avec leur couleur) ; celui retenu est en tête et marqué. */
+/**
+ * Choix de l'agenda : ceux du téléphone où JARVIS peut écrire et tous les agendas Google modifiables des comptes
+ * connectés ; celui retenu est en tête et marqué.
+ */
 @Composable
-private fun ChoixAgenda(app: JarvisApp, retenu: String, titre: String, onChoix: (String) -> Unit, onAnnuler: () -> Unit) {
+private fun ChoixAgenda(app: JarvisApp, retenu: String, titre: String, onChoix: (fr.dd.jarvis.device.AgendasCourrier.Choix) -> Unit, onAnnuler: () -> Unit) {
     val accent = LocalAccent.current
-    val agendas = remember {
-        runCatching { app.calendar.calendars().filter { it.writable } }.getOrDefault(emptyList())
-            .map { it to app.calendar.displayName(it) }
-            .sortedWith(compareBy({ it.second != retenu }, { it.second.lowercase() }))
+    var agendas by remember { mutableStateOf<List<fr.dd.jarvis.device.AgendasCourrier.Choix>?>(null) }
+    LaunchedEffect(Unit) {
+        val l = withContext(Dispatchers.IO) { runCatching { fr.dd.jarvis.device.AgendasCourrier.liste(app) }.getOrDefault(emptyList()) }
+        val r = fr.dd.jarvis.device.AgendasCourrier.retrouver(l, retenu)
+        agendas = l.sortedBy { it.cle != r?.cle }
     }
+    val choisiCle = agendas?.let { fr.dd.jarvis.device.AgendasCourrier.retrouver(it, retenu)?.cle }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onAnnuler,
         containerColor = androidx.compose.ui.graphics.Color(0xFF0B1424), titleContentColor = accent, textContentColor = HudText,
@@ -206,24 +211,29 @@ private fun ChoixAgenda(app: JarvisApp, retenu: String, titre: String, onChoix: 
             androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(titre, color = HudDim, fontSize = 12.sp, maxLines = 2)
-                if (agendas.isEmpty()) Text("Aucun agenda modifiable : autorise l'agenda pour JARVIS (Réglages › Système › Autorisations).", color = HudText, fontSize = 12.sp)
-                agendas.forEach { (cal, nom) ->
-                    val choisi = nom == retenu
-                    Row(
-                        androidx.compose.ui.Modifier.fillMaxWidth().clip(HudShapeSmall)
-                            .background(accent.copy(alpha = if (choisi) 0.20f else 0.06f))
-                            .border(1.dp, accent.copy(alpha = if (choisi) 0.9f else 0.3f), HudShapeSmall)
-                            .clickable { onChoix(nom) }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                    ) {
-                        androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.size(12.dp).clip(androidx.compose.foundation.shape.CircleShape)
-                            .background(androidx.compose.ui.graphics.Color(app.calendar.calendarColor(cal))))
-                        androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(start = 10.dp).weight(1f)) {
-                            Text(nom, color = HudText, fontSize = 13.sp, fontWeight = if (choisi) FontWeight.SemiBold else FontWeight.Normal)
-                            if (cal.account.isNotBlank() && cal.account != nom) Text(cal.account, color = HudDim, fontSize = 10.sp)
+                val l = agendas
+                when {
+                    l == null -> Text("Recherche des agendas (téléphone et Google)…", color = HudDim, fontSize = 12.sp)
+                    l.isEmpty() -> Text("Aucun agenda modifiable : autorise l'agenda pour JARVIS, ou connecte ton compte Google (Réglages › Maison & comptes › Mails).", color = HudText, fontSize = 12.sp)
+                    else -> l.forEach { c ->
+                        val choisi = c.cle == choisiCle
+                        Row(
+                            androidx.compose.ui.Modifier.fillMaxWidth().clip(HudShapeSmall)
+                                .background(accent.copy(alpha = if (choisi) 0.20f else 0.06f))
+                                .border(1.dp, accent.copy(alpha = if (choisi) 0.9f else 0.3f), HudShapeSmall)
+                                .clickable { onChoix(c) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.size(12.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(androidx.compose.ui.graphics.Color(c.couleur)))
+                            androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(start = 10.dp).weight(1f)) {
+                                Text(c.nom, color = HudText, fontSize = 13.sp, fontWeight = if (choisi) FontWeight.SemiBold else FontWeight.Normal)
+                                Text((if (c.googleId != null) "Google · " else "Téléphone · ") + c.compte + (if (c.googleId != null && c.localId == null) " · pas synchronisé sur le téléphone" else ""),
+                                    color = HudDim, fontSize = 10.sp)
+                            }
+                            if (choisi) Text("retenu", color = accent, fontSize = 10.sp)
                         }
-                        if (choisi) Text("retenu", color = accent, fontSize = 10.sp)
                     }
                 }
             }

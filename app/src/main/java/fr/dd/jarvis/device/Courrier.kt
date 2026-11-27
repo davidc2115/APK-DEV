@@ -642,7 +642,7 @@ object Courrier {
                     app.calendar.events(Instant.ofEpochMilli(e.dateRdv).atZone(ZoneId.systemDefault()).toLocalDate(), 1).any { kotlin.math.abs(it.begin - e.dateRdv) < 31 * 60_000L } }.getOrDefault(false)
                 if (deja) return
                 "📅 ${e.objet.ifBlank { "Rendez-vous" }} : ${quand(e.dateRdv)}" to "Ajoute à mon agenda : rendez-vous « ${e.objet.ifBlank { e.emetteur }} » ${quand(e.dateRdv)}" + (if (e.lieu.isNotBlank()) " à ${e.lieu}" else "") +
-                    agendaRetenu(app, e).let { if (it.isNotBlank()) " dans l'agenda « $it »" else "" } + " (détecté dans un message reçu)."
+                    agendaRetenu(app, e).substringAfter('\t').let { if (it.isNotBlank()) " dans l'agenda « $it »" else "" } + " (détecté dans un message reçu)."
             }
             FACTURE -> "🧾 Facture ${e.emetteur} : ${euros(e.montant)}${if (e.echeance.isNotBlank()) " avant le ${dateFr(e.echeance)}" else ""}${etiquette(e)}" to
                 if (e.domaine == PERSO) null else "Ajoute une note de frais de ${euros(e.montant)} chez ${e.emetteur}${if (e.echeance.isNotBlank()) " (facture à payer avant le ${dateFr(e.echeance)})" else ""}."
@@ -725,7 +725,7 @@ object Courrier {
     /** Dernier rendez-vous détecté, à venir et non traité. */
     fun dernierRdv(c: Context): Element? = liste(c).filter { it.type == RDV && !it.traite && (it.dateRdv ?: 0) > System.currentTimeMillis() }.maxByOrNull { it.ts }
 
-    /** Agenda retenu pour un élément selon son classement (Société / Perso / à classer), "" si aucun choix encore. */
+    /** Agenda retenu (« clé⇥nom », voir AgendasCourrier) pour un élément selon son classement (Société / Perso / à classer), "" sinon. */
     fun agendaRetenu(app: JarvisApp, e: Element): String = when (e.domaine) {
         SOCIETE -> app.store.courrierAgendaSociete.value; PERSO -> app.store.courrierAgendaPerso.value; else -> app.store.courrierAgendaAutre.value
     }

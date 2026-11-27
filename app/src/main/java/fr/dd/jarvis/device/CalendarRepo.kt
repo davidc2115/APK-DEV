@@ -165,7 +165,25 @@ class CalendarRepo(private val ctx: Context, private val store: Store) {
             if (description.isNotBlank()) put(CalendarContract.Events.DESCRIPTION, description)
         }
         val uri = ctx.contentResolver.insert(CalendarContract.Events.CONTENT_URI, v) ?: return null
+        // Envoi immédiat vers Google Agenda (sinon l'événement attend la prochaine synchronisation, jamais si elle est coupée).
+        synchroniser(calId)
         return ContentUris.parseId(uri)
+    }
+
+    /** Compte (nom, type) et identifiant Google (_SYNC_ID) d'un agenda du téléphone, ou null. */
+    fun infosSync(calId: Long): Triple<String, String, String>? = runCatching { meta(calId) }.getOrNull()
+
+    /** Demande la synchronisation immédiate de l'agenda (compte Google) : manuelle, donc même si la synchro auto est coupée. */
+    fun synchroniser(calId: Long) {
+        runCatching {
+            val (acc, type, _) = meta(calId) ?: return
+            if (acc.isBlank() || type.isBlank()) return
+            val extras = android.os.Bundle().apply {
+                putBoolean(android.content.ContentResolver.SYNC_EXTRAS_MANUAL, true)
+                putBoolean(android.content.ContentResolver.SYNC_EXTRAS_EXPEDITED, true)
+            }
+            android.content.ContentResolver.requestSync(android.accounts.Account(acc, type), CalendarContract.AUTHORITY, extras)
+        }
     }
 
     fun update(
