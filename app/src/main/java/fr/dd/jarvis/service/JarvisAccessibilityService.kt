@@ -259,22 +259,60 @@ class JarvisAccessibilityService : AccessibilityService() {
      * Appuie sur le bouton de départ du guidage (« Y aller », « Démarrer », « Go »…) de Waze / Google Maps s'il est
      * affiché sur le téléphone — l'itinéraire est calculé mais attend ce bouton. Rend le libellé appuyé, ou null.
      */
-    fun cliquerDepartGuidage(paquets: Set<String>): String? {
-        val racines = (runCatching { windows.mapNotNull { it.root } }.getOrDefault(emptyList()) + listOfNotNull(runCatching { rootInActiveWindow }.getOrNull()))
+    /** Fenêtres affichées de Waze / Maps (toutes les fenêtres interactives, pas seulement celle qui a le focus). */
+    private fun racinesGuidage(paquets: Set<String>): List<AccessibilityNodeInfo> =
+        (runCatching { windows.mapNotNull { it.root } }.getOrDefault(emptyList()) + listOfNotNull(runCatching { rootInActiveWindow }.getOrNull()))
             .filter { it.packageName?.toString() in paquets }
-        for (r in racines) {
-            val n = chercher(r) { x ->
-                x.isVisibleToUser && (fr.dd.jarvis.car.GuidageVoiture.boutonDepart(x.text?.toString().orEmpty()) ||
-                    fr.dd.jarvis.car.GuidageVoiture.boutonDepart(x.contentDescription?.toString().orEmpty()))
-            } ?: continue
-            val libelle = (n.text ?: n.contentDescription ?: "").toString().trim()
+            .distinctBy { runCatching { it.windowId }.getOrDefault(0) }
+
+    /** Bouton de départ visible : par son libellé (« Y aller »…), sinon par son identifiant (bouton-icône sans texte). */
+    private fun boutonDepartDans(r: AccessibilityNodeInfo): AccessibilityNodeInfo? =
+        chercher(r) { x ->
+            x.isVisibleToUser && (fr.dd.jarvis.car.GuidageVoiture.boutonDepart(x.text?.toString().orEmpty()) ||
+                fr.dd.jarvis.car.GuidageVoiture.boutonDepart(x.contentDescription?.toString().orEmpty()))
+        } ?: chercher(r) { x -> x.isVisibleToUser && fr.dd.jarvis.car.GuidageVoiture.boutonDepartId(x.viewIdResourceName.orEmpty()) }
+
+    fun cliquerDepartGuidage(paquets: Set<String>): String? {
+        for (r in racinesGuidage(paquets)) {
+            val n = boutonDepartDans(r) ?: continue
+            val libelle = (n.text ?: n.contentDescription)?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                ?: n.viewIdResourceName?.substringAfter(":id/") ?: "départ"
             var cur: AccessibilityNodeInfo? = n
             while (cur != null) {
-                if (cur.isClickable) return if (cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)) libelle else null
+                if (cur.isClickable) { if (cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return libelle; break }
                 cur = cur.parent
             }
+            // Aucun parent cliquable, ou clic refusé (vue dessinée par l'appli) : on touche le centre du bouton.
+            val b = android.graphics.Rect().also { n.getBoundsInScreen(it) }
+            if (!b.isEmpty && tap(b.exactCenterX(), b.exactCenterY())) return libelle
         }
         return null
+    }
+
+    /** null : Waze / Maps n'est pas affiché ; vrai : l'aperçu attend encore le bouton de départ ; faux : affiché, sans ce bouton. */
+    fun apercuGuidage(paquets: Set<String>): Boolean? {
+        val r = racinesGuidage(paquets)
+        if (r.isEmpty()) return null
+        return r.any { boutonDepartDans(it) != null }
+    }
+
+    /** Résumé de ce qui est affiché dans Waze / Maps (libellés, [cliquables] et #identifiants), pour le journal. */
+    fun resumeGuidage(paquets: Set<String>): String {
+        val r = racinesGuidage(paquets)
+        if (r.isEmpty()) return "aucune fenêtre Waze / Maps visible"
+        val vus = LinkedHashSet<String>()
+        fun parcourir(n: AccessibilityNodeInfo?, p: Int) {
+            if (n == null || p > 40 || vus.size >= 24) return
+            if (n.isVisibleToUser) {
+                val t = (n.text ?: n.contentDescription)?.toString()?.replace('\n', ' ')?.trim()?.take(32).orEmpty()
+                val id = if (n.isClickable) n.viewIdResourceName?.substringAfter(":id/")?.let { "#$it" }.orEmpty() else ""
+                val e = listOf(t, id).filter { it.isNotEmpty() }.joinToString(" ")
+                if (e.isNotEmpty()) vus += if (n.isClickable) "[$e]" else e
+            }
+            for (i in 0 until n.childCount) parcourir(runCatching { n.getChild(i) }.getOrNull(), p + 1)
+        }
+        r.forEach { parcourir(it, 0) }
+        return "${r.size} fenêtre(s) : " + vus.joinToString(" · ").ifEmpty { "(rien de lisible)" }
     }
 
     fun clickText(text: String): Boolean {

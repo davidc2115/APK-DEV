@@ -64,10 +64,18 @@ class JarvisNotificationListener : NotificationListenerService() {
             val actives = runCatching { s.activeNotifications }.getOrNull() ?: return null
             return actives.any { sbn ->
                 sbn.packageName in paquets && sbn.postTime >= depuis && sbn.notification?.let { n ->
-                    n.category == Notification.CATEGORY_NAVIGATION
+                    n.category == Notification.CATEGORY_NAVIGATION ||
+                        ((n.flags and Notification.FLAG_ONGOING_EVENT) != 0 && fr.dd.jarvis.car.GuidageVoiture.texteGuidage(texteNav(n)))
                 } == true
             }
         }
+
+        /** Titre + texte d'une notification Waze / Maps (consigne de guidage, heure d'arrivée). */
+        internal fun texteNav(n: Notification): String = runCatching {
+            val e = n.extras
+            listOf(Notification.EXTRA_TITLE, Notification.EXTRA_TEXT, Notification.EXTRA_SUB_TEXT, Notification.EXTRA_BIG_TEXT)
+                .mapNotNull { e.getCharSequence(it)?.toString() }.joinToString(" · ")
+        }.getOrDefault("")
 
         @Synchronized fun snapshot(): List<Item> = items.toList()
         @Synchronized private fun add(i: Item) { items.addFirst(i); while (items.size > 300) items.removeLast() }
@@ -140,7 +148,8 @@ class JarvisNotificationListener : NotificationListenerService() {
             if (sbn.packageName == packageName) return
             val n = sbn.notification ?: return
             // Guidage Waze / Maps (notification permanente mise à jour) : sert à vérifier qu'un itinéraire a vraiment démarré.
-            fr.dd.jarvis.car.GuidageVoiture.noter(sbn.packageName, sbn.postTime, n.category, (n.flags and Notification.FLAG_ONGOING_EVENT) != 0)
+            fr.dd.jarvis.car.GuidageVoiture.noter(sbn.packageName, sbn.postTime, n.category, (n.flags and Notification.FLAG_ONGOING_EVENT) != 0,
+                if (sbn.packageName in fr.dd.jarvis.car.GuidageVoiture.PAQUETS) texteNav(n) else "")
             val appel = n.category == Notification.CATEGORY_CALL
             if ((n.flags and Notification.FLAG_GROUP_SUMMARY) != 0 || ((n.flags and Notification.FLAG_ONGOING_EVENT) != 0 && !appel)) return
             val e = n.extras

@@ -31,11 +31,28 @@ object GuidageVoiture {
     private val fenetres = ConcurrentHashMap<String, Long>()
     private const val NOTIF = 7731
 
-    /** Notification d'une appli de navigation (appelé par l'écouteur de notifications). */
-    fun noter(pkg: String, quand: Long, categorie: String?, @Suppress("UNUSED_PARAMETER") permanente: Boolean) {
+    /**
+     * Notification d'une appli de navigation (appelé par l'écouteur de notifications). Une notification persistante seule
+     * ne prouve pas que le guidage a démarré (Waze en garde une dès qu'il tourne, Android Auto compris) : il faut qu'elle
+     * soit classée NAVIGATION, ou que son [texte] soit une consigne de guidage (« Dans 300 m, tournez à droite »,
+     * « Arrivée 11:42 »). Waze ne classe pas toujours la sienne.
+     */
+    fun noter(pkg: String, quand: Long, categorie: String?, permanente: Boolean, texte: String = "") {
         if (pkg !in PAQUETS) return
-        // Une notification persistante seule ne prouve pas que le calcul d’itinéraire a démarré.
-        if (categorie == Notification.CATEGORY_NAVIGATION) dernieres.merge(pkg, quand) { a, b -> maxOf(a, b) }
+        if (categorie == Notification.CATEGORY_NAVIGATION || (permanente && texteGuidage(texte))) dernieres.merge(pkg, quand) { a, b -> maxOf(a, b) }
+    }
+
+    private fun sansAccents(t: String) = java.text.Normalizer.normalize(t.lowercase(Locale.ROOT), java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "").replace('’', '\'').replace(Regex("\\s+"), " ").trim()
+    private val DISTANCE = Regex("\\b\\d+(?:[,.]\\d+)?\\s?(?:km|m)\\b")
+    private val CONSIGNE = Regex("\\b(tourne\\w*|continue\\w*|sortie|rond-point|rond point|serrez|prenez|restez|faites demi-tour|demi-tour|direction|arrivee|turn|continue|exit|roundabout|keep|arrival)\\b")
+    private val HEURE_ARRIVEE = Regex("\\b(arrivee|eta|arrival)\\b[^0-9]{0,20}\\d{1,2}\\s?[h:]\\s?\\d{2}\\b")
+
+    /** Texte d'une notification Waze / Maps qui ne s'affiche que pendant un guidage (consigne + distance, ou heure d'arrivée). */
+    fun texteGuidage(texte: String): Boolean {
+        val t = sansAccents(texte)
+        if (t.isBlank()) return false
+        return (DISTANCE.containsMatchIn(t) && CONSIGNE.containsMatchIn(t)) || HEURE_ARRIVEE.containsMatchIn(t)
     }
 
     /** Fenêtre de Waze / Maps ouverte sur le téléphone (appelé par le service d'accessibilité). */
@@ -62,9 +79,27 @@ object GuidageVoiture {
 
 
 
-    /** Bouton de départ du guidage (« Y aller », « Démarrer »…) : appuyer dessus est sans risque, aucune confirmation. */
-    private val BOUTON_DEPART = Regex("(?i)^\\s*(y aller|go|démarrer|demarrer|partir|c'est parti|lancer|lancer le guidage|commencer|start|démarrer la navigation|demarrer la navigation|aller)\\s*[!.]?\\s*$")
-    fun boutonDepart(texte: String): Boolean = BOUTON_DEPART.matches(texte)
+    /**
+     * Bouton de départ du guidage (« Y aller », « Démarrer »…) : appuyer dessus est sans risque, aucune confirmation.
+     * Waze n'auto-démarre plus avec « navigate=yes » (aperçu de l'itinéraire + bouton à toucher) et ses libellés changent
+     * selon les versions (« Y aller », « Y aller maintenant », « Partir maintenant », « Go now »…).
+     */
+    private val DEPART_EXACT = setOf("y aller", "go", "go now", "demarrer", "partir", "partir maintenant", "c'est parti", "allons-y", "allons y",
+        "lancer", "lancer le guidage", "lancer la navigation", "commencer", "start", "start navigation", "demarrer la navigation",
+        "demarrer le guidage", "demarrer le trajet", "aller", "y aller maintenant", "conduire", "drive", "lets go", "let's go")
+    private val DEPART_DEBUT = listOf("y aller", "demarrer", "partir maintenant", "go now", "lancer la navigation", "lancer le guidage",
+        "commencer la navigation", "commencer le trajet", "start navigation", "start driving")
+    private val PAS_DEPART = Regex("\\b(plus tard|later|annuler|cancel|arreter|stop|quitter|partager|share|ajouter|add|enregistrer|save|envoyer|send|planifier|schedule|itineraires|routes|options)\\b")
+
+    fun boutonDepart(texte: String): Boolean {
+        val t = sansAccents(texte).removePrefix("bouton ").removeSuffix(" bouton").trim().trimEnd('!', '.', ' ')
+        if (t.isEmpty() || t.length > 40 || PAS_DEPART.containsMatchIn(t)) return false
+        return t in DEPART_EXACT || DEPART_DEBUT.any { t.startsWith("$it ") || t == it }
+    }
+
+    /** Identifiant d'écran d'un bouton de départ sans texte (icône) : « com.waze:id/goButton », « …:id/start_navigation »… */
+    private val ID_DEPART = Regex("(?i)^(?:go|go_?button|btn_?go|go_?now\\w*|\\w*_go_?button|start_?nav\\w*|navigate_?button|start_?driv\\w*|drive_?button|route_?go\\w*)$")
+    fun boutonDepartId(id: String): Boolean = id.isNotBlank() && ID_DEPART.matches(id.substringAfter(":id/"))
 
     /** Voix de guidage en cours (Waze / Maps annonce le départ) : lecture audio « navigation » active. */
     fun guidageVocal(ctx: Context): Boolean = runCatching {
@@ -207,40 +242,50 @@ object GuidageVoiture {
         val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.phone.navigate(destination, "d", choix, point) }
         journal.noter("voiture", "téléphone : ${choix.ifBlank { "Google Maps" }} → ${r.take(120)}")
         if (r.startsWith("🧭")) {
-            // Waze démarré à froid met plusieurs secondes à calculer l'itinéraire.
             val nomAppli = choix.ifBlank { "Google Maps" }
-            // Premier contrôle court : souvent l'appli s'ouvre sur l'itinéraire calculé et attend « Y aller » / « Démarrer ».
-            when (attendre(t1, 6_000, app)) {
-                true -> { journal.noter("voiture", "guidage démarré par $nomAppli vers $nom"); return "🧭 Itinéraire vers $nom lancé dans $nomAppli." }
-                null -> {
-                    val ouverte = attendreOuverture(t1, 6_000)
-                    val appui = if (ouverte) appuyerDepart(journal, nomAppli) else null
-                    return when {
-                        appui != null -> "🧭 Itinéraire vers $nom lancé dans $nomAppli (j'ai appuyé sur « $appui »)."
-                        ouverte -> "⚠️ $nomAppli s'est ouvert pour $nom, mais l'accès aux notifications ne permet pas de confirmer le guidage. Vérifie que l'itinéraire a bien démarré."
-                        else -> "⚠️ La demande a été transmise à $nomAppli, mais je ne peux pas vérifier que l'application ou le guidage s'est ouvert. Active l'accès aux notifications et l'accessibilité de JARVIS pour un contrôle fiable."
-                    }
-                }
-                false -> {
-                    val ouverte = attendreOuverture(t1, 6_000)
-                    val blocage = blocageProbable(app)
-                    if (!ouverte) {
-                        journal.noter("voiture", "$nomAppli : aucune ouverture d'application détectée après l'intent")
-                        return "⚠️ Android a accepté la demande pour $nomAppli, mais l'application GPS ne s'est pas ouverte. Le guidage n'a donc pas démarré. ${blocage ?: "Vérifie l'autorisation de lancement en arrière-plan et que l'application est installée."}"
-                    }
-                    // Ouverte mais pas partie : JARVIS appuie lui-même sur le bouton de départ, puis revérifie.
-                    val appui = appuyerDepart(journal, nomAppli)
-                    val t2 = System.currentTimeMillis()
-                    if (appui != null && attendre(t2 - 500, 7_000, app) == true) {
-                        journal.noter("voiture", "guidage démarré par $nomAppli vers $nom après appui sur « $appui »")
-                        return "🧭 Itinéraire vers $nom lancé dans $nomAppli."
-                    }
-                    if (attendre(t1, 4_000, app) == true) return "🧭 Itinéraire vers $nom lancé dans $nomAppli."
-                    journal.noter("voiture", "$nomAppli : application ouverte, mais aucun signal de guidage" + (appui?.let { " (même après appui sur « $it »)" } ?: " (bouton de départ non trouvé à l'écran)"))
-                    return "⚠️ $nomAppli s'est bien ouvert pour $nom, mais je ne détecte pas le démarrage de l'itinéraire" +
-                        (if (appui != null) " (j'ai pourtant appuyé sur « $appui »)" else "") + ". Vérifie le bouton « Démarrer / Y aller » dans l'application."
-                }
+            val verrou = verrouille(app)
+            // Premier contrôle court : Google Maps part seul ; Waze, lui, s'arrête sur l'aperçu et attend « Y aller ».
+            val premier = attendre(t1, 5_000, app)
+            if (premier == true) { journal.noter("voiture", "guidage démarré par $nomAppli vers $nom"); return "🧭 Itinéraire vers $nom lancé dans $nomAppli." }
+            val ouverte = attendreOuverture(t1, 6_000)
+            if (!ouverte) {
+                journal.noter("voiture", "$nomAppli : aucune ouverture d'application détectée après l'intent · téléphone verrouillé : ${etat(verrou)}")
+                if (premier == null) return "⚠️ La demande a été transmise à $nomAppli, mais je ne peux pas vérifier que l'application ou le guidage s'est ouvert. Active l'accès aux notifications et l'accessibilité de JARVIS pour un contrôle fiable."
+                val secours = notifier(app, destination, point, choix)
+                val blocage = blocageProbable(app)
+                return "⚠️ Android a accepté la demande pour $nomAppli, mais l'application GPS ne s'est pas ouverte : le guidage n'a pas démarré. " +
+                    (if (verrou) "Le téléphone est verrouillé. " else "") + (blocage?.let { "$it. " } ?: "") + phraseSecours(secours)
             }
+            // Ouverte mais pas partie : JARVIS appuie lui-même sur le bouton de départ (le calcul de l'itinéraire peut
+            // prendre plusieurs secondes avant que le bouton n'apparaisse), puis revérifie.
+            val appui = appuyerDepart(journal, nomAppli, 20)
+            if (appui != null) {
+                if (attendre(System.currentTimeMillis() - 500, 6_000, app) == true) {
+                    journal.noter("voiture", "guidage démarré par $nomAppli vers $nom après appui sur « $appui »")
+                    return "🧭 Itinéraire vers $nom lancé dans $nomAppli."
+                }
+                // Aucun signal système, mais l'aperçu s'est fermé et l'appli reste affichée : elle est passée en guidage.
+                if (apercuFerme()) {
+                    journal.noter("voiture", "$nomAppli : aperçu fermé après appui sur « $appui » (guidage en cours, sans notification de navigation)")
+                    return "🧭 Itinéraire vers $nom lancé dans $nomAppli (j'ai appuyé sur « $appui »)."
+                }
+                // Le bouton est toujours là : l'appui n'a pas été pris, nouvel essai.
+                val second = appuyerDepart(journal, nomAppli, 4)
+                if (second != null && (attendre(System.currentTimeMillis() - 500, 5_000, app) == true || apercuFerme())) {
+                    journal.noter("voiture", "guidage démarré par $nomAppli vers $nom au second appui sur « $second »")
+                    return "🧭 Itinéraire vers $nom lancé dans $nomAppli."
+                }
+            } else {
+                if (premier == null) return "⚠️ $nomAppli s'est ouvert pour $nom, mais l'accès aux notifications ne permet pas de confirmer le guidage. Vérifie que l'itinéraire a bien démarré."
+                if (attendre(t1, 3_000, app) == true) return "🧭 Itinéraire vers $nom lancé dans $nomAppli."
+            }
+            journal.noter("voiture", "$nomAppli : application ouverte, mais aucun signal de guidage" +
+                (appui?.let { " (même après appui sur « $it »)" } ?: " (bouton de départ non trouvé à l'écran)") +
+                " · téléphone verrouillé : ${etat(verrou)} · écran : ${diagnosticEcran()}")
+            val secours = notifier(app, destination, point, choix)
+            return if (appui != null) "⚠️ J'ai appuyé sur « $appui » dans $nomAppli pour $nom, mais le guidage ne démarre pas. " + phraseSecours(secours)
+            else "⚠️ $nomAppli s'est ouvert pour $nom, mais je n'ai pas trouvé son bouton « Y aller » pour démarrer le guidage" +
+                (if (verrou) " : le téléphone est verrouillé, je ne vois pas l'écran de $nomAppli" else "") + ". " + phraseSecours(secours)
         } else echecs += r.removePrefix("❌ ").take(120)
 
         // 3. Rien de vérifié : itinéraire prêt dans une notification à toucher, et réponse honnête.
@@ -255,10 +300,28 @@ object GuidageVoiture {
             }
     }
 
-    /** Bouton de départ de Waze / Maps touché par le service d'accessibilité (jusqu'à ~4 s d'attente de son affichage). */
-    private suspend fun appuyerDepart(journal: fr.dd.jarvis.voice.JournalVoix, nomAppli: String): String? {
+    private fun verrouille(ctx: Context): Boolean =
+        runCatching { ctx.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked }.getOrDefault(false)
+
+    /** Ce que JARVIS voit de Waze / Maps à l'écran (journal : libellé exact du bouton de départ s'il a changé). */
+    private fun diagnosticEcran(): String =
+        fr.dd.jarvis.service.JarvisAccessibilityService.instance?.let { acc -> runCatching { acc.resumeGuidage(PAQUETS) }.getOrNull() } ?: "accessibilité inactive"
+
+    /** L'aperçu de l'itinéraire a disparu (plus de bouton de départ) alors que Waze / Maps est toujours affiché. */
+    private suspend fun apercuFerme(): Boolean {
+        val acc = fr.dd.jarvis.service.JarvisAccessibilityService.instance ?: return false
+        delay(1_500)
+        return runCatching { acc.apercuGuidage(PAQUETS) }.getOrNull() == false
+    }
+
+    private fun phraseSecours(voiture: Boolean): String =
+        if (voiture) "Touche la notification « 🧭 Itinéraire » sur l'écran de la voiture (ou sur le téléphone) : Android Auto démarre alors le guidage."
+        else "Touche la notification « 🧭 Itinéraire » sur le téléphone, ou le bouton « Y aller » dans l'application."
+
+    /** Bouton de départ de Waze / Maps touché par le service d'accessibilité ([essais] × 0,5 s d'attente de son affichage). */
+    private suspend fun appuyerDepart(journal: fr.dd.jarvis.voice.JournalVoix, nomAppli: String, essais: Int = 8): String? {
         val acc = fr.dd.jarvis.service.JarvisAccessibilityService.instance ?: return null
-        repeat(8) {
+        repeat(essais) {
             val l = runCatching { acc.cliquerDepartGuidage(PAQUETS) }.getOrNull()
             if (l != null) { journal.noter("voiture", "$nomAppli : bouton « $l » appuyé pour démarrer le guidage"); return l }
             delay(500)
@@ -266,8 +329,14 @@ object GuidageVoiture {
         return null
     }
 
-    /** Notification « Itinéraire vers … » : un toucher ouvre le guidage (lancement autorisé par Android). */
-    private fun notifier(app: JarvisApp, destination: String, point: Pair<Double, Double>?, appli: String) {
+    /**
+     * Notification « Itinéraire vers … » : un toucher ouvre le guidage (lancement autorisé par Android). Pendant Android
+     * Auto, elle s'affiche AUSSI sur l'écran de la voiture : la toucher demande à Android Auto lui-même de guider vers la
+     * destination (même chemin que l'écran JARVIS de la voiture), téléphone verrouillé compris. Vrai si la version
+     * « voiture » a été ajoutée.
+     */
+    private fun notifier(app: JarvisApp, destination: String, point: Pair<Double, Double>?, appli: String): Boolean {
+        var voiture = false
         runCatching {
             val a = appli.lowercase()
             val uri = when {
@@ -276,11 +345,25 @@ object GuidageVoiture {
             }
             val i = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             val pi = PendingIntent.getActivity(app, 31, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            val n = NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS).setSmallIcon(android.R.drawable.ic_dialog_map)
-                .setContentTitle("🧭 Itinéraire vers ${destination.ifBlank { "la destination" }.take(60)}")
+            val titre = "🧭 Itinéraire vers ${destination.ifBlank { "la destination" }.take(60)}"
+            val b = NotificationCompat.Builder(app, JarvisApp.CHANNEL_AGENTS).setSmallIcon(android.R.drawable.ic_dialog_map)
+                .setContentTitle(titre)
                 .setContentText("Touche pour démarrer le guidage").setCategory(NotificationCompat.CATEGORY_NAVIGATION)
-                .setPriority(NotificationCompat.PRIORITY_HIGH).setContentIntent(pi).setAutoCancel(true).build()
-            app.getSystemService(NotificationManager::class.java).notify(NOTIF, n)
+                .setPriority(NotificationCompat.PRIORITY_HIGH).setContentIntent(pi).setAutoCancel(true)
+            if (app.enVoiture && (destination.isNotBlank() || point != null)) runCatching {
+                val nav = Intent(androidx.car.app.CarContext.ACTION_NAVIGATE).setData(Uri.parse(geo(destination, point)))
+                val carPi = androidx.car.app.notification.CarPendingIntent.getCarApp(app, 32, nav, PendingIntent.FLAG_UPDATE_CURRENT)
+                b.extend(androidx.car.app.notification.CarAppExtender.Builder()
+                    .setContentTitle(titre).setContentText("Touche pour démarrer le guidage")
+                    .setSmallIcon(fr.dd.jarvis.R.drawable.ic_auto_route)
+                    .setContentIntent(carPi)
+                    .addAction(fr.dd.jarvis.R.drawable.ic_auto_route, "Démarrer", carPi)
+                    .setImportance(androidx.core.app.NotificationManagerCompat.IMPORTANCE_HIGH)
+                    .build())
+                voiture = true
+            }.onFailure { fr.dd.jarvis.voice.JournalVoix.noter("voiture", "notification écran voiture impossible : ${it.javaClass.simpleName} ${it.message.orEmpty().take(80)}") }
+            app.getSystemService(NotificationManager::class.java).notify(NOTIF, b.build())
         }
+        return voiture
     }
 }

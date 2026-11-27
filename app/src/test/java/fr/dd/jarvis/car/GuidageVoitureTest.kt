@@ -115,4 +115,36 @@ class LieuProcheTest {
         assertNull(g.categorieProche("la gare de Dijon"))
         assertNull(g.categorieProche("une rue de Dijon"))
     }
+
+    @Test fun boutonDeDepartDeWazeQuelleQueSoitSaVersion() {
+        listOf("Y aller", "Y aller maintenant", "Partir maintenant", "Go now", "Bouton Y aller", "Démarrer le trajet", "Allons-y !", "GO")
+            .forEach { assertTrue(it, GuidageVoiture.boutonDepart(it)) }
+        listOf("Partir plus tard", "Y aller plus tard", "Ajouter un arrêt", "Annuler", "Options d'itinéraire", "Partager l'heure d'arrivée", "")
+            .forEach { assertTrue(it, !GuidageVoiture.boutonDepart(it)) }
+        assertTrue(GuidageVoiture.boutonDepartId("com.waze:id/goButton"))
+        assertTrue(GuidageVoiture.boutonDepartId("com.google.android.apps.maps:id/start_navigation_button"))
+        assertTrue(!GuidageVoiture.boutonDepartId("com.waze:id/settingsButton"))
+        assertTrue(!GuidageVoiture.boutonDepartId("com.waze:id/btnCancel"))
+        assertTrue(!GuidageVoiture.boutonDepartId(""))
+    }
+
+    @Test fun notificationDeGuidageDeWazeReconnueASonTexte() {
+        assertTrue(GuidageVoiture.texteGuidage("Dans 300 m, tournez à droite · Rue de Massingy"))
+        assertTrue(GuidageVoiture.texteGuidage("Waze · Arrivée 11:42 · 12 min"))
+        assertTrue(GuidageVoiture.texteGuidage("Continuez sur 2,4 km"))
+        assertTrue(!GuidageVoiture.texteGuidage("Waze est en cours d'exécution"))
+        assertTrue(!GuidageVoiture.texteGuidage("Waze · connecté à Android Auto"))
+        assertTrue(!GuidageVoiture.texteGuidage("Il est temps de partir pour arriver à 9h00"))
+        assertTrue(!GuidageVoiture.texteGuidage("Vitteaux · 8,4 km"))
+
+        GuidageVoiture.reinitialiserPourTests()
+        val t = System.currentTimeMillis() - 100
+        GuidageVoiture.noter("com.waze", t + 10, null, true, "Waze est en cours d'exécution")
+        assertTrue(GuidageVoiture.demarreDepuis(t) != true)
+        GuidageVoiture.noter("com.waze", t + 20, null, false, "Dans 300 m, tournez à droite") // pas persistante : ignorée
+        assertTrue(GuidageVoiture.demarreDepuis(t) != true)
+        GuidageVoiture.noter("com.waze", t + 30, null, true, "Dans 300 m, tournez à droite")
+        assertTrue(GuidageVoiture.demarreDepuis(t) == true)
+        GuidageVoiture.reinitialiserPourTests()
+    }
 }
