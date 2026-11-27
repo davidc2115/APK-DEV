@@ -90,12 +90,11 @@ object VideoGen {
         val token = app.store.huggingFaceToken.value.trim()
         if (token.isBlank()) throw ApiException(401,
             "Token Hugging Face gratuit manquant : crée-en un sur huggingface.co/settings/tokens puis ajoute-le dans Réglages › IA › Images & vidéo. fal.ai n'est plus utilisé pour la génération vidéo.")
-        // Le service anime une IMAGE : sans image fournie, JARVIS en crée une d'abord (Cloudflare, gratuit), au bon format.
+        // Le service anime une IMAGE : sans image fournie, JARVIS en crée une d'abord (Cloudflare ou Hugging Face, gratuits), au bon format.
         val depart = image ?: runCatching {
             ImageGen.generate(app, "$prompt, ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, cinematic, highly detailed, no text",
-                "flux-2-klein", if (vertical) 768 else 1344, if (vertical) 1344 else 768).first
-        }.recoverCatching { ImageGen.generate(app, prompt).first }
-            .getOrElse { throw ApiException(0, "pas d'image de départ à animer (génération d'image Cloudflare impossible : ${it.message?.take(120)})") }
+                "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768).first
+        }.getOrElse { throw ApiException(0, "pas d'image de départ à animer (génération d'image impossible : ${it.message?.take(160)})") }
         return withContext(Dispatchers.IO) { animer(token, depart, prompt, dureeDemandee) }
     }
 

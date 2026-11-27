@@ -209,20 +209,22 @@ object Montage {
         val signature: List<Pair<File, Boolean>> = when {
             d.signature.isNotBlank() -> resoudreSources(app, d.signature, travail).take(2)
                 .also { if (it.isEmpty()) echecs += "signature : rien trouvé dans « ${d.signature.take(60)} »" }
-            d.style.isNotBlank() && sb.signature.isNotBlank() && app.store.cfAccounts.any { it.contains(':') } -> {
+            d.style.isNotBlank() && sb.signature.isNotBlank() && ImageGen.disponible(app) -> {
                 progres("🎨 Image de signature (${d.style.take(40)})…")
-                runCatching { listOf(ImageGen.generate(app, sb.signature + ", epic, highly detailed, vertical portrait 9:16 composition, no text, no letters").first to true) }
-                    .getOrElse { echecs += "image de signature : ${it.message?.take(120)}"; emptyList() }
+                runCatching { listOf(ImageGen.generate(app, sb.signature + ", epic, highly detailed, ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, no text, no letters",
+                    "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768).first to true) }
+                    .getOrElse { echecs += "image de signature : ${it.message?.take(160)}"; emptyList() }
             }
-            d.style.isNotBlank() && sb.signature.isNotBlank() -> { echecs += "image de signature : ajoute un compte Cloudflare (Réglages › IA › Images) ou tes images dans Réglages › TikTok"; emptyList() }
+            d.style.isNotBlank() && sb.signature.isNotBlank() -> { echecs += "image de signature : ajoute un compte Cloudflare ou ton jeton Hugging Face (Réglages › IA › Images & vidéo), ou tes images dans Réglages › TikTok"; emptyList() }
             else -> emptyList()
         }
         // 2a. Un média par plan du scénario, gratuit : image générée (Cloudflare) pour un symbole ou une allégorie (« phénix
         // tricolore au-dessus de Paris »), plan réel libre de droits (Pixabay / Pexels) pour une scène filmable.
         val modePlans = d.plans.trim().lowercase()
         val credits = mutableListOf<Stock.Clip>()
-        val cfOk = app.store.cfAccounts.any { it.contains(':') }
-        fun veutImage(p: Plan) = cfOk && when (modePlans) {
+        // Images : Cloudflare (quota gratuit du jour), puis Hugging Face (gratuit), puis photos libres de droits.
+        val cfOk = ImageGen.disponible(app)
+        fun veutImage(p: Plan) = (cfOk || Stock.disponible(app)) && when (modePlans) {
             "images" -> true
             "stock", "ia" -> false
             else -> p.source == "image" || !Stock.disponible(app)
@@ -230,11 +232,27 @@ object Montage {
         val medias = mutableListOf<Media>()
         val pris = mutableSetOf<String>()
         val imagesParPlan = HashMap<Int, File>()
-        suspend fun image(rang: Int, p: Plan): File? = imagesParPlan[rang] ?: runCatching {
-            val prompt = p.visuel + ", vertical portrait 9:16 composition, cinematic lighting, highly detailed, no text, no letters, no watermark"
-            // Image directement verticale et nette (FLUX.2) ; sinon le modèle habituel (carré, recadré au montage).
-            runCatching { ImageGen.generate(app, prompt, "flux-2-klein", 768, 1344).first }.getOrElse { ImageGen.generate(app, prompt).first }
-        }.onFailure { echecs += "image ${rang + 1} : ${it.message?.take(110)}" }.getOrNull()?.also { imagesParPlan[rang] = it }
+        // Après un refus pour quota, inutile de redemander une image IA à chaque plan : les photos libres de droits prennent le relais.
+        var imagesIaEpuisees = !cfOk
+        suspend fun image(rang: Int, p: Plan): File? = imagesParPlan[rang] ?: if (imagesIaEpuisees) null else runCatching {
+            val prompt = p.visuel + ", ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, cinematic lighting, highly detailed, no text, no letters, no watermark"
+            // Image directement au bon format et nette (FLUX.2 klein 4B : ≈ 10 fois moins de quota que le 9B).
+            ImageGen.generate(app, prompt, "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768).first
+        }.onFailure {
+            echecs += "image ${rang + 1} : ${it.message?.take(220)}"
+            if (Regex("(?i)quota|épuisé|allocation|aucun compte").containsMatchIn(it.message.orEmpty())) imagesIaEpuisees = true
+        }.getOrNull()?.also { imagesParPlan[rang] = it }
+        // Photo ou illustration libre de droits (Pexels / Pixabay) : le secours gratuit des images IA.
+        suspend fun photo(i: Int, p: Plan): File? {
+            if (!Stock.disponible(app)) return null
+            val requetes = listOf(p.recherche, Stock.motsCles(p.visuel), Stock.motsCles(p.visuel, 2)).filter { it.isNotBlank() }.distinct()
+            val clip = requetes.firstNotNullOfOrNull { q -> Stock.chercherImage(app, q, vertical, pris) }
+                ?: Stock.motsClesFr(d.sujet).let { mots -> listOf(mots.joinToString(" "), mots.firstOrNull().orEmpty()) }
+                    .filter { it.isNotBlank() }.distinct().firstNotNullOfOrNull { q -> Stock.chercherImage(app, q, vertical, pris, francais = true) }
+            val f = clip?.let { Stock.telecharger(it, File(travail, "photo_$i.jpg")) }
+            if (clip != null && f != null) credits += clip
+            return f
+        }
         suspend fun reel(i: Int, p: Plan): File? {
             val requetes = listOf(p.recherche, Stock.motsCles(p.visuel), Stock.motsCles(p.visuel, 2)).filter { it.isNotBlank() }.distinct()
             val clip = requetes.firstNotNullOfOrNull { q -> Stock.chercher(app, q, vertical, pris) }
@@ -246,19 +264,27 @@ object Montage {
             return f
         }
         if (manqueTotal > 0 && modePlans != "ia" && (Stock.disponible(app) || cfOk)) {
+            val imagesAvant = echecs.size
             val nb = if (d.tiktok) ceil(manqueTotal / 3000.0).toInt().coerceIn(1, 12) else max(1, ceil(manqueTotal / 4000.0).toInt())
             for (i in 0 until nb) {
                 verifierAnnulation()
                 val rang = (existants.size + i) % sb.plans.size
                 val p = sb.plans[rang]
                 val img = veutImage(p)
-                progres(if (img) "🎨 Image ${i + 1}/$nb (Cloudflare)…" else "🎞️ Plan ${i + 1}/$nb libre de droits (Pixabay / Pexels)…")
-                // Source préférée, puis l'autre si elle ne donne rien (jamais de trou dans la vidéo).
-                val m = if (img) image(rang, p)?.let { Media(i, it, true, p.texte) }
+                progres(if (img) "🎨 Image ${i + 1}/$nb" + (if (imagesIaEpuisees) " (photo libre de droits)…" else "…") else "🎞️ Plan ${i + 1}/$nb libre de droits (Pixabay / Pexels)…")
+                // Source préférée, puis les autres si elle ne donne rien (jamais de trou dans la vidéo) :
+                // image IA → photo libre de droits → plan vidéo libre de droits.
+                val m = if (img) (image(rang, p) ?: photo(i, p))?.let { Media(i, it, true, p.texte) }
                     ?: (if (Stock.disponible(app) && modePlans != "images") reel(i, p)?.let { Media(i, it, false, p.texte) } else null)
                 else (if (Stock.disponible(app)) reel(i, p)?.let { Media(i, it, false, p.texte) } else null)
-                    ?: (if (cfOk && modePlans != "stock") image(rang, p)?.let { Media(i, it, true, p.texte) } else null)
+                    ?: (if (modePlans != "stock") (image(rang, p) ?: photo(i, p))?.let { Media(i, it, true, p.texte) } else null)
                 if (m != null) medias += m
+            }
+            // Les images manquantes ont été remplacées : leurs refus ne sont plus des échecs, une seule ligne suffit.
+            if (medias.size >= nb && echecs.size > imagesAvant) {
+                val raison = echecs.drop(imagesAvant).firstOrNull { it.startsWith("image ") }?.substringAfter(" : ").orEmpty()
+                while (echecs.size > imagesAvant) echecs.removeAt(echecs.size - 1)
+                if (raison.isNotBlank()) echecs += "images IA remplacées par des photos libres de droits : ${raison.take(200)}"
             }
             if (medias.isEmpty()) echecs += "aucune image ni aucun plan libre de droits obtenu"
         }
@@ -362,7 +388,7 @@ object Montage {
         val briques = (existants.mapIndexed { i, (f, image) -> Triple(f, image, sb.plans.getOrNull(i)?.texte.orEmpty()) } +
             clipsStock.sortedBy { it.i }.map { Triple(it.fichier, it.image, it.texte) } + clipsIa.map { (_, f, t) -> Triple(f, false, t) })
             .ifEmpty { signature.map { (f, image) -> Triple(f, image, sb.plans.firstOrNull()?.texte.orEmpty()) } }
-        if (briques.isEmpty()) return "❌ Aucun plan n'a pu être créé" + (if (echecs.isNotEmpty()) " :\n- " + echecs.joinToString("\n- ") else ".")
+        if (briques.isEmpty()) return "❌ Aucun plan n'a pu être créé" + (if (echecs.isNotEmpty()) " :\n- " + regrouper(echecs).joinToString("\n- ") else ".")
         val segments = mutableListOf<Segment>()
         // Signature : ouverture (et fin dès 15 s), 2,5 s chacune ; le milieu est rempli par les plans.
         val ouverture = signature.firstOrNull()
@@ -464,7 +490,7 @@ object Montage {
             echecs += "montage $libelle : ${r.exceptionOrNull()?.message?.take(140)}"
         }
         travail.deleteRecursively()
-        if (!ok) return "❌ Le montage a échoué sur ce téléphone :\n- " + echecs.joinToString("\n- ")
+        if (!ok) return "❌ Le montage a échoué sur ce téléphone :\n- " + regrouper(echecs).joinToString("\n- ")
 
         val dossierCoffre = if (d.tiktok) "JARVIS/Vidéos TikTok" else "JARVIS/Vidéos"
         val loc = runCatching { app.obsidian.saveBytes(dossierCoffre, nom, sortie.readBytes(), "video/mp4") }.getOrDefault("")
@@ -493,7 +519,30 @@ object Montage {
             if (credits.isNotEmpty()) append("\n🎞️ Plans libres de droits : " + credits.map { it.source }.distinct().joinToString(" et ") + " (auteurs crédités dans la note)")
             if (envoi.isNotBlank()) append("\n\n$envoi")
             if (abandons.isNotBlank()) append("\n⚠️ Montage fait $abandons (effet refusé par le téléphone).")
-            if (echecs.isNotEmpty()) append("\n⚠️ " + echecs.joinToString("\n⚠️ "))
+            if (echecs.isNotEmpty()) append("\n⚠️ " + regrouper(echecs).joinToString("\n⚠️ "))
+        }
+    }
+
+    /**
+     * Messages d'échec regroupés : « image 1 : quota… », « image 2 : quota… » → « images 1, 2 : quota… » (le même
+     * refus n'est plus répété neuf fois et la vraie cause du problème reste visible).
+     */
+    internal fun regrouper(echecs: List<String>): List<String> {
+        val motif = Regex("^(image|plan|animation IA de l'image) (\\d+) : (.*)$", RegexOption.DOT_MATCHES_ALL)
+        val groupes = LinkedHashMap<Pair<String, String>, MutableList<String>>()
+        for (e in echecs) {
+            val m = motif.find(e)
+            if (m == null) { groupes.getOrPut("" to e) { mutableListOf() }; continue }
+            val (genre, n, raison) = m.destructured
+            groupes.getOrPut(genre to raison) { mutableListOf() } += n
+        }
+        return groupes.map { (cle, nums) ->
+            val (genre, raison) = cle
+            when {
+                genre.isEmpty() -> raison
+                nums.size == 1 -> "$genre ${nums[0]} : $raison"
+                else -> when (genre) { "image" -> "images"; "plan" -> "plans"; else -> "animation IA des images" } + " ${nums.joinToString(", ")} : $raison"
+            }
         }
     }
 

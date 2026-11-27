@@ -196,4 +196,58 @@ class TikTokStudioTest {
         assertTrue(m.toString(), m.all { it.length <= 190 } && m.size >= 3)
         assertEquals(("Court. " + longue).replace(Regex("\\s+"), " ").trim(), m.joinToString(" "))
     }
+
+    // ------------------------------------------------------------------ images gratuites : quotas et secours
+
+    /** Refus Cloudflare « daily free allocation » : quota du jour, mémorisé jusqu'à minuit UTC. */
+    @Test fun quotaCloudflareDuJour() {
+        val brut = "Cloudflare 429 : {\"errors\":[{\"message\":\"AiError: AiError: you have used up your daily free allocation of 10,000 neurons, please upgrade\",\"code\":4006}]}"
+        assertTrue(ImageGen.quotaJour(429, brut))
+        assertFalse(ImageGen.quotaJour(429, "Cloudflare 429 : too many requests"))
+        assertFalse(ImageGen.quotaJour(500, brut))
+        val t = java.time.Instant.parse("2026-11-27T21:21:00Z").toEpochMilli()
+        assertEquals(java.time.Instant.parse("2026-11-28T00:00:00Z").toEpochMilli(), ImageGen.minuitUtc(t))
+    }
+
+    /** Hugging Face : paramètres exacts des deux Spaces d'images et format vertical. */
+    @Test fun parametresImagesHuggingFace() {
+        val klein = HfImage.donnees(HfImage.SPACES[0], "phoenix", 768, 1344)
+        assertEquals(10, klein.length())
+        assertEquals("Distilled (4 steps)", klein.getString(2))
+        assertEquals(768, klein.getInt(5)); assertEquals(1344, klein.getInt(6)); assertEquals(4, klein.getInt(7))
+        val z = HfImage.donnees(HfImage.SPACES[1], "phoenix", 768, 1344)
+        assertEquals(7, z.length())
+        assertEquals("720x1280 ( 9:16 )", z.getString(1))
+        assertEquals("1280x720 ( 16:9 )", HfImage.resolutionZImage(1344, 768))
+        assertEquals("1024x1024 ( 1:1 )", HfImage.resolutionZImage(0, 0))
+        assertEquals(1024, HfImage.cote(0)); assertEquals(1536, HfImage.cote(4000)); assertEquals(768, HfImage.cote(770))
+    }
+
+    /** Réponse Gradio : image simple (FLUX.2 klein), galerie (Z-Image) ou simple chemin. */
+    @Test fun imageDansLaReponseGradio() {
+        val base = "https://black-forest-labs-flux-2-klein-9b.hf.space"
+        val klein = org.json.JSONArray("""[{"path":"/tmp/gradio/a/image.webp","url":"$base/gradio_api/file=/tmp/gradio/a/image.webp","size":null,"orig_name":"image.webp","mime_type":null,"is_stream":false,"meta":{"_type":"gradio.FileData"}}, 1234]""")
+        assertEquals("$base/gradio_api/file=/tmp/gradio/a/image.webp", HfImage.premierFichier(base, klein))
+        val zb = "https://tongyi-mai-z-image-turbo.hf.space"
+        val galerie = org.json.JSONArray("""[[{"image":{"path":"/tmp/gradio/b/i.webp","url":null,"meta":{"_type":"gradio.FileData"}},"caption":null}], "42", 42]""")
+        assertEquals("$zb/gradio_api/file=/tmp/gradio/b/i.webp", HfImage.premierFichier(zb, galerie))
+        assertNull(HfImage.premierFichier(zb, org.json.JSONArray("[null, \"42\"]")))
+        assertTrue(HfImage.quota("You have exceeded your ZeroGPU quota (60s requested vs. 12s left)"))
+        assertFalse(HfImage.quota("CUDA out of memory"))
+    }
+
+    /** Photos libres de droits : la plus grande version proposée par Pixabay et par Pexels. */
+    @Test fun photosLibresDeDroits() {
+        assertEquals("https://pixabay.com/get/big.jpg", Stock.imagePixabay(JSONObject("""{"webformatURL":"https://pixabay.com/get/small.jpg","largeImageURL":"https://pixabay.com/get/big.jpg"}""")))
+        assertEquals("https://pixabay.com/get/small.jpg", Stock.imagePixabay(JSONObject("""{"webformatURL":"https://pixabay.com/get/small.jpg"}""")))
+        assertEquals("https://images.pexels.com/p/1.jpeg?w=940&dpr=2", Stock.imagePexels(JSONObject("""{"src":{"original":"https://images.pexels.com/p/1.jpeg","large2x":"https://images.pexels.com/p/1.jpeg?w=940&dpr=2"}}""")))
+        assertNull(Stock.imagePexels(JSONObject("{}")))
+    }
+
+    /** Le même refus n'est plus répété neuf fois : les messages identiques sont regroupés. */
+    @Test fun echecsRegroupes() {
+        val r = Montage.regrouper(listOf("image 1 : quota épuisé", "image 2 : quota épuisé", "image 3 : autre", "montage complet : codec",
+            "animation IA de l'image 1 : x", "animation IA de l'image 2 : x"))
+        assertEquals(listOf("images 1, 2 : quota épuisé", "image 3 : autre", "montage complet : codec", "animation IA des images 1, 2 : x"), r)
+    }
 }

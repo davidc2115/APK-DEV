@@ -108,6 +108,54 @@ object Stock {
         null
     }
 
+    /** Image Pixabay la plus grande disponible (« largeImageURL », 1280 px), sinon l'aperçu « webformatURL ». */
+    internal fun imagePixabay(h: JSONObject): String? =
+        listOf("largeImageURL", "webformatURL").firstNotNullOfOrNull { k -> h.optString(k).takeIf { it.startsWith("https://") } }
+
+    /** Photo Pexels en grand (« large2x », ≈ 1 880 px), sinon « large » ou l'original. */
+    internal fun imagePexels(p: JSONObject): String? = p.optJSONObject("src")?.let { s ->
+        listOf("large2x", "large", "original").firstNotNullOfOrNull { k -> s.optString(k).takeIf { it.startsWith("https://") } }
+    }
+
+    /**
+     * Photo ou illustration libre de droits pour [requete] (anglais, ou français si [francais]) : le secours des images
+     * générées quand l'IA d'images n'a plus de quota. Pexels puis Pixabay, orientation voulue, jamais deux fois la même.
+     */
+    suspend fun chercherImage(app: JarvisApp, requete: String, vertical: Boolean, pris: MutableSet<String>, francais: Boolean = false): Clip? = withContext(Dispatchers.IO) {
+        val q = java.net.URLEncoder.encode(requete.trim().ifBlank { return@withContext null }, "UTF-8")
+        val pexels = app.store.pexelsKey.value.trim()
+        if (pexels.isNotBlank()) {
+            val j = get("https://api.pexels.com/v1/search?query=$q&orientation=${if (vertical) "portrait" else "landscape"}&per_page=15" +
+                (if (francais) "&locale=fr-FR" else ""), "Authorization" to pexels)
+            val photos = j?.optJSONArray("photos")
+            if (photos != null) for (i in 0 until photos.length()) {
+                val p = photos.optJSONObject(i) ?: continue
+                val id = "pexels-img:" + p.optLong("id")
+                if (id in pris) continue
+                if (!pertinent(requete, p.optString("alt") + " " + p.optString("url").substringAfter("/photo/").replace('-', ' '))) continue
+                val lien = imagePexels(p) ?: continue
+                pris += id
+                return@withContext Clip(id, lien, "Pexels", p.optString("photographer"), p.optString("url"), 0)
+            }
+        }
+        val pixabay = app.store.pixabayKey.value.trim()
+        if (pixabay.isNotBlank()) {
+            val j = get("https://pixabay.com/api/?key=${java.net.URLEncoder.encode(pixabay, "UTF-8")}&q=$q&image_type=all&orientation=${if (vertical) "vertical" else "horizontal"}" +
+                "&per_page=30&safesearch=true&order=popular" + (if (francais) "&lang=fr" else ""))
+            val hits = j?.optJSONArray("hits")
+            if (hits != null) for (i in 0 until hits.length()) {
+                val h = hits.optJSONObject(i) ?: continue
+                val id = "pixabay-img:" + h.optLong("id")
+                if (id in pris) continue
+                if (!pertinent(requete, h.optString("tags") + " " + h.optString("pageURL").substringAfter(".com/").replace('-', ' ').replace('/', ' '))) continue
+                val lien = imagePixabay(h) ?: continue
+                pris += id
+                return@withContext Clip(id, lien, "Pixabay", h.optString("user"), h.optString("pageURL"), 0)
+            }
+        }
+        null
+    }
+
     /** Télécharge le plan (40 Mo au plus) ; null en cas d'échec. */
     suspend fun telecharger(clip: Clip, dest: File): File? = withContext(Dispatchers.IO) {
         runCatching {

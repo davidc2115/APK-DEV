@@ -13,15 +13,25 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-/** Génération d'images avec Cloudflare Workers AI ; plusieurs comptes (« idCompte:jeton ») utilisés à tour de rôle. */
+/**
+ * Génération d'images avec Cloudflare Workers AI ; plusieurs comptes (« idCompte:jeton ») utilisés à tour de rôle.
+ * Quota gratuit : 10 000 « neurones » par compte et par jour (remis à zéro à minuit UTC). Coût d'une image verticale
+ * 768 × 1344 : ≈ 100 à 160 neurones avec flux-2-klein-4b, ≈ 1 400 avec flux-2-klein-9b (7 images par jour seulement),
+ * ≈ 60 avec flux-1-schnell (carré). Quand tous les comptes ont épuisé leur quota, les images sont faites gratuitement
+ * sur Hugging Face ([HfImage]) avec le jeton Hugging Face.
+ */
 object ImageGen {
     private val http = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).callTimeout(100, TimeUnit.SECONDS).build()
     private var next = 0
     private val cooldown = mutableMapOf<String, Long>()
-    // flux-2-dev : rendu réaliste haute qualité (plus lent). flux-2-klein-9b : qualité proche, plus rapide/léger. flux-1-schnell : le plus rapide.
+    /** Comptes dont le quota gratuit du jour est épuisé, jusqu'à la remise à zéro (minuit UTC). */
+    private val epuises = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    // flux-2-dev : rendu réaliste haute qualité (plus lent, très coûteux en quota). flux-2-klein-4b : net, rapide et
+    // économe (images des montages). flux-2-klein-9b : un peu plus fin mais 10 fois plus coûteux. flux-1-schnell : le plus sobre.
     val MODELES = listOf(
         "@cf/black-forest-labs/flux-1-schnell",
         "@cf/black-forest-labs/flux-2-dev",
+        "@cf/black-forest-labs/flux-2-klein-4b",
         "@cf/black-forest-labs/flux-2-klein-9b",
         "@cf/stabilityai/stable-diffusion-xl-base-1.0",
         "@cf/bytedance/stable-diffusion-xl-lightning",
@@ -34,7 +44,8 @@ object ImageGen {
         val req = if (model.contains("flux-2")) {
             val form = MultipartBody.Builder().setType(MultipartBody.FORM)
                 .addFormDataPart("prompt", prompt)
-                .addFormDataPart("steps", "28")
+                // klein : 4 étapes fixes (modèle distillé) ; seul flux-2-dev accepte un nombre d'étapes (facturé à l'étape).
+                .apply { if (model.contains("flux-2-dev")) addFormDataPart("steps", "28") }
                 .apply { if (largeur > 0 && hauteur > 0) { addFormDataPart("width", "$largeur"); addFormDataPart("height", "$hauteur") } }
                 .build()
             Request.Builder().url("https://api.cloudflare.com/client/v4/accounts/$id/ai/run/$model")
@@ -79,43 +90,85 @@ object ImageGen {
     /** Alias pratiques pour le paramètre « modele » de l'outil generer_image. */
     private fun alias(modele: String): String = when (modele.trim().lowercase()) {
         "flux", "flux2", "flux-2", "flux-2-dev", "flux dev" -> "@cf/black-forest-labs/flux-2-dev"
-        "flux-klein", "flux klein", "flux2klein", "flux-2-klein", "klein" -> "@cf/black-forest-labs/flux-2-klein-9b"
+        "flux-klein-4b", "flux-2-klein-4b", "klein-4b", "klein 4b" -> "@cf/black-forest-labs/flux-2-klein-4b"
+        "flux-klein", "flux klein", "flux2klein", "flux-2-klein", "klein", "flux-2-klein-9b", "klein-9b" -> "@cf/black-forest-labs/flux-2-klein-9b"
         "flux-schnell", "flux schnell", "schnell", "flux-1", "flux1" -> "@cf/black-forest-labs/flux-1-schnell"
         else -> modele
     }
 
+    /** Refus « you have used up your daily free allocation of 10,000 neurons » (code 4006) : quota du jour épuisé. */
+    internal fun quotaJour(code: Int, message: String): Boolean =
+        code == 429 && Regex("(?i)daily free allocation|neurons|\\b4006\\b").containsMatchIn(message)
+
+    /** Remise à zéro du quota Cloudflare : minuit UTC suivant [maintenant]. */
+    internal fun minuitUtc(maintenant: Long): Long = (maintenant / 86_400_000L + 1) * 86_400_000L
+
+    private fun comptes(app: JarvisApp) = app.store.cfAccounts.filter { it.contains(':') }
+
+    /** Une image peut être faite : compte Cloudflare ou jeton Hugging Face (secours gratuit). */
+    fun disponible(app: JarvisApp) = comptes(app).isNotEmpty() || app.store.huggingFaceToken.value.isNotBlank()
+
     /** Génère une image, la garde dans l'appli et dans Obsidian. Retourne (fichier, emplacement Obsidian). */
     /** [largeur] × [hauteur] : format demandé (modèles FLUX.2 seulement, ex. 768 × 1344 pour un TikTok vertical). */
     suspend fun generate(app: JarvisApp, prompt: String, modele: String = "", largeur: Int = 0, hauteur: Int = 0): Pair<File, String> = withContext(Dispatchers.IO) {
-        val list = app.store.cfAccounts.filter { it.contains(':') }
-        if (list.isEmpty()) throw IllegalStateException("Aucun compte Cloudflare : ajoute « idCompte:jeton » dans Réglages › IA › Images & vidéo.")
+        val list = comptes(app)
+        val hf = app.store.huggingFaceToken.value.trim()
+        if (list.isEmpty() && hf.isBlank()) throw IllegalStateException("Aucun compte Cloudflare : ajoute « idCompte:jeton » dans Réglages › IA › Images & vidéo (ou ton jeton Hugging Face gratuit).")
         val model = modele.trim().let { if (it.isBlank()) app.store.cfModel.value.ifBlank { MODELES[0] } else alias(it) }
         val now = System.currentTimeMillis()
-        val order = list.indices.map { (next + it) % list.size }
-        val (ready, cooling) = order.partition { (cooldown[list[it]] ?: 0L) <= now }
+        val actifs = list.indices.map { (next + it) % list.size }.filter { (epuises[list[it]] ?: 0L) <= now }
+        val (ready, cooling) = actifs.partition { (cooldown[list[it]] ?: 0L) <= now }
         var last: Exception? = null
         for (i in ready + cooling) {
+            val compte = list[i]
             try {
-                val bytes = genere(list[i], model, prompt, largeur, hauteur)
+                val bytes = try { genere(compte, model, prompt, largeur, hauteur) } catch (e: ApiException) {
+                    // Modèle refusé par ce compte (absent, paramètre) : le modèle de base, le plus sobre.
+                    if (e.code in setOf(400, 404, 422) && model != MODELES[0]) genere(compte, MODELES[0], prompt) else throw e
+                }
                 next = (i + 1) % list.size
-                // Nom daté + quelques mots de la description : l'image se retrouve aussi par son sujet (dans Obsidian comme par JARVIS).
-                val sujet = java.text.Normalizer.normalize(prompt.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
-                    .replace(Regex("[^a-z0-9]+"), " ").trim().split(' ').filter { it.length > 2 && it !in setOf("the", "and", "with", "for", "style", "detailed", "high", "quality") }
-                    .take(4).joinToString("-").take(40)
-                val name = "img_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.FRENCH).format(java.util.Date()) +
-                    (if (sujet.isNotBlank()) "_$sujet" else "") + "_" + (100 + (Math.random() * 899).toInt()) + ".png"
-                val dossierImages = File(app.filesDir, "images").apply { mkdirs() }
-                val f = File(dossierImages, name)
-                f.writeBytes(bytes)
-                memoriserDescription(dossierImages, name, prompt, bytes)
-                val loc = app.obsidian.saveBytes("JARVIS/Images", name, bytes, "image/png")
-                return@withContext f to loc
+                return@withContext enregistrer(app, prompt, bytes)
             } catch (e: ApiException) {
                 last = e
-                cooldown[list[i]] = System.currentTimeMillis() + when (e.code) { 429 -> 60_000L; 401, 403 -> 600_000L; else -> 15_000L }
+                if (quotaJour(e.code, e.message.orEmpty())) epuises[compte] = minuitUtc(System.currentTimeMillis())
+                else cooldown[compte] = System.currentTimeMillis() + when (e.code) { 429 -> 60_000L; 401, 403 -> 600_000L; else -> 15_000L }
             } catch (e: Exception) { last = e }
         }
-        throw last ?: IllegalStateException("Génération impossible.")
+        // Cloudflare impossible (quota du jour épuisé, panne) : image gratuite sur Hugging Face.
+        val tousEpuises = list.isNotEmpty() && list.all { (epuises[it] ?: 0L) > System.currentTimeMillis() }
+        val raisonCf = when {
+            list.isEmpty() -> "aucun compte Cloudflare"
+            tousEpuises -> "quota gratuit Cloudflare du jour épuisé (10 000 neurones par compte, remis à zéro à " +
+                java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRENCH).format(java.util.Date(minuitUtc(System.currentTimeMillis()))) + ")"
+            else -> last?.message?.take(160) ?: "Cloudflare indisponible"
+        }
+        if (hf.isBlank()) throw IllegalStateException("$raisonCf — ajoute ton jeton Hugging Face gratuit (Réglages › IA › Images & vidéo) pour continuer les images sur Hugging Face.")
+        val octets = try { HfImage.image(hf, prompt, largeur, hauteur) } catch (e: Exception) {
+            throw IllegalStateException("$raisonCf ; Hugging Face : ${e.message?.take(160)}")
+        }
+        enregistrer(app, prompt, enPng(octets))
+    }
+
+    /** Hugging Face renvoie du WebP : converti en PNG (format attendu partout dans l'appli et dans Obsidian). */
+    private fun enPng(octets: ByteArray): ByteArray = runCatching {
+        val bmp = android.graphics.BitmapFactory.decodeByteArray(octets, 0, octets.size) ?: return@runCatching octets
+        java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it); bmp.recycle() }.toByteArray()
+    }.getOrDefault(octets)
+
+    /** Garde l'image dans l'appli et dans Obsidian, sous un nom daté qui reprend son sujet. */
+    private fun enregistrer(app: JarvisApp, prompt: String, bytes: ByteArray): Pair<File, String> {
+        // Nom daté + quelques mots de la description : l'image se retrouve aussi par son sujet (dans Obsidian comme par JARVIS).
+        val sujet = java.text.Normalizer.normalize(prompt.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+            .replace(Regex("[^a-z0-9]+"), " ").trim().split(' ').filter { it.length > 2 && it !in setOf("the", "and", "with", "for", "style", "detailed", "high", "quality") }
+            .take(4).joinToString("-").take(40)
+        val name = "img_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.FRENCH).format(java.util.Date()) +
+            (if (sujet.isNotBlank()) "_$sujet" else "") + "_" + (100 + (Math.random() * 899).toInt()) + ".png"
+        val dossierImages = File(app.filesDir, "images").apply { mkdirs() }
+        val f = File(dossierImages, name)
+        f.writeBytes(bytes)
+        memoriserDescription(dossierImages, name, prompt, bytes)
+        val loc = app.obsidian.saveBytes("JARVIS/Images", name, bytes, "image/png")
+        return f to loc
     }
 
     /** Garde la description (prompt) de chaque image générée, pour la retrouver plus tard par son sujet. */
