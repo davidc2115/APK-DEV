@@ -153,7 +153,14 @@ class JarvisService : Service() {
     // Le catalogue d'outils et le cerveau ne sont nécessaires qu'après la première phrase comprise.
     // Les construire à l'ouverture du service retardait inutilement le micro Android Auto.
     private val tools by lazy(LazyThreadSafetyMode.NONE) {
-        ToolBox(app) { q, _ ->
+        ToolBox(app) { q, force ->
+            // Commande simple que tu viens de dicter (ouvrir une appli, appeler, couper le Wi-Fi, ouvrir les volets…) :
+            // exécutée sans « oui ou non ». La question reste pour l'irréversible (suppression, facture, envoi de SMS /
+            // mail, serveur, sécurité). Avant, TOUTE confirmation était posée à la voix, même désactivée dans les réglages.
+            if (!fr.dd.jarvis.ai.ConfirmationVocale.necessaire(q, force)) {
+                journal("confirmation passée (commande simple dictée) : " + q.replace('\n', ' ').take(120))
+                return@ToolBox true
+            }
             // Action sensible à la voix, téléphone verrouillé : seulement si c'est TA voix (empreinte vocale),
             // sinon il faut déverrouiller le téléphone (personne d'autre ne peut la déclencher).
             // Désactiver un système de sécurité téléphone verrouillé : empreinte vocale exigée même si l'option est coupée.

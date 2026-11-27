@@ -98,7 +98,7 @@ object CarBridge {
             }
             val rep = try {
                 // Les opérations qui exigent une confirmation explicite restent bloquées depuis l’interface voiture.
-                Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(contexte(), vocal = true) { }
+                Brain(app.llm, ToolBox(app) { q, force -> !fr.dd.jarvis.ai.ConfirmationVocale.necessaire(q, force) || !force }, app) { app.store.userName.value }.reply(contexte(), vocal = true) { }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Throwable) { "Désolé, je n’ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }

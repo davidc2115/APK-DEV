@@ -263,7 +263,7 @@ class ConversationVoiture private constructor(private val ctx: CarContext, priva
     private val app = ctx.applicationContext as JarvisApp
     // Le cerveau et son catalogue d'outils sont réutilisés d'un échange à l'autre :
     // les reconstruire à chaque phrase ajoutait du travail avant même le premier appel au modèle.
-    private val outils by lazy { ToolBox(app) { _, force -> !force } }
+    private val outils by lazy { ToolBox(app) { q, force -> !fr.dd.jarvis.ai.ConfirmationVocale.necessaire(q, force) || !force } }
     private val cerveau by lazy { Brain(app.llm, outils, app) { app.store.userName.value } }
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -433,7 +433,7 @@ class ReponseTexteScreen(ctx: CarContext, private val question: String) : Screen
             CarBridge.ajouter(userMessage)
             app.chatAjouter(userMessage)
             val rep = withContext(Dispatchers.IO) {
-                try { Brain(app.llm, ToolBox(app) { _, force -> !force }, app) { app.store.userName.value }.reply(CarBridge.contexte(), vocal = true) { } }
+                try { Brain(app.llm, ToolBox(app) { q, force -> !fr.dd.jarvis.ai.ConfirmationVocale.necessaire(q, force) || !force }, app) { app.store.userName.value }.reply(CarBridge.contexte(), vocal = true) { } }
                 catch (e: kotlinx.coroutines.CancellationException) { throw e }
                 catch (e: Throwable) { "Désolé, je n'ai pas pu faire ça : ${e.message ?: e.javaClass.simpleName}" }
             }

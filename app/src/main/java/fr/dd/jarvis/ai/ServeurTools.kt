@@ -319,7 +319,9 @@ class ServeurTools(
                 concise = a.optString("details").trim().lowercase() !in setOf("oui", "true", "1", "yes")), direct = true)
             "ha_service" -> {
                 val d = a.optString("domaine").trim(); val s = a.optString("service").trim(); val e = a.optString("entity_id").trim()
-                val sensible = (d in setOf("lock", "alarm_control_panel") || s in setOf("restart", "stop", "unlock", "alarm_disarm", "open_cover") && d != "light") || (d == "homeassistant" && s in setOf("restart", "stop"))
+                // Ouvrir des volets / stores : commande simple. Un portail, un garage, une porte : confirmé.
+                val acces = s == "open_cover" && Regex("garage|portail|porte|gate|door|barriere|portillon").containsMatchIn(e.lowercase())
+                val sensible = (d in setOf("lock", "alarm_control_panel") || s in setOf("restart", "stop", "unlock", "alarm_disarm") && d != "light") || acces || (d == "homeassistant" && s in setOf("restart", "stop"))
                 if (sensible && !confirm("Home Assistant : exécuter $d.$s ${e}?", true)) return ToolResult("Refusé par l'utilisateur.")
                 // Redémarrage : configuration vérifiée avant, retour en ligne attendu (jamais « redémarré » à l'aveugle).
                 if (d == "homeassistant" && s == "restart") return ToolResult(HaSur.redemarrer(app), direct = true)

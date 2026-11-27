@@ -86,7 +86,7 @@ class JarvisMediaService : MediaBrowserService() {
     private val portee = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val app get() = application as JarvisApp
     // Réutilise le moteur et son catalogue d'outils entre les demandes Android Auto.
-    private val outils by lazy { ToolBox(app) { _, force -> !force } }
+    private val outils by lazy { ToolBox(app) { q, force -> !fr.dd.jarvis.ai.ConfirmationVocale.necessaire(q, force) || !force } }
     private val cerveau by lazy { Brain(app.llm, outils, app) { app.store.userName.value } }
 
     // Android Auto reçoit directement les bitmaps pour éviter les problèmes de rendu des URI de ressources.

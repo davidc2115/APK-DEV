@@ -48,6 +48,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val tools = ToolBox(app) { question, force ->
         if (!force && !store.confirmSensitive.value) true
+        // Demande dictée au micro de l'appli : une commande simple s'exécute sans fenêtre de confirmation.
+        else if (fr.dd.jarvis.ai.CanalDemande.vocal && !fr.dd.jarvis.ai.ConfirmationVocale.necessaire(question, force)) true
         // La réflexion tourne en arrière-plan : la question (fenêtre, empreinte) est posée sur le fil de l'écran.
         else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
             askConfirm(question) && (!store.biometrie.value || !fr.dd.jarvis.device.Securite.sensible(question) ||

@@ -72,7 +72,7 @@ object ConversationAuto {
         if (!app.chatLoaded) app.chatCharger()
         if (CarBridge.contexte().isEmpty()) app.chat.toList().takeLast(10).forEach { CarBridge.ajouter(it) }
         // Prépare le moteur et ses outils une seule fois par conversation voiture, pas à chaque phrase.
-        val tools = ToolBox(app) { _, force -> !force }
+        val tools = ToolBox(app) { q, force -> !fr.dd.jarvis.ai.ConfirmationVocale.necessaire(q, force) || !force }
         val brain = Brain(app.llm, tools, app) { app.store.userName.value }
         val journal = fr.dd.jarvis.voice.JournalVoix
         while (true) {
