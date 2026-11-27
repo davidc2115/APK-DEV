@@ -34,7 +34,25 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+/**
+ * Adresse ou coordonnées touchées dans une fiche : ouvertes dans le GPS par défaut du téléphone (l'appli choisie pour
+ * les liens « geo: » ; sinon Android propose la liste, avec « Toujours »). Google Maps dans le navigateur en dernier recours.
+ */
+fun ouvrirGps(ctx: Context, cible: String) {
+    val p = runCatching { fr.dd.jarvis.societe.Geo.lireCoordonnees(cible) }.getOrNull()
+    val geo = if (p != null) "geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}" else "geo:0,0?q=" + Uri.encode(cible.trim())
+    try {
+        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(geo)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (_: Exception) {
+        val web = if (p != null) fr.dd.jarvis.societe.Geo.lienGoogleMaps(p) else "https://www.google.com/maps/search/?api=1&query=" + Uri.encode(cible.trim())
+        runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(web)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure { android.widget.Toast.makeText(ctx, "Aucune application GPS pour ouvrir : $cible", android.widget.Toast.LENGTH_SHORT).show() }
+    }
+}
+
 fun openLink(ctx: Context, url: String) {
+    // Adresse / coordonnées d'une fiche (« jarvis-nav:… ») : le GPS par défaut du téléphone.
+    if (url.startsWith("jarvis-nav:")) { ouvrirGps(ctx, Uri.decode(url.removePrefix("jarvis-nav:"))); return }
     // Médias créés par JARVIS (images, vidéos IA, fichiers) : ouverts dans la visionneuse du téléphone.
     val media = Regex("^(jarvis-img|jarvis-video-ia|jarvis-file):(.+)$").find(url.trim())
     if (media != null) { ouvrirMedia(ctx, media.groupValues[1], media.groupValues[2]); return }

@@ -126,23 +126,36 @@ object Rendu {
         )
     }
 
-    fun clientCtx(d: SocieteData, c: Client, aujourdhui: LocalDate = LocalDate.now()): Ctx {
+    /** Lien « ouvrir dans le GPS » d'une fiche affichée dans l'application (schéma interne jarvis-nav:). */
+    internal fun lienGps(texte: String, cible: String = texte): String =
+        if (texte.isBlank() || texte.trim() == "—") texte
+        else "[${texte.trim().replace("]", ")").replace("[", "(")}](jarvis-nav:${java.net.URLEncoder.encode(cible.trim(), "UTF-8").replace("+", "%20")})"
+    internal fun lienTel(t: String): String = t.filter { it.isDigit() || it == '+' }.let { n -> if (n.length < 4) t else "[${t.trim()}](tel:$n)" }
+    internal fun lienMail(m: String): String = if (!Regex("^[^\\s@\\[\\]()]+@[^\\s@\\[\\]()]+$").matches(m.trim())) m else "[${m.trim()}](mailto:${m.trim()})"
+
+    /**
+     * [interactif] : fiche affichée dans l'application — adresse et GPS ouvrent le GPS du téléphone, téléphone et mail
+     * sont cliquables. Jamais pour Obsidian ni le PDF (liens internes inutiles hors de l'application).
+     */
+    fun clientCtx(d: SocieteData, c: Client, aujourdhui: LocalDate = LocalDate.now(), interactif: Boolean = false): Ctx {
         val r = d.remiseClient(c, aujourdhui)
         val vars = societeVars(d) + mapOf(
-            "client_nom" to c.nom, "type" to c.type, "contact" to c.contact, "tel" to c.tel, "email" to c.email,
-            "adresse" to c.adresse, "depuis" to (if (c.depuis.isBlank()) "—" else dateFr(c.depuis)),
+            "client_nom" to c.nom, "type" to c.type, "contact" to c.contact,
+            "tel" to (if (interactif) lienTel(c.tel) else c.tel), "email" to (if (interactif) lienMail(c.email) else c.email),
+            "adresse" to (if (interactif) lienGps(c.adresse) else c.adresse), "depuis" to (if (c.depuis.isBlank()) "—" else dateFr(c.depuis)),
             "anciennete" to Pricing.anciennete(c.depuis, aujourdhui).toString(),
             "nb_sites" to c.sites.size.toString(), "notes" to c.notes,
             "ca_total" to euro(d.caClient(c)),
             "remise_applicable" to (if (r.pct > 0) "${nombre(r.pct)} % (${r.detail})" else "aucune")
         )
         val sites = c.sites.map {
+            val gps = gpsVars(it)
             mapOf(
-                "nom" to it.nom.ifBlank { "Installation" }, "adresse" to it.adresse, "kwc" to nombre(it.kwc),
+                "nom" to it.nom.ifBlank { "Installation" }, "adresse" to (if (interactif) lienGps(it.adresse) else it.adresse), "kwc" to nombre(it.kwc),
                 "mise_en_service" to it.miseEnService.ifBlank { "—" }, "onduleur" to it.onduleur.ifBlank { "—" },
                 "nb_panneaux" to (if (it.nbPanneaux > 0) it.nbPanneaux.toString() else "—"),
                 "distance_km" to (it.distanceKm?.let { k -> nombre(round2(k)) } ?: "—"), "notes" to it.notes
-            ) + gpsVars(it)
+            ) + gps + (if (interactif && it.lat != null && it.lon != null) mapOf("gps" to lienGps(gps.getValue("gps"), "${it.lat},${it.lon}")) else emptyMap())
         }
         val docs = d.docs.filter { it.clientId == c.id }.sortedByDescending { it.date }.map {
             mapOf(
@@ -280,7 +293,11 @@ object Rendu {
     }
 
     fun rendreDoc(d: SocieteData, doc: Doc) = Templates.render(d.modele(doc.type), docCtx(d, doc))
-    fun rendreClient(d: SocieteData, c: Client) = Templates.render(d.modele("client"), clientCtx(d, c))
+    fun rendreClient(d: SocieteData, c: Client, interactif: Boolean = false): String =
+        Templates.render(d.modele("client"), clientCtx(d, c, interactif = interactif)).let { md ->
+            // `[47.29, 4.38](jarvis-nav:…)` : le lien ne doit pas rester dans un bloc de code (il ne serait pas cliquable).
+            if (interactif) md.replace(Regex("`(\\[[^\\]`]+]\\([^)\\s`]+\\))`"), "$1") else md
+        }
     fun rendreBulletin(d: SocieteData, b: Bulletin) = Templates.render(d.modele("paie"), bulletinCtx(d, b))
 
     fun statutIntervention(s: String) = when (s) {

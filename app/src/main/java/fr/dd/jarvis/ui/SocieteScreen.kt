@@ -3,6 +3,7 @@ package fr.dd.jarvis.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import android.graphics.BitmapFactory
 import java.io.File
 import androidx.compose.foundation.layout.Arrangement
@@ -83,6 +84,7 @@ fun SocieteScreen(app: JarvisApp) {
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun Dialogue(titre: String, onClose: () -> Unit, actions: @Composable () -> Unit = {}, content: @Composable () -> Unit) {
     AlertDialog(
@@ -90,14 +92,19 @@ private fun Dialogue(titre: String, onClose: () -> Unit, actions: @Composable ()
         containerColor = Color(0xFF0B1424), titleContentColor = LocalAccent.current, textContentColor = HudText,
         title = { Text(titre, fontSize = 16.sp) },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() } },
-        confirmButton = { Row { actions() } },
-        dismissButton = { TextButton(onClose) { Text("Fermer", color = HudDim) } }
+        // Boutons qui passent à la ligne quand ils ne tiennent pas (avant : « Sup/pri/me » écrasé sur « Fermer »).
+        confirmButton = {
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.End) {
+                actions()
+                TextButton(onClose) { Text("Fermer", color = HudDim, maxLines = 1) }
+            }
+        }
     )
 }
 
 @Composable
 private fun Action(label: String, onClick: () -> Unit) {
-    TextButton(onClick) { Text(label, color = LocalAccent.current, fontSize = 13.sp) }
+    TextButton(onClick) { Text(label, color = LocalAccent.current, fontSize = 13.sp, maxLines = 1, softWrap = false) }
 }
 
 // ---------------------------------------------------------------------- Historique photovoltaïque
@@ -446,16 +453,18 @@ private fun ClientsTab(app: JarvisApp) {
     val selectedLive = selected?.let { chosen -> d.client(chosen.id) ?: chosen }
     selectedLive?.let { c0 ->
         val c = d.client(c0.id) ?: c0
-        val md = Rendu.rendreClient(d, c)
+        val md = Rendu.rendreClient(d, c, interactif = true)
+        val mdExport = Rendu.rendreClient(d, c)
         Dialogue(c.nom, { selected = null }, actions = {
             Action("Obsidian") { info = "📁 " + svc.exporterClient(c).second; selected = null }
-            Action("PDF") { svc.partagerPdf("Fiche ${c.nom}", md) }
+            Action("PDF") { svc.partagerPdf("Fiche ${c.nom}", mdExport) }
             Action("✎ Modifier") { editing = c; selected = null }
             Action("🗑 Supprimer") { deleteTarget = c; selected = null }
             Action("Diagnostic") { diagnosticConfirm = true }
         }) {
             MarkdownText(md)
             val sitesGps = c.sites.filter { it.lat != null && it.lon != null }
+            val ctxGps = LocalContext.current
             if (sitesGps.isNotEmpty()) {
                 HudDivider()
                 Text("Coordonnées GPS actuelles", color = LocalAccent.current, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -463,7 +472,10 @@ private fun ClientsTab(app: JarvisApp) {
                     val point = Geo.Point(site.lat!!, site.lon!!)
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(site.nom, color = HudText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                        Text(Geo.texteGps(point), color = LocalAccent.current, fontSize = 12.sp)
+                        // Touché : le GPS par défaut du téléphone.
+                        Text(Geo.texteGps(point), color = LocalAccent.current, fontSize = 12.sp,
+                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                            modifier = Modifier.clickable { ouvrirGps(ctxGps, "${point.lat},${point.lon}") })
                         Text(
                             "${(Geo.precisionDe(site.gpsPrecision) ?: Geo.Precision.INCONNUE).libelle} · ${Geo.texteDms(point)}",
                             color = HudDim, fontSize = 10.sp
