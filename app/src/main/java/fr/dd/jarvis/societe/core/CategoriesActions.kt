@@ -34,6 +34,21 @@ object CategoriesActions {
      * Domaine d'une ligne, ou null si aucun ou si elle en couvre plusieurs (« Contrôle des coffrets, vérification de la
      * terre, nettoyage… » : un résumé, pas un contrôle). « Onduleurs » s'efface devant un autre domaine (« Nettoyage des onduleurs »).
      */
+    /**
+     * « Coffret DC : contrôle parafoudre OK, serrage OK » → (« Coffret DC », [« contrôle parafoudre OK », « serrage OK »]).
+     * null pour une ligne qui n'ouvre pas de rubrique, dont « Remise en service : OK » (un contrôle, pas une rubrique).
+     */
+    fun enLigne(t: String): Pair<String, List<String>>? {
+        val m = EN_LIGNE.find(t.trim()) ?: return null
+        val contenu = m.groupValues[2].trim()
+        if (RESULTAT_SEUL.matches(contenu)) return null
+        val parties = contenu.split(Regex("""\s*[,;•]\s*""")).map { it.trim() }.filter { it.isNotBlank() }
+        return m.groupValues[1].trim() to (if (parties.size > 1 && parties.all { it.length >= 3 && it.any(Char::isLetter) }) parties else listOf(contenu))
+    }
+
+    /** Clé du domaine d'une ligne (« nettoyage », « linky »…), ou null. */
+    fun cleDomaine(texte: String): String? = domaineDe(texte)?.cle
+
     private fun domaineDe(texte: String): Domaine? {
         val tous = DOMAINES.filter { it.motif.containsMatchIn(texte) }
         val utiles = if (tous.size > 1) tous.filter { it.cle != "onduleurs" } else tous
@@ -108,21 +123,13 @@ object CategoriesActions {
         for (brute in lignes) {
             val t = brute.trim().trimStart('-', '•', '*', '·', ' ').trim()
             if (t.isBlank()) continue
-            if (ActionsDetaillees.rubrique(t)) { courant = rubrique(t); continue }
-            val m = EN_LIGNE.find(t)
-            // « Remise en service : OK » est un contrôle (rangé selon son domaine), pas une nouvelle rubrique.
-            if (m != null && RESULTAT_SEUL.matches(m.groupValues[2].trim())) { ranger(t); continue }
-            if (m != null) {
-                courant = rubrique(m.groupValues[1])
-                val contenu = m.groupValues[2].trim()
-                val parties = contenu.split(Regex("""\s*[,;•]\s*""")).map { it.trim() }.filter { it.isNotBlank() }
-                when {
-                    parties.size > 1 && parties.all { it.length >= 3 && it.any(Char::isLetter) } -> parties.forEach { ranger(it) }
-                    else -> ranger(contenu)
-                }
-                continue
+            val titre = ActionsDetaillees.titre(t)
+            val e = if (titre == null) enLigne(t) else null
+            when {
+                titre != null -> courant = rubrique(titre)
+                e != null -> { courant = rubrique(e.first); e.second.forEach { ranger(it) } }
+                else -> ranger(t)
             }
-            ranger(t)
         }
         return cats.values.filter { it.lignes.isNotEmpty() }.map { Categorie(it.cle, it.titre, it.emoji, it.lignes.toList()) }
     }

@@ -273,17 +273,115 @@ object ActionsDetaillees {
         }
     }
 
+    private val COFFRET_SEUL = Regex("""(?i)^coffrets?\s+[\p{L}\d]+(?:\s+[\p{L}\d]+)?$""")
+
+    /** Titre d'une ligne de rubrique (« Coffret AC : », ou « Coffret DC » seul sur sa ligne), sinon null. */
+    fun titre(ligne: String): String? {
+        val l = ligne.trim()
+        return when {
+            rubrique(l) -> l.removeSuffix(":").trim().ifBlank { null }
+            COFFRET_SEUL.matches(l) -> l
+            else -> null
+        }
+    }
+
+    /** Rubrique et ses contrôles ; [entete] null pour les lignes écrites avant toute rubrique. */
+    class Bloc(val entete: String?, val titre: String?, val lignes: MutableList<String> = mutableListOf()) {
+        val cle: String get() = titre?.let { normaliser(it).replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim() }.orEmpty()
+    }
+
+    /** Liste d'actions découpée en rubriques (« Coffret DC : contrôle parafoudre OK » ouvre la rubrique Coffret DC). */
+    fun enBlocs(lignes: List<String>): List<Bloc> {
+        val r = mutableListOf(Bloc(null, null))
+        for (brut in lignes) {
+            val l = brut.trim()
+            if (l.isBlank()) continue
+            val t = titre(l)
+            if (t != null) { r += Bloc(l, t); continue }
+            val e = CategoriesActions.enLigne(l)
+            if (e != null) { r += Bloc("${e.first} :", e.first, e.second.toMutableList()); continue }
+            r.last().lignes += l
+        }
+        return r.filter { it.titre != null || it.lignes.isNotEmpty() }
+    }
+
+    private fun aplatir(blocs: List<Bloc>): List<String> = blocs.flatMap { b -> listOfNotNull(b.entete) + b.lignes }
+
+    /** Même contrôle (mêmes mots porteurs : « nettoyage et ventilation » / « Nettoyage des ventilateurs : OK »). */
+    private fun similaire(a: String, b: String) = CategoriesActions.doublon(a, b) || CategoriesActions.doublon(b, a)
+
     /**
-     * Lignes [ajouts] ajoutées à [actuelles] : une ligne qui reprend une action existante (mêmes mots porteurs,
-     * « nettoyage et ventilation » / « Nettoyage des ventilateurs : OK ») la remplace à sa place ; sinon elle est ajoutée.
+     * Lignes [ajouts] ajoutées à [actuelles], RUBRIQUE PAR RUBRIQUE : « Coffret DC : serrage OK » complète la rubrique
+     * Coffret DC (créée au besoin, après les autres coffrets) même si « Serrage OK » existe déjà sous Coffret AC. Sans
+     * rubrique, une ligne qui reprend UNE action existante la remplace à sa place ; sinon elle rejoint la rubrique de son
+     * domaine (nettoyage…) ou les actions générales.
      */
     fun completer(actuelles: List<String>, ajouts: List<String>): List<String> {
-        val r = actuelles.toMutableList()
-        for (l in ajouts.map { it.trim() }.filter { it.isNotBlank() }) {
-            val i = r.indexOfFirst { e -> !rubrique(e) && (CategoriesActions.doublon(e, l) || CategoriesActions.doublon(l, e)) }
-            if (i >= 0) r[i] = l else r += l
+        val blocs = enBlocs(actuelles).toMutableList()
+        for (aj in enBlocs(ajouts)) {
+            if (aj.titre == null) {
+                for (l in aj.lignes) {
+                    val trouves = blocs.flatMapIndexed { bi, b -> b.lignes.indices.filter { similaire(b.lignes[it], l) }.map { bi to it } }
+                    when {
+                        trouves.size == 1 -> blocs[trouves[0].first].lignes[trouves[0].second] = l
+                        trouves.isEmpty() -> {
+                            val d = CategoriesActions.cleDomaine(l)
+                            val cible = blocs.lastOrNull { b -> b.titre != null && d != null && CategoriesActions.cleDomaine(b.titre) == d }
+                                ?: blocs.firstOrNull { it.titre == null } ?: Bloc(null, null).also { blocs.add(0, it) }
+                            cible.lignes += l
+                        }
+                        // Plusieurs rubriques ont ce contrôle (« Serrage OK ») : sans rubrique précisée, rien n'est déplacé.
+                        else -> Unit
+                    }
+                }
+            } else {
+                val existant = blocs.firstOrNull { it.titre != null && it.cle == aj.cle }
+                if (existant != null) {
+                    for (l in aj.lignes) {
+                        val k = existant.lignes.indexOfFirst { similaire(it, l) }
+                        if (k >= 0) existant.lignes[k] = l else existant.lignes += l
+                    }
+                } else inserer(blocs, Bloc(aj.entete, aj.titre, aj.lignes.toMutableList()))
+            }
         }
-        return r
+        return aplatir(blocs)
+    }
+
+    /** Nouvelle rubrique : après la dernière de la même famille (« Coffret DC » après « Coffret Enedis »), sinon à la fin. */
+    private fun inserer(blocs: MutableList<Bloc>, nouveau: Bloc) {
+        val famille = nouveau.cle.substringBefore(' ')
+        val j = blocs.indexOfLast { it.titre != null && it.cle.substringBefore(' ') == famille }
+        if (j >= 0) blocs.add(j + 1, nouveau) else blocs += nouveau
+    }
+
+    /**
+     * « Modifie la partie coffret DC : contrôle parafoudre OK, contrôle sectionneur OK, serrage OK » : chaque rubrique
+     * donnée REMPLACE la rubrique du même nom (créée au besoin) ; les autres rubriques restent telles quelles. Les lignes
+     * sans rubrique complètent la liste ([completer]).
+     */
+    fun remplacerRubriques(actuelles: List<String>, nouvelles: List<String>): List<String> {
+        val blocs = enBlocs(actuelles).toMutableList()
+        val sansRubrique = mutableListOf<String>()
+        for (nb in enBlocs(nouvelles)) {
+            if (nb.titre == null) { sansRubrique += nb.lignes; continue }
+            val i = blocs.indexOfFirst { it.titre != null && it.cle == nb.cle }
+            if (i >= 0) blocs[i] = Bloc(blocs[i].entete, blocs[i].titre, nb.lignes.toMutableList()) else inserer(blocs, Bloc(nb.entete, nb.titre, nb.lignes.toMutableList()))
+        }
+        return completer(aplatir(blocs), sansRubrique)
+    }
+
+    /**
+     * Vrai si [liste] contient TOUT ce que dit [autres], rubrique par rubrique : une ancienne liste dictée, même plus
+     * longue, ne remplace jamais des actions qui ont été ajoutées depuis (« Coffret DC : serrage OK »).
+     */
+    fun couvre(liste: List<String>, autres: List<String>): Boolean {
+        val a = enBlocs(liste)
+        return enBlocs(autres).all { b ->
+            b.lignes.all { l ->
+                if (b.titre == null) a.any { x -> x.lignes.any { similaire(it, l) } }
+                else a.any { x -> x.cle == b.cle && x.lignes.any { similaire(it, l) } }
+            }
+        }
     }
 
     /** Rubrique (« Coffret AC : », « Nettoyage et maintenance : ») : titre sans contenu après les deux-points. */

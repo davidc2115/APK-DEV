@@ -584,7 +584,46 @@ Compteur Linky:
     @Test fun ajoutDeLignesSansPerdreLesAutres() {
         val actuelles = listOf("Coffret AC :", "Serrage OK", "Coffret Enedis :", "Test du disjoncteur OK", "nettoyage et ventilation", "nettoyage de l'installation", "remise en service OK")
         val r = ActionsDetaillees.completer(actuelles, listOf("Nettoyage des ventilateurs : OK", "Nettoyage de l'installation : OK", "Contrôle du parafoudre : OK"))
-        assertEquals(listOf("Coffret AC :", "Serrage OK", "Coffret Enedis :", "Test du disjoncteur OK", "Nettoyage des ventilateurs : OK",
-            "Nettoyage de l'installation : OK", "remise en service OK", "Contrôle du parafoudre : OK"), r)
+        // Sans rubrique ni domaine, la ligne nouvelle rejoint les actions générales (en tête), pas la dernière rubrique.
+        assertEquals(listOf("Contrôle du parafoudre : OK", "Coffret AC :", "Serrage OK", "Coffret Enedis :", "Test du disjoncteur OK", "Nettoyage des ventilateurs : OK",
+            "Nettoyage de l'installation : OK", "remise en service OK"), r)
+    }
+
+    private val ACTIONS_LAPREE = listOf("Coffret AC :", "Serrage : OK", "Disjoncteur : OK", "Contrôle parafoudre : OK", "Coffret Enedis :",
+        "Test du disjoncteur : OK", "Serrage : OK", "Nettoyage & ventilation :", "Nettoyage et ventilation : OK", "Remise en service :", "Remise en service : OK")
+
+    /** Bon de lapree (18 h) : « coffret DC : contrôle parafoudre OK, contrôle sectionneur OK, serrage OK » n'apparaissait qu'en partie. */
+    @Test fun memeControleDansPlusieursRubriques() {
+        val dicte = listOf("coffret DC: contrôle parafoudre OK", "contrôle sectionneur OK", "serrage OK")
+        val r = ActionsDetaillees.completer(ACTIONS_LAPREE, dicte)
+        // La rubrique DC est créée après le coffret Enedis, avec ses trois contrôles ; le coffret AC n'est pas touché.
+        val dc = r.indexOf("coffret DC :")
+        assertTrue(r.toString(), dc > r.indexOf("Coffret Enedis :") && dc < r.indexOf("Nettoyage & ventilation :"))
+        assertEquals(listOf("contrôle parafoudre OK", "contrôle sectionneur OK", "serrage OK"), r.subList(dc + 1, dc + 4))
+        assertEquals(ACTIONS_LAPREE.subList(0, 7), r.subList(0, 7))
+        // DC déjà là avec une seule ligne : complété.
+        val avecDc = ACTIONS_LAPREE + listOf("Coffret DC :", "Contrôle sectionneur : OK")
+        val r2 = ActionsDetaillees.completer(avecDc, dicte)
+        assertEquals(listOf("Coffret DC :", "contrôle sectionneur OK", "contrôle parafoudre OK", "serrage OK"), r2.takeLast(4))
+        assertEquals(avecDc.subList(0, 7), r2.subList(0, 7))
+        // Partie remplacée telle que donnée (« modifie la partie coffret DC »).
+        val r3 = ActionsDetaillees.remplacerRubriques(avecDc, listOf("Coffret DC :", "Contrôle parafoudre : OK", "Contrôle sectionneur : OK", "Serrage : OK"))
+        assertEquals(listOf("Coffret DC :", "Contrôle parafoudre : OK", "Contrôle sectionneur : OK", "Serrage : OK"), r3.takeLast(4))
+        assertEquals(avecDc.dropLast(2), r3.dropLast(4))
+        // Une ancienne liste dictée sans coffret DC ne « couvre » pas la nouvelle : elle ne la remplace plus.
+        assertTrue(!ActionsDetaillees.couvre(ACTIONS_LAPREE + "Contrôle visuel : OK", r2))
+        assertTrue(ActionsDetaillees.couvre(r2, ACTIONS_LAPREE))
+    }
+
+    @Test fun memeControleAfficheDansChaqueSection() {
+        val site = Site("s2", "Installation 2")
+        val client = Client("c", "lapree", sites = listOf(site))
+        val actions = ActionsDetaillees.completer(ACTIONS_LAPREE, listOf("coffret DC: contrôle parafoudre OK", "contrôle sectionneur OK", "serrage OK"))
+        val inter = Intervention("i", "2026-11-27", "maintenance", "Maintenance", actions = actions.joinToString("\n"))
+        val r = Rendu.rendreIntervention(SocieteData(clients = listOf(client)), client, site, inter)
+        assertTrue(r, r.contains("## ⚡ Coffret DC\n- ✅ Contrôle parafoudre OK\n- ✅ Contrôle sectionneur OK\n- ✅ Serrage OK"))
+        assertTrue(r, r.contains("## ⚡ Coffret AC\n- ✅ Serrage : OK\n- ✅ Disjoncteur : OK\n- ✅ Contrôle parafoudre : OK"))
+        assertTrue(r, r.contains("## ⚡ Coffret Enedis\n- ✅ Test du disjoncteur : OK\n- ✅ Serrage : OK"))
+        assertTrue(r, r.indexOf("## ⚡ Coffret DC") < r.indexOf("## 🧹 Nettoyage"))
     }
 }
