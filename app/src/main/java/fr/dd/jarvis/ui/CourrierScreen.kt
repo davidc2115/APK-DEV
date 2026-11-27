@@ -1,5 +1,7 @@
 package fr.dd.jarvis.ui
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
@@ -11,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -19,6 +22,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -30,6 +34,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 /**
  * Onglet « Courrier » (à part de la Société) : colis, rendez-vous, factures et devis repérés dans les SMS et mails, à
@@ -43,18 +49,32 @@ fun CourrierScreen(app: JarvisApp) = CourrierListe(app, null)
 @Composable
 fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
     var version by remember { mutableIntStateOf(0) }
+    var actionInfo by remember { mutableStateOf("") }
     var domaine by rememberSaveable { mutableStateOf(domaineFixe ?: "tous") }
     var type by rememberSaveable { mutableStateOf("tous") }
-    var voirTraites by rememberSaveable { mutableStateOf(false) }
+    var filtreEtat by rememberSaveable("courrier_filtre_etat_v2") { mutableStateOf("a_traiter") }
     val tout = remember(version) { Courrier.liste(app).sortedByDescending { it.ts } }
     val l = tout.filter { e ->
-        (voirTraites || !e.traite) && (type == "tous" || e.type == type) &&
+        (filtreEtat == "tout" || (filtreEtat == "traites" && e.traite) || (filtreEtat == "a_traiter" && !e.traite)) && (type == "tous" || e.type == type) &&
             when (domaine) { "tous" -> true; "a_classer" -> e.domaine.isBlank(); else -> e.domaine == domaine }
     }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    LaunchedEffect(app) {
+        val resultat = withContext(Dispatchers.IO) {
+            val anciensFauxPositifs = Courrier.revaliderHistorique(app)
+            val sms = Courrier.importerSmsRecents(app)
+            val mails = runCatching { Courrier.importerMailsRecents(app, 200) }
+            Triple(anciensFauxPositifs, sms, mails)
+        }
+        if (resultat.first > 0 || resultat.second > 0 || resultat.third.getOrDefault(0) > 0) version++
+        actionInfo = resultat.third.exceptionOrNull()?.let { "⚠️ Import des mails impossible : ${it.message ?: it.javaClass.simpleName}. Vérifie Réglages › Comptes › Mails." }
+            ?: "Synchronisation terminée : ${resultat.second} nouveau(x) SMS, ${resultat.third.getOrDefault(0)} nouveau(x) mail(s), ${resultat.first} ancienne(s) publicité(s) retirée(s)."
+    }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             HudPanel(Modifier.fillMaxWidth(), title = if (domaineFixe == Courrier.SOCIETE) "📬 Reçus pour la Société" else "📬 Courrier reçu") {
+                if (actionInfo.isNotBlank()) Text(actionInfo, color = HudDim, fontSize = 11.sp)
                 Text(if (domaineFixe == Courrier.SOCIETE) "Factures, devis, rendez-vous et colis classés « Société ». Les éléments perso ou à classer sont dans l'onglet Courrier."
                     else "Colis, rendez-vous, factures et devis repérés dans tes SMS et mails. Classe chacun 🏢 Société ou 🏠 Perso : ce qui vient d'un client de la Société (ou cite un de tes devis / factures, ou arrive sur la boîte mail de la Société) est classé tout seul, et ton choix est retenu pour les prochains messages du même expéditeur.",
                     color = HudDim, fontSize = 12.sp)
@@ -72,8 +92,9 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
                         .forEach { (k, v) -> HudChip(v, type == k) { type = k } }
                 }
                 Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    HudChip("À traiter", !voirTraites) { voirTraites = false }
-                    HudChip("Avec les traités", voirTraites) { voirTraites = true }
+                    HudChip("À traiter", filtreEtat == "a_traiter") { filtreEtat = "a_traiter" }
+                    HudChip("Traités", filtreEtat == "traites") { filtreEtat = "traites" }
+                    HudChip("Tout", filtreEtat == "tout") { filtreEtat = "tout" }
                 }
             }
         }
@@ -101,10 +122,32 @@ fun CourrierListe(app: JarvisApp, domaineFixe: String?) {
                         if (e.domaine.isBlank()) Courrier.classer(app, e.id, Courrier.SOCIETE)
                         Courrier.marquer(app, e.id); version++
                     }
-                    if (e.type == Courrier.RDV) HudChip("📅 Ajouter à l'agenda") {
-                        scope.launch {
-                            withContext(Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.ToolBox(app) { _, _ -> true }.execute("create_event", Courrier.argsEvenement(e)) } }
-                            Courrier.marquer(app, e.id); version++
+                    if (e.type == Courrier.RDV) HudChip("📅 Ajouter au planning") {
+                        val initial = e.dateRdv?.let { java.time.Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDateTime() }
+                            ?: LocalDate.now().plusDays(1).atTime(9, 0)
+                        fun creerEvenement(debut: LocalDateTime) {
+                            scope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    runCatching { fr.dd.jarvis.ai.ToolBox(app) { _, _ -> true }.execute("create_event", Courrier.argsEvenement(e, debut)) }
+                                        .getOrElse { fr.dd.jarvis.ai.ToolResult("Échec de création : " + (it.message ?: "erreur inconnue")) }
+                                }
+                                actionInfo = result.text
+                                if (result.text.startsWith("Événement «")) {
+                                    Courrier.marquer(app, e.id)
+                                    version++
+                                }
+                            }
+                        }
+                        if (e.dateRdv != null && !e.statut.contains("heure non précisée")) {
+                            creerEvenement(initial)
+                        } else {
+                            android.app.DatePickerDialog(context, { _, annee, mois, jour ->
+                                android.app.TimePickerDialog(context, { _, heure, minute ->
+                                    creerEvenement(LocalDate.of(annee, mois + 1, jour).atTime(heure, minute))
+                                }, initial.hour, initial.minute, true).show()
+                            }, initial.year, initial.monthValue - 1, initial.dayOfMonth).apply {
+                                datePicker.minDate = System.currentTimeMillis() - 1000
+                            }.show()
                         }
                     }
                     if (e.lien.isNotBlank()) HudChip("🔗 Suivi") {

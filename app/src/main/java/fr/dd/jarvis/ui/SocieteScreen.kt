@@ -155,6 +155,7 @@ private fun InterventionsTab(app: JarvisApp) {
     }
 
     val sites = app.societe.data.clients.flatMap { client -> client.sites.map { site -> client to site } }.sortedBy { it.first.nom.lowercase() + " " + it.second.nom.lowercase() }
+    val brouillonsGlobaux = app.societe.data.brouillonsRapport.sortedByDescending { it.modifieLe }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { HudPanel(Modifier.fillMaxWidth(), title = "🛠️ Carnet technique photovoltaïque") {
             Text("Un dossier structuré par installation : constats, réparations, pièces, mesures et photos. Les corrections faites par Hermès sont répercutées ici et dans les rapports.", color = HudDim, fontSize = 12.sp)
@@ -182,6 +183,27 @@ private fun InterventionsTab(app: JarvisApp) {
             if (photoInfo.isNotBlank()) Text(photoInfo, color = LocalAccent.current, fontSize = 12.sp)
         } }
 
+        if (brouillonsGlobaux.isNotEmpty()) item {
+            HudPanel(Modifier.fillMaxWidth(), title = "📝 Brouillons à reprendre · " + brouillonsGlobaux.size) {
+                Text("Tous les rapports non validés restent accessibles ici, même après avoir quitté cet écran ou fermé le formulaire.", color = HudDim, fontSize = 12.sp)
+                brouillonsGlobaux.forEach { brouillon ->
+                    val client = app.societe.data.clients.firstOrNull { it.id == brouillon.clientId }
+                    val clientNom = client?.nom ?: "Client introuvable"
+                    val siteNom = client?.sites?.firstOrNull { it.id == brouillon.siteId }?.nom ?: "Installation"
+                    HudDivider()
+                    Text(clientNom + " · " + siteNom, color = HudText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(brouillon.description.ifBlank { "Rapport commencé — saisie à reprendre" }, color = HudDim, fontSize = 11.sp)
+                    Text("Dernière sauvegarde : " + brouillon.modifieLe.take(16).replace('T', ' '), color = HudDim, fontSize = 10.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HudButton("Reprendre") { brouillonEdit = brouillon }
+                        HudButton("Abandonner") {
+                            if (app.societe.supprimerBrouillon(brouillon.id)) photoInfo = "Brouillon abandonné."
+                        }
+                    }
+                }
+            }
+        }
+
         if (sites.isEmpty()) item { Text("Aucune installation enregistrée. Ajoute d'abord un client et son installation.", color = HudDim, fontSize = 13.sp) }
         items(sites, key = { it.first.id + "_" + it.second.id }) { pair ->
             val client = pair.first; val site = pair.second
@@ -196,18 +218,6 @@ private fun InterventionsTab(app: JarvisApp) {
                     HudButton("＋ Nouveau rapport") {
                         brouillonEdit = app.societe.creerBrouillon(client.id, site.id)
                         if (brouillonEdit == null) photoInfo = "❌ Impossible de créer le brouillon."
-                    }
-                }
-                brouillonsSite.sortedByDescending { it.modifieLe }.forEach { brouillon ->
-                    HudPanel(Modifier.fillMaxWidth(), title = "✎ Brouillon · " + (brouillon.date.ifBlank { "Date à préciser" })) {
-                        Text(brouillon.description.ifBlank { "Rapport non renseigné — saisie à reprendre" }, color = HudText, fontSize = 12.sp)
-                        Text("Enregistré automatiquement · " + brouillon.modifieLe.take(16).replace('T', ' '), color = HudDim, fontSize = 10.sp)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            HudButton("Reprendre") { brouillonEdit = brouillon }
-                            HudButton("Abandonner") {
-                                if (app.societe.supprimerBrouillon(brouillon.id)) photoInfo = "Brouillon abandonné."
-                            }
-                        }
                     }
                 }
                 Text("HISTORIQUE · " + site.interventions.size + " fiche(s)", color = LocalAccent.current, fontSize = 10.sp, fontWeight = FontWeight.Bold)

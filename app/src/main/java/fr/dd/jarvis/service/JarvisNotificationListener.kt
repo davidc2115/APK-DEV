@@ -145,7 +145,8 @@ class JarvisNotificationListener : NotificationListenerService() {
             if ((n.flags and Notification.FLAG_GROUP_SUMMARY) != 0 || ((n.flags and Notification.FLAG_ONGOING_EVENT) != 0 && !appel)) return
             val e = n.extras
             var titre = e.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-            val texteNotification = (e.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: e.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
+            val lignesNotification = e.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.joinToString("\n") { it.toString() }.orEmpty()
+            val texteNotification = (e.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: e.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty().ifBlank { lignesNotification }
             // Commande anti-vol (« JARVIS <code> … ») : jamais gardée, résumée ni lue à voix haute (elle contient le code).
             // Dernier message d'une conversation (style « messagerie ») : c'est lui qui vient d'arriver.
             val dernierMessage = runCatching {
@@ -181,7 +182,7 @@ class JarvisNotificationListener : NotificationListenerService() {
             val appelManque = n.category == Notification.CATEGORY_MISSED_CALL
             add(Item(sbn.packageName, label, titre, texte, sbn.postTime))
             sauver(applicationContext)
-            val mail = estMail(sbn.packageName)
+            val mail = estMail(sbn.packageName) || n.category == Notification.CATEGORY_EMAIL
             // Mode rendez-vous : appel manqué noté (et SMS « je te rappelle » aux contacts si l'option est active).
             if (!appel && fr.dd.jarvis.device.SilenceRdv.estAppelManque(sbn.packageName, n.category, titre, texte))
                 (applicationContext as? fr.dd.jarvis.JarvisApp)?.let { a -> val t = titre; fond.execute { runCatching { fr.dd.jarvis.device.SilenceRdv.appelManque(a, t, texte) } } }

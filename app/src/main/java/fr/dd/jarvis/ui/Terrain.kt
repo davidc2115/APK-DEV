@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import fr.dd.jarvis.JarvisApp
 import fr.dd.jarvis.ai.Vision
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -66,8 +67,47 @@ import java.time.LocalDate
 
 /** Fichier temporaire (partagé avec l'appareil photo par le FileProvider de l'appli). */
 private fun nouvellePhoto(ctx: Context, prefixe: String): Pair<File, Uri> {
-    val f = File(File(ctx.cacheDir, "share").apply { mkdirs() }, "${prefixe}_${System.currentTimeMillis()}.jpg")
+    // Photos d'un rapport : stockage privé durable (le cache peut être vidé par Android avant la fin du rapport).
+    val dossier = if (prefixe == "avant" || prefixe == "apres") File(ctx.filesDir, BrouillonRapportAccueil.DOSSIER) else File(ctx.cacheDir, "share")
+    val f = File(dossier.apply { mkdirs() }, "${prefixe}_${System.currentTimeMillis()}.jpg")
     return f to androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+}
+
+/**
+ * Brouillon du rapport de la page d'accueil (« 📝 Rapport ») : installation, catégorie, dictée et photos avant/après,
+ * gardés dans le stockage privé — rien n'est perdu en quittant l'écran, en fermant JARVIS ou en éteignant le téléphone.
+ * Effacé quand le rapport est créé (ou réinitialisé).
+ */
+internal object BrouillonRapportAccueil {
+    const val DOSSIER = "rapport_brouillon"
+    private const val PREFS = "jarvis_rapport_brouillon"
+    data class Contenu(val installation: String, val categorie: String, val dictee: String, val avant: List<String>, val apres: List<String>) {
+        val vide get() = dictee.isBlank() && avant.isEmpty() && apres.isEmpty()
+    }
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private fun liste(s: String?) = s.orEmpty().split('\n').map { it.trim() }.filter { it.isNotBlank() }
+
+    fun lire(ctx: Context): Contenu = prefs(ctx).let { p ->
+        Contenu(p.getString("installation", "").orEmpty(), p.getString("categorie", "").orEmpty(), p.getString("dictee", "").orEmpty(),
+            liste(p.getString("avant", "")), liste(p.getString("apres", "")))
+    }
+
+    fun enCours(ctx: Context): Boolean = runCatching { !lire(ctx).vide }.getOrDefault(false)
+
+    fun ecrire(ctx: Context, c: Contenu) {
+        if (c.vide) { prefs(ctx).edit().clear().apply(); return }
+        prefs(ctx).edit().putString("installation", c.installation).putString("categorie", c.categorie).putString("dictee", c.dictee)
+            .putString("avant", c.avant.joinToString("\n")).putString("apres", c.apres.joinToString("\n")).apply()
+    }
+
+    /** Efface le brouillon et ses photos (après création du rapport : elles ont été copiées dans l'intervention). */
+    fun effacer(ctx: Context) {
+        prefs(ctx).edit().clear().apply()
+        runCatching { File(ctx.filesDir, DOSSIER).listFiles()?.forEach { it.delete() } }
+    }
+
+    /** Photo encore présente (une photo d'un ancien brouillon dans le cache a pu être supprimée par Android). */
+    fun existe(ctx: Context, u: Uri): Boolean = runCatching { ctx.contentResolver.openInputStream(u)?.use { true } ?: false }.getOrDefault(false)
 }
 
 /** Photo réduite (1600 px max, JPEG 85 %) : envoi plus rapide, lecture des petites inscriptions préservée. */
@@ -304,12 +344,22 @@ private fun signaturePng(traits: List<Trait>, largeur: Int, hauteur: Int): ByteA
 fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    // Le brouillon est restauré après rotation, retour de l'appareil photo et recréation de l'activité.
+    // Brouillon conservé dans le stockage privé (installation, catégorie, dictée, photos), même après fermeture de
+    // l'écran, de JARVIS ou arrêt du téléphone ; restauré à la réouverture.
+    var brouillonCharge by remember { mutableStateOf(false) }
+    var confirmerReset by remember { mutableStateOf(false) }
     var installationCle by rememberSaveable { mutableStateOf("") }
     var categorie by rememberSaveable { mutableStateOf("maintenance") }
     var dictee by rememberSaveable { mutableStateOf("") }
     val avant = rememberSaveable(saver = UriListSaver) { mutableStateListOf<Uri>() }
     val apres = rememberSaveable(saver = UriListSaver) { mutableStateListOf<Uri>() }
+    androidx.compose.runtime.LaunchedEffect(dictee, installationCle, categorie, avant.size, apres.size, brouillonCharge) {
+        if (brouillonCharge) {
+            delay(250)
+            val c = BrouillonRapportAccueil.Contenu(installationCle, categorie, dictee, avant.map { it.toString() }, apres.map { it.toString() })
+            withContext(Dispatchers.IO) { BrouillonRapportAccueil.ecrire(ctx, c) }
+        }
+    }
     val traits = rememberSaveable(saver = TraitListSaver) { mutableStateListOf<Trait>() }
     var version by rememberSaveable { mutableStateOf(0) }
     var largeurSig by rememberSaveable { mutableIntStateOf(900) }
@@ -320,8 +370,21 @@ fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) 
     var finiDescription by rememberSaveable { mutableStateOf("") }
     var installations by remember { mutableStateOf<List<Vision.SiteProche>>(emptyList()) }
     val installation = installations.firstOrNull { installationCle == it.client.id + "::" + it.site.id }
-    // Ouvert sur place : présélectionne le site proche uniquement si aucun choix restauré n'existe.
+    // D'abord le brouillon enregistré (il garde SON installation), puis, sans brouillon, le site sur lequel on se trouve.
     androidx.compose.runtime.LaunchedEffect(Unit) {
+        val b = withContext(Dispatchers.IO) { runCatching { BrouillonRapportAccueil.lire(ctx) }.getOrNull() }
+        if (b != null && !b.vide) {
+            if (dictee.isBlank()) dictee = b.dictee
+            if (b.installation.isNotBlank() && installationCle.isBlank()) installationCle = b.installation
+            if (b.categorie.isNotBlank()) categorie = b.categorie
+            val photos = withContext(Dispatchers.IO) {
+                b.avant.map { Uri.parse(it) }.filter { BrouillonRapportAccueil.existe(ctx, it) } to b.apres.map { Uri.parse(it) }.filter { BrouillonRapportAccueil.existe(ctx, it) }
+            }
+            if (avant.isEmpty()) avant.addAll(photos.first)
+            if (apres.isEmpty()) apres.addAll(photos.second)
+            message = "📝 Brouillon repris là où tu l'avais laissé."
+        }
+        brouillonCharge = true
         installations = withContext(Dispatchers.IO) { runCatching { Vision.sitesProches(app) }.getOrDefault(emptyList()) }
         if (installationCle.isBlank()) installationCle = installations.firstOrNull { (it.km ?: 99.0) < 0.25 }
             ?.let { it.client.id + "::" + it.site.id }.orEmpty()
@@ -353,7 +416,16 @@ fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) 
                         .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Décris l'intervention"))
                 }
             }
-            if (dictee.isNotBlank()) HudButton("Effacer") { dictee = "" }
+            if (dictee.isNotBlank() || avant.isNotEmpty() || apres.isNotEmpty()) HudButton(if (confirmerReset) "⚠️ Toucher encore : tout effacer" else "↻ Réinitialiser le brouillon") {
+                // Deux appuis : la dictée ET les photos du brouillon sont effacées.
+                if (!confirmerReset) { confirmerReset = true; message = "Touche encore pour effacer la dictée et les photos de ce brouillon." }
+                else {
+                    confirmerReset = false
+                    dictee = ""; avant.clear(); apres.clear(); traits.clear(); version++
+                    message = "Brouillon réinitialisé."
+                    scope.launch(Dispatchers.IO) { BrouillonRapportAccueil.effacer(ctx) }
+                }
+            }
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -377,7 +449,13 @@ fun CompteRenduEcran(app: JarvisApp, onFermer: () -> Unit, onDemander: (String) 
                     fr.dd.jarvis.ai.CompteRendu.creer(app, s.client.id, s.site.id, categorie, dictee, avant.toList(), apres.toList(), signature)
                 }.getOrElse { fr.dd.jarvis.ai.CompteRendu.Resultat("❌ ${it.message}", null, null) }
                 message = r.texte
-                if (r.date != null && r.description != null) { finiDate = r.date; finiDescription = r.description }
+                if (r.date != null && r.description != null) {
+                    finiDate = r.date
+                    finiDescription = r.description
+                    // Rapport créé (photos copiées dans l'intervention) : brouillon et photos temporaires effacés.
+                    dictee = ""; avant.clear(); apres.clear()
+                    withContext(Dispatchers.IO) { BrouillonRapportAccueil.effacer(ctx) }
+                }
                 occupe = false
             }
         }

@@ -48,6 +48,25 @@ class CourrierTest {
         assertEquals(30, date.minute)
     }
 
+    @Test fun rendezVousAutomobileSansMotRendezVousSontDetectesDepuisLeSms() {
+        val base = LocalDate.of(2026, 11, 26)
+        val vidange = Courrier.analyser("Garage", "Jeudi 3 à 15h kadjar vidange garage vitteaux", "SMS", 0L, base).single()
+        assertEquals(Courrier.RDV, vidange.type)
+        val dateVidange = java.time.Instant.ofEpochMilli(vidange.dateRdv!!).atZone(java.time.ZoneId.systemDefault())
+        assertEquals(LocalDate.of(2026, 12, 3), dateVidange.toLocalDate())
+        assertEquals(15, dateVidange.hour)
+        assertEquals(0, dateVidange.minute)
+        assertEquals("Garage vitteaux", vidange.lieu)
+        assertTrue(Courrier.ligne(vidange).contains("Kadjar — Vidange"))
+
+        val ct = Courrier.analyser("Garage", "Lundi 7 à 17h20 CT kadjar", "SMS", 0L, base).single()
+        assertEquals(Courrier.RDV, ct.type)
+        val dateCt = java.time.Instant.ofEpochMilli(ct.dateRdv!!).atZone(java.time.ZoneId.systemDefault())
+        assertEquals(LocalDate.of(2026, 12, 7), dateCt.toLocalDate())
+        assertEquals(17, dateCt.hour)
+        assertEquals(20, dateCt.minute)
+        assertTrue(Courrier.ligne(ct).contains("Kadjar — Contrôle technique"))
+    }
     @Test fun texteNotificationResteUnSecoursSiAucunDernierSmsNestExpose() {
         assertEquals("Rendez-vous demain à 9h", Courrier.contenuNotification("Rendez-vous demain à 9h", " "))
     }
@@ -89,4 +108,55 @@ class CourrierTest {
         // Classement retenu pour l'expéditeur.
         assertEquals(Courrier.PERSO to true, Courrier.domaine(el("EDF", "votre facture"), "", data, mapOf(Courrier.cleEmetteur("EDF") to Courrier.PERSO)))
     }
+    @Test fun rendezVousSansDateResteDansLeCourrierPourEtreComplete() {
+        val r = a("M. Dupont", "Bonjour, je vous confirme notre rendez-vous pour votre installation. Je vous rappelle l'horaire.").single()
+        assertEquals(Courrier.RDV, r.type)
+        assertNull(r.dateRdv)
+        assertEquals("date non précisée", r.statut)
+    }
+
+    @Test fun factureEtDevisSansMontantSontConserves() {
+        val f = a("Contact inconnu", "Bonjour, veuillez trouver votre facture en pièce jointe.").single()
+        assertEquals(Courrier.FACTURE, f.type)
+        assertNull(f.montant)
+        val d = a("Artisan Martin", "Votre devis numéro 4587 est prêt, merci de nous confirmer votre accord.").single()
+        assertEquals(Courrier.DEVIS, d.type)
+        assertNull(d.montant)
+    }
+
+    @Test fun expeditionAvecFormulationLibreEstReconnue() {
+        val c = a("Transport", "Votre paquet a été remis au transporteur et est en cours d'expédition.").single()
+        assertEquals(Courrier.COLIS, c.type)
+    }
+
+    @Test fun lesPublicitesNeDeviennentPasDesRendezVousFacturesOuColis() {
+        assertTrue(a("Option Budget", "Découvrez notre option budget et profitez de nos offres exclusives.").isEmpty())
+        assertTrue(a("Garage", "Découvrez notre garage et nos offres promotionnelles sur l'entretien.").isEmpty())
+        assertTrue(a("Banque", "Votre option budget évolue, un prélèvement sera effectué selon votre choix.").isEmpty())
+        assertTrue(a("Transport", "Profitez de la livraison gratuite sur toutes nos commandes.").isEmpty())
+        assertTrue(a("Boutique", "Découvrez votre colis idéal pour vos vacances avec notre offre spéciale.").isEmpty())
+    }
+
+    @Test fun rendezVousPersonnelSansMotRendezVousEstDetecte() {
+        val r = Courrier.analyser("Ma chérie", "Je passerai chez toi jeudi 3 décembre vers 19h.", "Mail", 0L, LocalDate.of(2026, 11, 26)).single()
+        assertEquals(Courrier.RDV, r.type)
+        val date = java.time.Instant.ofEpochMilli(r.dateRdv!!).atZone(java.time.ZoneId.systemDefault())
+        assertEquals(LocalDate.of(2026, 12, 3), date.toLocalDate())
+        assertEquals(19, date.hour)
+    }
+
+    @Test fun exemplesCapturesNeSontPasClassesCommeRdvFactureOuDevis() {
+        val base = LocalDate.of(2026, 11, 26)
+        assertTrue(Courrier.analyser("SUEZ", "Relevez votre compteur d'eau avant le 24/11/2026 ! Relevez compteur", "Mail", 0L, base).isEmpty())
+        assertTrue(Courrier.analyser("Leroy Merlin", "Votre simulation est sauvegardée. Nos experts vous aident à la peaufiner.", "Mail", 0L, base).isEmpty())
+        assertTrue(Courrier.analyser("Google Play — 4,99 €", "Confirmation de votre commande Google Play du 18 nov. Votre abonnement a été prolongé et facturé en conséquence.", "Mail", 0L, base).isEmpty())
+        assertTrue(Courrier.analyser("Rendez-vous Chaussea — date inconnue", "Plus que 48 h pour profiter de vos -25%. David, votre code expire bientôt.", "Mail", 0L, base).isEmpty())
+    }
+
+    @Test fun vraiRappelDeRendezVousResteDetecteMalgreObjetCourt() {
+        val r = Courrier.analyser("Cabinet Martin", "Rappel : votre rendez-vous est confirmé le 3 décembre 2026 à 14h30 au 12 rue des Lilas.", "Mail", 0L, LocalDate.of(2026, 11, 26)).single()
+        assertEquals(Courrier.RDV, r.type)
+        assertTrue(r.dateRdv != null)
+    }
+
 }

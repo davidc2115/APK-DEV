@@ -129,7 +129,9 @@ object GmailApi {
             }
         }
         if (all.isEmpty() && errors.isNotEmpty()) throw IllegalStateException(errors.joinToString("\n"))
-        return all.sortedByDescending { it.date }.take(count)
+        // count est appliqué par compte dans fetchOne : ne pas tronquer ici, sinon les comptes à faible volume
+        // disparaissent dès qu'un autre compte contient davantage de messages récents.
+        return all.sortedByDescending { it.date }
     }
 
     /** Texte brut d'un message Gmail (partie text/plain, sinon HTML nettoyé). */
@@ -154,7 +156,7 @@ object GmailApi {
         if (auth.hasResolution()) throw IllegalStateException("autorisation à renouveler (Réglages › Comptes › Mails › Ajouter un compte Google).")
         val token = auth.accessToken ?: throw IllegalStateException("jeton Google indisponible.")
         return withContext(Dispatchers.IO) {
-            val qs = listOfNotNull(if (unreadOnly) "is:unread" else null, if (lusSeulement) "is:read" else null, if (everywhere) "-in:spam -in:trash -in:drafts" else null).joinToString(" ")
+            val qs = listOfNotNull(if (unreadOnly) "is:unread" else null, if (lusSeulement) "is:read" else null, if (everywhere) "-in:spam -in:trash -in:drafts -in:sent" else null).joinToString(" ")
             val q = if (qs.isNotBlank()) "&q=" + java.net.URLEncoder.encode(qs, "UTF-8") else ""
             val inbox = if (everywhere) "" else "&labelIds=INBOX"
             // Pagination : l'API Gmail renvoie au plus 100 mails par page.
@@ -189,7 +191,7 @@ object GmailApi {
                             unread = m.optJSONArray("labelIds")?.toString()?.contains("UNREAD") == true,
                             account = account,
                             id = id,
-                            body = if (full) texteMail(m.optJSONObject("payload")).take(1500) else "",
+                            body = if (full) texteMail(m.optJSONObject("payload")).take(5000) else "",
                             fromAddr = Regex("<([^>]+)>").find(h("From"))?.groupValues?.get(1)?.lowercase() ?: h("From").trim().lowercase(),
                             labels = m.optJSONArray("labelIds")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
                         )

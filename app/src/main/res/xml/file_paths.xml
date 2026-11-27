@@ -3,6 +3,7 @@
     <cache-path name="share" path="share/" />
     <cache-path name="mms" path="mms/" />
     <files-path name="images" path="images/" />
+    <files-path name="rapport_brouillon" path="rapport_brouillon/" />
     <files-path name="exports" path="exports/" />
     <files-path name="societe_paie" path="societe/paie/" />
     <files-path name="societe_frais" path="societe/frais/" />

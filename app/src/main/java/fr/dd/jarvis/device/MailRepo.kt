@@ -37,16 +37,33 @@ class MailRepo(private val ctx: Context, private val store: Store) {
     /** [lusSeulement] : seulement les mails déjà lus (tri des mails lus ; les non lus ne sont jamais touchés). */
     suspend fun fetchRecent(count: Int, unreadOnly: Boolean, compte: String? = null, full: Boolean = false, everywhere: Boolean = false, lusSeulement: Boolean = false): List<MailItem> {
         val q = compte?.trim()?.lowercase().orEmpty()
-        if (store.gmailAccounts.isNotEmpty()) {
-            val chosen = if (q.isNotEmpty()) store.gmailAccounts.filter { it.lowercase().contains(q) }
-            else store.gmailAccounts.filter { store.mailActive(it) }
-            if (chosen.isEmpty()) throw IllegalStateException(
-                if (q.isNotEmpty()) "Aucun compte ne correspond à « $compte »." else "Tous les comptes mail sont désactivés (Réglages › Comptes › Mails) : demande un compte précisément pour le lire."
-            )
-            return GmailApi.fetchRecent(ctx, chosen, count, unreadOnly, full, everywhere, lusSeulement)
+        if (q.isNotEmpty()) {
+            val chosen = store.gmailAccounts.filter { it.lowercase().contains(q) }
+            if (chosen.isNotEmpty()) return GmailApi.fetchRecent(ctx, chosen, count, unreadOnly, full, everywhere, lusSeulement)
+            if (q == "imap" || store.mailUser.value.contains(q, true)) {
+                if (!store.mailActive("imap")) throw IllegalStateException("Le compte IMAP est désactivé.")
+                return fetchImap(if (lusSeulement) count * 3 else count, unreadOnly).let { l -> if (lusSeulement) l.filter { !it.unread }.take(count) else l }
+            }
+            throw IllegalStateException("Aucun compte mail ne correspond à « $compte ».")
         }
-        if (q.isEmpty() && !store.mailActive("imap")) throw IllegalStateException("Le compte mail est désactivé (Réglages › Comptes › Mails).")
-        return fetchImap(if (lusSeulement) count * 3 else count, unreadOnly).let { l -> if (lusSeulement) l.filter { !it.unread }.take(count) else l }
+        val resultats = mutableListOf<MailItem>()
+        val erreurs = mutableListOf<String>()
+        val gmailActifs = store.gmailAccounts.filter { store.mailActive(it) }
+        if (gmailActifs.isNotEmpty()) runCatching {
+            resultats += GmailApi.fetchRecent(ctx, gmailActifs, count, unreadOnly, full, everywhere, lusSeulement)
+        }.onFailure { erreurs += "Gmail : ${it.message ?: it.javaClass.simpleName}" }
+        if (store.mailActive("imap") && store.mailHost.value.isNotBlank()) runCatching {
+            val imap = fetchImap(if (lusSeulement) count * 3 else count, unreadOnly)
+                .let { l -> if (lusSeulement) l.filter { !it.unread }.take(count) else l }
+                .map { it.copy(account = store.mailUser.value.trim()) }
+            resultats += imap
+        }.onFailure { erreurs += "IMAP : ${it.message ?: it.javaClass.simpleName}" }
+        if (resultats.isEmpty() && erreurs.isNotEmpty()) throw IllegalStateException(erreurs.joinToString("\n"))
+        if (resultats.isEmpty() && gmailActifs.isEmpty() && !store.mailActive("imap")) {
+            throw IllegalStateException("Aucun compte mail actif (Réglages › Comptes › Mails).")
+        }
+        val limite = count * (gmailActifs.size + if (store.mailActive("imap") && store.mailHost.value.isNotBlank()) 1 else 0).coerceAtLeast(1)
+        return resultats.sortedByDescending { it.date }.distinctBy { it.id.ifBlank { "${it.account}|${it.from}|${it.subject}|${it.date?.time}" } }.take(limite)
     }
 
     private suspend fun fetchImap(count: Int, unreadOnly: Boolean): List<MailItem> = withContext(Dispatchers.IO) {
