@@ -131,6 +131,8 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
             "tiktok_profil" -> {
                 if (!TikTok.connecte(app)) return ToolResult("Aucun compte TikTok connecté : utilise tiktok_connexion.")
                 val u = TikTok.monProfil(app)
+                if (u.optBoolean("sans_stats")) return ToolResult("# 🎵 ${u.optString("display_name")}\n- Vidéos : ${u.optInt("videos_listees")}\n- Likes sur ces vidéos : ${u.optLong("likes_videos")}\n" +
+                    "- Abonnés : non disponibles — ajoute le scope user.info.stats à Jarvis21 (developers.tiktok.com), active « Abonnés et likes du profil » dans Réglages › TikTok, puis reconnecte le compte.", direct = true)
                 ToolResult("# 🎵 ${u.optString("display_name")}\n- Abonnés : ${u.optLong("follower_count")}\n- Abonnements : ${u.optLong("following_count")}\n- Likes cumulés : ${u.optLong("likes_count")}\n- Vidéos : ${u.optLong("video_count")}", direct = true)
             }
             "tiktok_mes_videos" -> {

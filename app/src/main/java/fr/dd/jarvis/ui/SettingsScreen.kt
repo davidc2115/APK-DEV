@@ -780,6 +780,9 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
         VoletReglages("ia", "medias", "Vidéo IA", "video fal wan generation animation") {
             PollinationsPanel(store)
         },
+        VoletReglages("ia", "medias", "Plans libres de droits (Pexels, Pixabay)", "pexels pixabay plans libres de droits montage gratuit video stock cle api tiktok") {
+            PlansLibresPanel(store)
+        },
         VoletReglages("voix", "ecoute", "Écoute « Jarvis »", "ecoute jarvis mot eveil micro picovoice vosk detecteur assistant par defaut econome batterie") {
             val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
                 if (ok) { store.wakeOn.set(true); fr.dd.jarvis.service.JarvisService.start(ctx) }
@@ -2349,6 +2352,8 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
     var msg by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     val connecte = store.tiktokAccessToken.value.isNotBlank()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
     HudPanel(Modifier.fillMaxWidth(), title = "TikTok — compte personnel") {
         Text(
             "Permet à JARVIS de lire les statistiques de TES vidéos (vues, likes, commentaires, partages) et de te conseiller. Les tendances, ta niche et tes concurrents sont lus sur les pages publiques via tikwm (gratuit, non officiel, peut s'interrompre). " +
@@ -2377,8 +2382,12 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
             HudButton(if (busy) "…" else "Se connecter", enabled = !busy && store.tiktokClientKey.value.isNotBlank() && store.tiktokClientSecret.value.isNotBlank()) {
                 val state = java.util.UUID.randomUUID().toString()
                 store.tiktokOAuthState.set(state)
-                val err = app.phone.start(android.content.Intent.ACTION_VIEW, fr.dd.jarvis.ai.TikTok.urlAutorisation(app, state), null)
-                msg = if (err.isNotBlank()) "❌ $err" else ""
+                // Ouverture directe du navigateur (l'ADB intégré bloquait l'écran : appli figée).
+                msg = runCatching {
+                    ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(fr.dd.jarvis.ai.TikTok.urlAutorisation(app, state)))
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    ""
+                }.getOrElse { "❌ Impossible d'ouvrir le navigateur : ${it.message}" }
             }
             if (connecte) HudButton("Se déconnecter", enabled = !busy) { fr.dd.jarvis.ai.TikTok.deconnecter(app); msg = "Déconnecté." }
             HudButton(if (busy) "Test…" else "Tester", enabled = !busy && connecte) {
@@ -2386,7 +2395,7 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
                     busy = true
                     msg = try {
                         val u = fr.dd.jarvis.ai.TikTok.monProfil(app)
-                        "✅ ${u.optString("display_name")} — ${u.optLong("follower_count")} abonnés, ${u.optLong("video_count")} vidéos"
+                        "✅ " + fr.dd.jarvis.ai.TikTok.resumeProfil(u)
                     } catch (e: Exception) { "❌ ${e.message}" }
                     busy = false
                 }
@@ -2394,38 +2403,55 @@ private fun TikTokPanel(store: fr.dd.jarvis.data.Store, app: fr.dd.jarvis.Jarvis
         }
         if (msg.isNotBlank()) Text(msg, color = HudText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
     }
-    Spacer(Modifier.height(10.dp))
     HudPanel(Modifier.fillMaxWidth(), title = "TikTok — niche, concurrents, idées") {
         HudTextField(store.tiktokNiche.value, { store.tiktokNiche.set(it) }, Modifier.fillMaxWidth(), label = "Ta niche (mots-clés)", placeholder = "maintenance photovoltaïque, panneaux solaires")
         Spacer(Modifier.height(6.dp))
         HudTextField(store.tiktokConcurrents.value, { store.tiktokConcurrents.set(it) }, Modifier.fillMaxWidth(), label = "Comptes concurrents suivis", placeholder = "@compte1, @compte2")
         Spacer(Modifier.height(8.dp))
         HudChip(if (store.tiktokHebdo.value) "💡 3 idées de vidéos chaque lundi : oui" else "Idées de vidéos chaque lundi : non", store.tiktokHebdo.value) { store.tiktokHebdo.set(!store.tiktokHebdo.value) }
+    }
+    HudPanel(Modifier.fillMaxWidth(), title = "TikTok — autorisations du compte") {
+        Text("Chaque autorisation doit d'abord être ajoutée à ton appli Jarvis21 sur developers.tiktok.com, sinon TikTok refuse TOUTE la connexion. Après un changement, touche « Se connecter » à nouveau.",
+            color = HudDim, fontSize = 12.sp)
         Spacer(Modifier.height(6.dp))
+        Text("Accordées : " + store.tiktokScopes.value.ifBlank { "inconnues (reconnecte le compte)" }, color = HudText, fontSize = 11.sp)
+        Spacer(Modifier.height(6.dp))
+        HudChip(if (store.tiktokStats.value) "📊 Abonnés et likes du profil (user.info.stats) : oui" else "Abonnés et likes du profil (user.info.stats) : non", store.tiktokStats.value) {
+            store.tiktokStats.set(!store.tiktokStats.value)
+        }
+        Text("Produit « Display API » de Jarvis21 → scope user.info.stats. Sans lui, JARVIS compte tes vidéos et leurs likes à partir de leur liste.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
         HudChip(if (store.tiktokPublication.value) "📥 Envoyer mes montages dans mes brouillons TikTok : oui" else "Envoyer mes montages dans mes brouillons TikTok : non", store.tiktokPublication.value) {
             store.tiktokPublication.set(!store.tiktokPublication.value)
         }
         val autorise = fr.dd.jarvis.ai.TikTok.envoiAutorise(app)
         Text(
-            if (!store.tiktokPublication.value) "Brouillons : sur developers.tiktok.com, ajoute à Jarvis21 le produit « Content Posting API » avec le scope video.upload, active l'option ci-dessus puis reconnecte le compte."
+            if (!store.tiktokPublication.value) "Produit « Content Posting API » de Jarvis21 → scope video.upload."
             else if (autorise) "✅ Envoi en brouillon autorisé : chaque montage TikTok arrive dans ta boîte TikTok (5 envois en attente au plus par 24 h)."
-            else "⚠️ Reconnecte le compte (bouton « Se connecter ») pour autoriser l'envoi en brouillon. Si TikTok refuse la connexion, le scope video.upload n'est pas encore ajouté à Jarvis21.",
-            color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
+            else "⚠️ Reconnecte le compte pour autoriser l'envoi en brouillon. Si TikTok refuse la connexion, le scope video.upload n'est pas encore ajouté à Jarvis21.",
+            color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp)
         )
     }
-    Spacer(Modifier.height(10.dp))
+    PlansLibresPanel(store)
+    }
+}
+
+/** Clés Pexels / Pixabay (plans vidéo libres de droits gratuits pour les montages) : réglages TikTok et Vidéo IA. */
+@Composable
+private fun PlansLibresPanel(store: fr.dd.jarvis.data.Store) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     HudPanel(Modifier.fillMaxWidth(), title = "Montage gratuit — plans libres de droits") {
-        val ctx = androidx.compose.ui.platform.LocalContext.current
         Text("Pexels (200 recherches/heure) et Pixabay (100/minute) fournissent gratuitement des plans vidéo réels pour tes montages, avant toute génération IA. Clés gratuites, gardées chiffrées.", color = HudDim, fontSize = 12.sp)
         Spacer(Modifier.height(6.dp))
         HudTextField(store.pexelsKey.value, { v -> runCatching { store.pexelsKey.set(v.trim()) } }, Modifier.fillMaxWidth(), label = "Clé API Pexels", password = true)
         Text("Créer une clé Pexels", color = HudDim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 4.dp).clickable {
-            ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.pexels.com/api/new/")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.pexels.com/api/new/")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
         })
         HudTextField(store.pixabayKey.value, { v -> runCatching { store.pixabayKey.set(v.trim()) } }, Modifier.fillMaxWidth(), label = "Clé API Pixabay", password = true)
         Text("Créer une clé Pixabay", color = HudDim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 4.dp).clickable {
-            ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://pixabay.com/api/docs/")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://pixabay.com/api/docs/")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
         })
+        Text(if (store.pexelsKey.value.isNotBlank() || store.pixabayKey.value.isNotBlank()) "✅ Plans libres de droits actifs pour les montages." else "Sans clé, les montages utilisent uniquement les plans générés par IA.",
+            color = HudText, fontSize = 11.sp)
     }
 }
 

@@ -42,7 +42,8 @@ object TikTok {
      * publication est activée dans les réglages — ce scope doit d'abord être ajouté à l'appli sur developers.tiktok.com,
      * sinon TikTok refuse toute la connexion.
      */
-    fun scopes(app: JarvisApp) = "user.info.basic,video.list" + if (app.store.tiktokPublication.value) ",video.upload" else ""
+    fun scopes(app: JarvisApp) = "user.info.basic,video.list" + (if (app.store.tiktokStats.value) ",user.info.stats" else "") +
+        (if (app.store.tiktokPublication.value) ",video.upload" else "")
 
     /** Le compte connecté a autorisé l'envoi en brouillon. */
     fun envoiAutorise(app: JarvisApp) = connecte(app) && app.store.tiktokScopes.value.split(',', ' ').any { it.trim() == "video.upload" }
@@ -121,10 +122,37 @@ object TikTok {
         }
     }
 
+    /**
+     * Profil du compte. Les abonnés / likes demandent le scope user.info.stats : s'il n'est pas accordé (« The user did
+     * not authorize the scope… »), seul le profil de base est lu, et le nombre de vidéos et leurs likes sont comptés
+     * à partir de la liste des vidéos ([JSONObject] « sans_stats » = true).
+     */
     suspend fun monProfil(app: JarvisApp): JSONObject = withContext(Dispatchers.IO) {
-        appel(app, "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url,follower_count,following_count,likes_count,video_count")
-            .optJSONObject("data")?.optJSONObject("user") ?: JSONObject()
+        val complet = "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url,follower_count,following_count,likes_count,video_count"
+        val avecStats = !app.store.tiktokScopes.value.isNotBlank() || app.store.tiktokScopes.value.contains("user.info.stats")
+        if (avecStats) try {
+            return@withContext appel(app, complet).optJSONObject("data")?.optJSONObject("user") ?: JSONObject()
+        } catch (e: IllegalStateException) {
+            if (!refusScope(e.message.orEmpty())) throw e
+        }
+        val u = appel(app, "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url").optJSONObject("data")?.optJSONObject("user") ?: JSONObject()
+        u.put("sans_stats", true)
+        runCatching {
+            val v = mesVideos(app, 100)
+            u.put("videos_listees", v.length())
+            u.put("likes_videos", (0 until v.length()).sumOf { v.getJSONObject(it).optLong("like_count") })
+        }
+        u
     }
+
+    /** Erreur TikTok « autorisation (scope) non accordée ». */
+    fun refusScope(message: String) = Regex("(?i)scope|not authori[sz]e").containsMatchIn(message)
+
+    /** Une ligne lisible du profil, avec ou sans les statistiques du profil. */
+    fun resumeProfil(u: JSONObject): String = if (u.optBoolean("sans_stats"))
+        "${u.optString("display_name")} — ${if (u.has("videos_listees")) "${u.optInt("videos_listees")} vidéos, ${u.optLong("likes_videos")} likes sur ces vidéos" else "liste des vidéos non autorisée"}" +
+            " (abonnés : active « Abonnés et likes du profil » dans les réglages TikTok)"
+    else "${u.optString("display_name")} — ${u.optLong("follower_count")} abonnés, ${u.optLong("likes_count")} likes, ${u.optLong("video_count")} vidéos"
 
     /** Vidéos du compte connecté, avec leurs statistiques (20 par appel au plus — max_count TikTok —, pages suivies jusqu'à [max]). */
     suspend fun mesVideos(app: JarvisApp, max: Int = 20): JSONArray = withContext(Dispatchers.IO) {

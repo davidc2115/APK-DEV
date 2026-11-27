@@ -233,7 +233,10 @@ class MainActivity : ComponentActivity() {
             return
         }
         vm.viewModelScope.launch {
-            val r = fr.dd.jarvis.ai.TikTok.echangerCode(app, code)
+            // Erreur réseau pendant l'échange du code : message, jamais de plantage de l'appli.
+            val r = try { fr.dd.jarvis.ai.TikTok.echangerCode(app, code) }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { "❌ Connexion TikTok interrompue : ${e.message ?: e.javaClass.simpleName}" }
             android.widget.Toast.makeText(this@MainActivity, r, android.widget.Toast.LENGTH_LONG).show()
         }
     }

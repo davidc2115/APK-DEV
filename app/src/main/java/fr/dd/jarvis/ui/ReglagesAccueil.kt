@@ -234,7 +234,8 @@ fun PageGroupeReglages(
             }
             if (ouvert) contenu.forEach { v ->
                 item(key = "v:" + v.onglet + "/" + v.sous + "/" + v.titre) {
-                    Box(Modifier.padding(start = 6.dp)) { v.contenu() }
+                    // Colonne (et non Box) : un réglage fait de plusieurs panneaux les empile au lieu de les superposer.
+                    Column(Modifier.padding(start = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { v.contenu() }
                 }
             }
         }

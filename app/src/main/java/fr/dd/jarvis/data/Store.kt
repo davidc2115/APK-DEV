@@ -553,6 +553,8 @@ class Store(context: Context) {
     val tiktokScopes = SPref("tiktokScopes", "")              // autorisations accordées (user.info.basic,video.list,video.upload)
     /** Demander video.upload à la connexion : les montages TikTok partent dans les brouillons du compte. */
     val tiktokPublication = BPref("tiktokPublication", false)
+    /** Demander user.info.stats (abonnés, likes du profil) à la connexion. */
+    val tiktokStats = BPref("tiktokStats", false)
     /** Mots-clés de la niche (« maintenance photovoltaïque, panneaux solaires »). */
     val tiktokNiche = SPref("tiktokNiche", "")
     /** Comptes concurrents suivis (@pseudo séparés par des virgules). */

@@ -137,4 +137,14 @@ class TikTokStudioTest {
         assertTrue(TikTokPropositions.aLancer(mercredi, "2026-W48", true))   // téléphone éteint lundi : rattrapé
         assertFalse(TikTokPropositions.aLancer(lundi10h, "2026-W48", false))
     }
+
+    /** « The user did not authorize the scope required for completing this request » : profil sans statistiques. */
+    @Test fun profilSansLeScopeStatistiques() {
+        assertTrue(TikTok.refusScope("TikTok : The user did not authorize the scope required for completing this request."))
+        assertFalse(TikTok.refusScope("TikTok 500 : erreur serveur"))
+        val u = JSONObject().put("display_name", "Dd").put("sans_stats", true).put("videos_listees", 12).put("likes_videos", 340)
+        assertEquals("Dd — 12 vidéos, 340 likes sur ces vidéos (abonnés : active « Abonnés et likes du profil » dans les réglages TikTok)", TikTok.resumeProfil(u))
+        val complet = JSONObject().put("display_name", "Dd").put("follower_count", 250).put("likes_count", 1200).put("video_count", 12)
+        assertEquals("Dd — 250 abonnés, 1200 likes, 12 vidéos", TikTok.resumeProfil(complet))
+    }
 }
