@@ -219,18 +219,17 @@ private fun ChoixAgenda(app: JarvisApp, retenu: String, titre: String, onChoix: 
                         val choisi = c.cle == choisiCle
                         Row(
                             androidx.compose.ui.Modifier.fillMaxWidth().clip(HudShapeSmall)
-                                .background(accent.copy(alpha = if (choisi) 0.20f else 0.06f))
-                                .border(1.dp, accent.copy(alpha = if (choisi) 0.9f else 0.3f), HudShapeSmall)
-                                .clickable { onChoix(c) }
+                                .background(accent.copy(alpha = if (choisi) 0.20f else if (c.ecriture) 0.06f else 0.02f))
+                                .border(1.dp, accent.copy(alpha = if (choisi) 0.9f else if (c.ecriture) 0.3f else 0.12f), HudShapeSmall)
+                                .clickable(enabled = c.ecriture) { onChoix(c) }
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
                         ) {
                             androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.size(12.dp).clip(androidx.compose.foundation.shape.CircleShape)
                                 .background(androidx.compose.ui.graphics.Color(c.couleur)))
                             androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(start = 10.dp).weight(1f)) {
-                                Text(c.nom, color = HudText, fontSize = 13.sp, fontWeight = if (choisi) FontWeight.SemiBold else FontWeight.Normal)
-                                Text((if (c.googleId != null) "Google · " else "Téléphone · ") + c.compte + (if (c.googleId != null && c.localId == null) " · pas synchronisé sur le téléphone" else ""),
-                                    color = HudDim, fontSize = 10.sp)
+                                Text(c.nom, color = if (c.ecriture) HudText else HudDim, fontSize = 13.sp, fontWeight = if (choisi) FontWeight.SemiBold else FontWeight.Normal)
+                                Text(c.etiquette + (if (c.compte.isNotBlank() && c.compte != c.nom) " · ${c.compte}" else ""), color = HudDim, fontSize = 10.sp)
                             }
                             if (choisi) Text("retenu", color = accent, fontSize = 10.sp)
                         }

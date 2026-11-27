@@ -170,10 +170,56 @@ class CalendarRepo(private val ctx: Context, private val store: Store) {
         return ContentUris.parseId(uri)
     }
 
+    /** Détail d'un agenda du téléphone pour le rapprocher d'un agenda Google (identifiants possibles, synchro, droits). */
+    data class DetailAgenda(val id: Long, val nom: String, val compte: String, val typeCompte: String, val identifiants: Set<String>,
+                            val couleur: Int, val ecriture: Boolean, val synchronise: Boolean)
+
+    /** Tous les agendas du téléphone, y compris en lecture seule, avec ce qui permet de les relier à Google. */
+    fun detailAgendas(): List<DetailAgenda> {
+        if (!hasPermission()) return emptyList()
+        val out = mutableListOf<DetailAgenda>()
+        val proj = arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, CalendarContract.Calendars.ACCOUNT_NAME,
+            CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.Calendars.NAME, CalendarContract.Calendars.OWNER_ACCOUNT, CalendarContract.Calendars._SYNC_ID,
+            CalendarContract.Calendars.CALENDAR_COLOR, CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL, CalendarContract.Calendars.SYNC_EVENTS)
+        runCatching {
+            ctx.contentResolver.query(CalendarContract.Calendars.CONTENT_URI, proj, null, null, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val ids = listOf(4, 5, 6).mapNotNull { c.getString(it)?.trim()?.takeIf { v -> v.isNotBlank() } }
+                        .flatMap { v -> listOf(v, runCatching { java.net.URLDecoder.decode(v.substringAfterLast("/feeds/").substringBefore('/'), "UTF-8") }.getOrDefault(v)) }
+                        .map { it.lowercase() }.toSet()
+                    val cal = CalInfo(c.getLong(0), c.getString(1) ?: "Agenda", c.getString(2) ?: "", c.getInt(7), true)
+                    out += DetailAgenda(cal.id, displayName(cal), cal.account, c.getString(3) ?: "", ids, calendarColor(cal),
+                        c.getInt(8) >= CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR, c.isNull(9) || c.getInt(9) != 0)
+                }
+            }
+        }
+        return out
+    }
+
     /** Compte (nom, type) et identifiant Google (_SYNC_ID) d'un agenda du téléphone, ou null. */
     fun infosSync(calId: Long): Triple<String, String, String>? = runCatching { meta(calId) }.getOrNull()
 
     /** Demande la synchronisation immédiate de l'agenda (compte Google) : manuelle, donc même si la synchro auto est coupée. */
+    /**
+     * Active la synchronisation et l'affichage d'un agenda du téléphone (comme la case à cocher de l'appli Agenda) :
+     * un agenda Google présent sur le téléphone mais non synchronisé n'apparaîtrait pas dans JARVIS.
+     */
+    fun activerSynchro(calId: Long): Boolean = runCatching {
+        val v = ContentValues().apply { put(CalendarContract.Calendars.SYNC_EVENTS, 1); put(CalendarContract.Calendars.VISIBLE, 1) }
+        ctx.contentResolver.update(android.content.ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, calId), v, null, null) > 0
+    }.getOrDefault(false).also { if (it) synchroniser(calId) }
+
+    /** Synchronise tout de suite les agendas d'un compte Google du téléphone (fait apparaître un agenda Google récent). */
+    fun synchroniserCompte(compte: String) {
+        runCatching {
+            val extras = android.os.Bundle().apply {
+                putBoolean(android.content.ContentResolver.SYNC_EXTRAS_MANUAL, true)
+                putBoolean(android.content.ContentResolver.SYNC_EXTRAS_EXPEDITED, true)
+            }
+            android.content.ContentResolver.requestSync(android.accounts.Account(compte, "com.google"), CalendarContract.AUTHORITY, extras)
+        }
+    }
+
     fun synchroniser(calId: Long) {
         runCatching {
             val (acc, type, _) = meta(calId) ?: return

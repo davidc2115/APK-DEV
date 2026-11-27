@@ -461,18 +461,22 @@ object GmailApi {
     }
 
     /** Un agenda Google où le compte peut écrire (propriétaire ou modification autorisée). */
-    data class AgendaGoogle(val compte: String, val id: String, val nom: String, val couleur: Int, val principal: Boolean)
+    data class AgendaGoogle(val compte: String, val id: String, val nom: String, val couleur: Int, val principal: Boolean, val ecriture: Boolean = true)
 
-    /** Agendas Google modifiables de [account], y compris ceux que le téléphone ne synchronise pas (liste vide si non autorisé). */
+    /**
+     * Tous les agendas Google de [account] (ceux qu'il peut modifier ET ceux qu'il ne peut que lire : [AgendaGoogle.ecriture]),
+     * y compris ceux que le téléphone ne synchronise pas (liste vide si non autorisé).
+     */
     suspend fun agendasGoogle(ctx: Context, account: String): List<AgendaGoogle> = try {
         val auth = authorize(ctx, account)
         val token = auth.accessToken
         if (auth.hasResolution() || token == null) emptyList() else withContext(Dispatchers.IO) {
-            val r = get(token, "https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=writer&maxResults=250")
+            val r = get(token, "https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader&maxResults=250&showHidden=true")
             val items = r.optJSONArray("items") ?: org.json.JSONArray()
             (0 until items.length()).map { items.getJSONObject(it) }.filter { !it.optBoolean("deleted") }.map { o ->
                 AgendaGoogle(account, o.optString("id"), o.optString("summaryOverride").ifBlank { o.optString("summary") }.ifBlank { o.optString("id") },
-                    runCatching { android.graphics.Color.parseColor(o.optString("backgroundColor")) }.getOrDefault(0xFF039BE5.toInt()), o.optBoolean("primary"))
+                    runCatching { android.graphics.Color.parseColor(o.optString("backgroundColor")) }.getOrDefault(0xFF039BE5.toInt()), o.optBoolean("primary"),
+                    o.optString("accessRole") in setOf("owner", "writer"))
             }
         }
     } catch (e: Exception) { emptyList() }
