@@ -259,10 +259,13 @@ object Montage {
         // première image de ce montage (le même sujet d'un plan à l'autre).
         val modelesChaine = if (d.tiktok) TikTokAuto.references(app).take(3) else emptyList()
         var modeleMontage: File? = null
+        // Sujet récurrent de la chaîne (le phénix tricolore…) imposé aux plans qui n'en montrent aucun symbole.
+        val ancre = if (!d.tiktok) "" else app.store.tiktokStyle.value.trim().takeIf { it.isNotBlank() && it.length <= 220 && Regex("(?i)[a-z]").containsMatchIn(it) }
+            ?: if (Regex("(?i)ph[ée]nix|phoenix").containsMatchIn(d.sujet + " " + d.style)) ANCRE_PHENIX else ""
         suspend fun image(rang: Int, p: Plan): File? = imagesParPlan[rang] ?: if (imagesIaEpuisees) null else runCatching {
             val modeles = modelesChaine + listOfNotNull(modeleMontage)
             val prompt = (if (modeles.isNotEmpty()) "Keep exactly the same main subject design, color palette, lighting and mood as the reference images, in a new composition: " else "") +
-                p.visuel + ", ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, cinematic lighting, highly detailed, no text, no letters, no watermark"
+                interdits(ancrer(p.visuel, ancre)) + ", ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, cinematic lighting, highly detailed"
             // Image directement au bon format et nette (FLUX.2 klein 4B : ≈ 10 fois moins de quota que le 9B).
             ImageGen.generate(app, prompt, "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768, huggingFace = false, references = modeles).first
                 .also { if (modeleMontage == null) modeleMontage = ImageGen.reference(it, File(travail, "modele_montage.jpg")) }
@@ -287,10 +290,10 @@ object Montage {
         }
         suspend fun reel(i: Int, p: Plan): File? {
             val requetes = listOf(p.recherche, Stock.motsCles(p.visuel), Stock.motsCles(p.visuel, 2)).filter { it.isNotBlank() }.distinct()
-            val clip = requetes.firstNotNullOfOrNull { q -> Stock.chercher(app, q, vertical, pris) }
+            val clip = requetes.firstNotNullOfOrNull { q -> Stock.chercher(app, q, vertical, pris, strict = d.tiktok) }
                 // Rien en anglais : mots du sujet en français (Pixabay et Pexels cherchent aussi en français).
                 ?: Stock.motsClesFr(d.sujet).let { mots -> listOf(mots.joinToString(" "), mots.firstOrNull().orEmpty()) }
-                    .filter { it.isNotBlank() }.distinct().firstNotNullOfOrNull { q -> Stock.chercher(app, q, vertical, pris, francais = true) }
+                    .filter { it.isNotBlank() }.distinct().firstNotNullOfOrNull { q -> Stock.chercher(app, q, vertical, pris, francais = true, strict = d.tiktok) }
             val f = clip?.let { Stock.telecharger(it, File(travail, "stock_$i.mp4")) }
             if (clip != null && f != null) credits += clip
             return f
@@ -344,7 +347,9 @@ object Montage {
                             .onFailure { echecs += "animation IA de l'image ${k + 1} : ${it.message?.take(110)}" }.getOrNull()
                     }
                     if (clip == null || clip.size <= 10_000) break   // quota épuisé ou service indisponible : inutile d'insister
-                    val f = File(travail, "anime_${m.i}.mp4").apply { writeBytes(clip) }
+                    // Hugging Face rend 16 images/s : sous le minimum de TikTok (23) → converti en 30 images/s constants.
+                    val brut = File(travail, "anime_${m.i}_16.mp4").apply { writeBytes(clip) }
+                    val f = runCatching { en30ips(app, brut, travail) }.getOrNull() ?: brut
                     medias[medias.indexOf(m)] = m.copy(fichier = f, image = false)
                     animees++
                 }
@@ -512,7 +517,16 @@ object Montage {
         // des images abîmées (blocs remis à zéro → bandes et images figées sur TikTok). Le réglage (portrait direct ou
         // paysage + rotation) est choisi d'après ce que l'encodeur accepte vraiment, pour garder la pleine résolution.
         // Chaque export est vérifié (images abîmées, résolution) ; sinon il est refait autrement, le meilleur gardé.
-        data class Essai(val avecTexte: Boolean, val avecSon: Boolean, val l: Int, val h: Int, val libelle: String, val logiciel: Boolean = true, val portrait: Boolean = true)
+        // Cadence : tout plan vidéo sous 23 images/s (TikTok le refuse) est d'abord converti en 30 images/s constants.
+        val convertis = HashMap<File, File>()
+        for ((k, sg) in segments.withIndex()) {
+            if (sg.image || (ipsVideo(sg.fichier) ?: 30.0) >= 23.0) continue
+            progres("🎞️ Mise à 30 images/s d'un plan…")
+            val c = convertis.getOrPut(sg.fichier) { runCatching { en30ips(app, sg.fichier, travail) }.getOrNull() ?: sg.fichier }
+            segments[k] = sg.copy(fichier = c)
+        }
+        data class Essai(val avecTexte: Boolean, val avecSon: Boolean, val l: Int, val h: Int, val libelle: String, val logiciel: Boolean = true, val portrait: Boolean = true,
+                         val texteDansImages: Boolean = false)
         val (l720, h720) = if (vertical) 720 to 1280 else 1280 to 720
         val reglagePlein = reglageLogiciel(largeur, hauteur)
         val reglage720 = reglageLogiciel(l720, h720)
@@ -521,31 +535,41 @@ object Montage {
             if (reglagePlein == null && largeur != l720 && reglage720 != null) Essai(true, true, l720, h720, "en 720p", portrait = reglage720) else null,
             Essai(true, true, largeur, hauteur, "encodeur matériel", logiciel = false),
             if (reglage720 != null && largeur != l720 && reglagePlein != null) Essai(true, true, l720, h720, "en 720p", portrait = reglage720) else null,
+            // Incrustation refusée par le téléphone : le texte est dessiné dans les images elles-mêmes (pleine résolution).
+            (reglagePlein ?: reglage720)?.let { p -> Essai(false, true, if (reglagePlein != null) largeur else l720, if (reglagePlein != null) hauteur else h720,
+                "avec le texte dessiné dans les images", portrait = p, texteDansImages = d.textes) },
             Essai(false, true, l720, h720, "sans texte à l'écran", logiciel = reglage720 != null, portrait = reglage720 ?: true),
             Essai(false, false, l720, h720, "sans texte ni son", logiciel = reglage720 != null, portrait = reglage720 ?: true)
         )
-        val complets = setOf("complet", "en 720p", "encodeur matériel")
+        val complets = setOf("complet", "en 720p", "encodeur matériel", "avec le texte dessiné dans les images")
         var abandons = ""
+        var raisonAbandon = ""
         var ok = false
         var secours: File? = null
         var secoursScore = Long.MIN_VALUE
         var secoursAbimees = 0
         var secoursLibelle = ""
         var secoursCote = 0
-        for ((avecTexte, avecSon, l, h, libelle, logiciel, portrait) in essais) {
+        for ((avecTexte, avecSon, l, h, libelle, logiciel, portrait, texteDansImages) in essais) {
             progres("🎞️ Montage" + (if (libelle != "complet") " ($libelle)" else "") + "…")
             val r = runCatching {
                 exporter(app, segments, if (avecSon) voix else emptyList(), if (avecSon) musique else null, avecTexte, d.garderSon && avecSon, l, h, avecParoles, sortie,
                     if (avecTexte && avecSon) reperes else emptyList(), tiktok = d.tiktok,
-                    bandeau = if (avecTexte && d.tiktok) app.store.tiktokBandeau.value.trim().ifBlank { sb.bandeau } else "",
-                    logiciel = logiciel, portrait = portrait)
+                    bandeau = if ((avecTexte || texteDansImages) && d.tiktok) app.store.tiktokBandeau.value.trim().ifBlank { sb.bandeau } else "",
+                    logiciel = logiciel, portrait = portrait, texteDansImages = texteDansImages)
             }
-            if (r.isFailure) { echecs += "montage $libelle : ${r.exceptionOrNull()?.message?.take(140)}"; continue }
+            if (r.isFailure) {
+                val raison = r.exceptionOrNull()?.let { e -> (e.message ?: e.javaClass.simpleName) + (e.cause?.message?.let { " ($it)" } ?: "") }.orEmpty()
+                if (raisonAbandon.isBlank()) raisonAbandon = raison.take(160)
+                echecs += "montage $libelle : ${raison.take(160)}"; continue
+            }
             progres("🔎 Vérification de la vidéo…")
             val (abimees, cote) = withContext(Dispatchers.IO) { analyser(sortie) }
             val pleineTaille = cote == 0 || cote >= min(l, h) * 9 / 10
             if (abimees == 0 && pleineTaille) { ok = true; if (libelle !in complets) abandons = libelle; break }
-            echecs += "montage $libelle : " + (if (abimees > 0) "$abimees images abîmées par l'encodeur du téléphone" else "résolution réduite à ${cote}p par l'encodeur") + ", refait autrement"
+            val defaut = if (abimees > 0) "$abimees images abîmées par l'encodeur du téléphone" else "résolution réduite à ${cote}p par l'encodeur"
+            if (raisonAbandon.isBlank()) raisonAbandon = defaut
+            echecs += "montage $libelle : $defaut, refait autrement"
             // Meilleur export de secours : sans défaut d'abord, puis la plus grande résolution, puis le moins d'images abîmées.
             val score = if (abimees == 0) 1_000_000L + cote else -abimees.toLong()
             if (score > secoursScore) {
@@ -576,7 +600,13 @@ object Montage {
                     (if (credits.isNotEmpty()) "\n\n## Crédits des plans libres de droits\n" + credits.joinToString("\n") { "- ${it.source} · ${it.auteur.ifBlank { "auteur inconnu" }} · ${it.page}" } else ""))
         }
         // Brouillon TikTok : la vidéo part dans la boîte de réception TikTok (son tendance et publication dans l'appli).
-        val envoi = if (d.tiktok && d.brouillon) runCatching { TikTok.envoyerBrouillon(app, sortie) }.getOrElse { "❌ Envoi en brouillon TikTok impossible : ${it.message}" } else ""
+        // TikTok exige 23 à 60 images/s : vérifié avant l'envoi (sinon refus « frame_rate_check_failed » après coup).
+        val cadence = withContext(Dispatchers.IO) { cadenceMoyenne(sortie) }
+        val envoi = when {
+            !(d.tiktok && d.brouillon) -> ""
+            cadence != null && (cadence < 23.0 || cadence > 60.5) -> "⚠️ Pas envoyée dans tes brouillons TikTok : la vidéo est à ${"%.1f".format(cadence)} images/s (TikTok exige 23 à 60)."
+            else -> runCatching { TikTok.envoyerBrouillon(app, sortie) }.getOrElse { "❌ Envoi en brouillon TikTok impossible : ${it.message}" }
+        }
         return buildString {
             append("🎬 « ${sb.titre} » — ${d.dureeS} s, ${segments.size} plans")
             val pistes = listOfNotNull(if (voix.isNotEmpty() && abandons.isBlank()) "voix off" else null,
@@ -591,7 +621,7 @@ object Montage {
             if (sb.legende.isNotBlank()) append("\n\n📝 Légende : ${sb.legende}")
             if (credits.isNotEmpty()) append("\n🎞️ Plans libres de droits : " + credits.map { it.source }.distinct().joinToString(" et ") + " (auteurs crédités dans la note)")
             if (envoi.isNotBlank()) append("\n\n$envoi")
-            if (abandons.isNotBlank()) append("\n⚠️ Montage fait $abandons (effet refusé par le téléphone).")
+            if (abandons.isNotBlank()) append("\n⚠️ Montage fait $abandons (refusé par le téléphone" + (if (raisonAbandon.isNotBlank()) " : $raisonAbandon" else "") + ").")
             if (echecs.isNotEmpty()) append("\n⚠️ " + regrouper(echecs).joinToString("\n⚠️ "))
         }
     }
@@ -640,7 +670,10 @@ object Montage {
             if (d.tiktok) {
                 // Ressembler aux vidéos de la chaîne : même sujet récurrent d'un plan à l'autre, textes courts et forts.
                 append("Fidélité à la chaîne : garde LE MÊME sujet principal (même apparence, mêmes couleurs) dans tous les plans, " +
-                    "décors et ambiance cohérents ; textes à l'écran de 1 à 4 mots, percutants, dans le ton de la chaîne.\n")
+                    "décors et ambiance cohérents ; textes à l'écran de 1 à 4 mots, percutants, dans le ton de la chaîne.\n" +
+                    "Chaque plan montre ce sujet principal OU un symbole évident de la niche (pour une niche patriotique française : drapeau tricolore, " +
+                    "coq gaulois, Marianne, monuments français, pompiers, agriculteurs, paysages de France). JAMAIS de personnage inventé sans rapport, " +
+                    "de masque, de portail magique, de rue ou d'objet quelconque, ni de texte écrit DANS l'image (vêtements, panneaux).\n")
                 app.store.tiktokBandeau.value.takeIf { it.isNotBlank() }?.let { append("Bandeau habituel en haut des vidéos : $it\n") }
             }
         }
@@ -751,6 +784,119 @@ object Montage {
         } finally { b.recycle() }
     }.getOrDefault(true)
 
+    /** Sujet récurrent des vidéos de la chaîne quand elle parle de phénix (repris dans chaque plan qui n'en montre aucun symbole). */
+    internal const val ANCRE_PHENIX = "a majestic phoenix with blue, white and red flaming wings in the colours of the French flag"
+
+    private val SYMBOLES = Regex("(?i)ph[oeé]+ni|flag|drapeau|tricolo|marianne|rooster|\\bcoq|eiffel|triomphe|triumph|notre.?dame|mont.?saint|versailles|" +
+        "firefighter|pompier|farmer|agricult|tractor|tracteur|soldier|soldat|\\bfrance|french|paris|chateau|château|cathedral")
+
+    /** Plan sans aucun symbole de la chaîne : le sujet récurrent ([ancre]) y est ajouté. */
+    internal fun ancrer(visuel: String, ancre: String): String =
+        if (ancre.isBlank() || SYMBOLES.containsMatchIn(visuel)) visuel else "$ancre, $visuel"
+
+    /** Interdits de l'image : jamais de texte (« Unité » sur un t-shirt), ni de personnage inventé quand le plan n'en demande pas. */
+    internal fun interdits(visuel: String): String {
+        val personnes = Regex("(?i)firefighter|pompier|farmer|agricult|soldier|soldat|crowd|foule|people|person|\\bman\\b|woman|child|famil|marianne").containsMatchIn(visuel)
+        return visuel + ", no text, no letters, no words, no writing on clothes or signs, no logo, no watermark" +
+            if (personnes) ", no masks" else ", no people, no human figures, no masks"
+    }
+
+    /** Images de sortie pour chaque image source : [n] images à [source] i/s → [cible] i/s constants (1 ou 2 chacune). */
+    internal fun repartitionTrames(n: Int, source: Double, cible: Double = 30.0): List<Int> =
+        (0 until n).map { k -> (Math.round((k + 1) * cible / source) - Math.round(k * cible / source)).toInt().coerceAtLeast(1) }
+
+    /** Cadence moyenne d'une vidéo (images / seconde) d'après ses premières secondes ; null si illisible. */
+    private fun ipsVideo(f: File): Double? = runCatching {
+        val ex = android.media.MediaExtractor()
+        try {
+            ex.setDataSource(f.absolutePath)
+            val piste = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(android.media.MediaFormat.KEY_MIME)?.startsWith("video/") == true } ?: return@runCatching null
+            ex.selectTrack(piste)
+            var n = 0; var premier = -1L; var dernier = 0L
+            while (n < 240) {
+                val t = ex.sampleTime
+                if (t < 0) break
+                if (premier < 0) premier = t
+                dernier = t; n++
+                if (!ex.advance()) break
+            }
+            if (n < 3 || dernier <= premier) null else (n - 1) * 1_000_000.0 / (dernier - premier)
+        } finally { ex.release() }
+    }.getOrNull()
+
+    /**
+     * Clip à moins de 23 images/s (animation IA à 16 i/s, refusée par TikTok) → copie à 30 images/s CONSTANTES : chaque
+     * image du clip est reprise 1 ou 2 fois, la durée et le mouvement restent identiques. null si impossible.
+     */
+    @OptIn(UnstableApi::class)
+    private suspend fun en30ips(app: JarvisApp, clip: File, dossier: File): File? {
+        if (android.os.Build.VERSION.SDK_INT < 28) return null
+        val ips = ipsVideo(clip) ?: return null
+        if (ips >= 23.0) return clip
+        val images = withContext(Dispatchers.IO) {
+            val mmr = android.media.MediaMetadataRetriever()
+            try {
+                mmr.setDataSource(clip.absolutePath)
+                val n = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT)?.toIntOrNull() ?: return@withContext emptyList<File>()
+                val out = mutableListOf<File>()
+                var k = 0
+                while (k < n) {
+                    val lot = runCatching { mmr.getFramesAtIndex(k, minOf(10, n - k)) }.getOrNull() ?: break
+                    lot.forEach { b -> out += File(dossier, "${clip.nameWithoutExtension}_i${out.size}.jpg").also { f -> f.outputStream().use { b.compress(Bitmap.CompressFormat.JPEG, 92, it) }; b.recycle() } }
+                    k += lot.size
+                    if (lot.isEmpty()) break
+                }
+                out
+            } finally { runCatching { mmr.release() } }
+        }
+        if (images.size < 3) return null
+        val trames = repartitionTrames(images.size, ips)
+        val items = images.mapIndexed { k, f ->
+            val ms = trames[k] * 1000L / 30
+            EditedMediaItem.Builder(MediaItem.Builder().setUri(Uri.fromFile(f)).setImageDurationMs(ms).build())
+                .setDurationUs(ms * 1000).setFrameRate(30).setRemoveAudio(true).build()
+        }
+        val sortie = File(dossier, clip.nameWithoutExtension.removeSuffix("_16") + "_30.mp4")
+        if (sortie.exists()) sortie.delete()
+        try {
+            withContext(Dispatchers.Main) {
+                suspendCancellableCoroutine<Unit> { cont ->
+                    val selecteur = androidx.media3.transformer.EncoderSelector { mime ->
+                        val tous = androidx.media3.transformer.EncoderUtil.getSupportedEncoders(mime)
+                        com.google.common.collect.ImmutableList.copyOf(tous.filter { encodeurLogiciel(it.name) }.ifEmpty { tous })
+                    }
+                    val transformer = Transformer.Builder(app).setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264)
+                        .setPortraitEncodingEnabled(true)
+                        .setEncoderFactory(androidx.media3.transformer.DefaultEncoderFactory.Builder(app).setVideoEncoderSelector(selecteur).setEnableFallback(true).build())
+                        .addListener(object : Transformer.Listener {
+                            override fun onCompleted(c: Composition, r: ExportResult) { if (cont.isActive) cont.resume(Unit) }
+                            override fun onError(c: Composition, r: ExportResult, e: ExportException) { if (cont.isActive) cont.resumeWithException(e) }
+                        }).build()
+                    cont.invokeOnCancellation { runCatching { transformer.cancel() } }
+                    transformer.start(Composition.Builder(listOf(EditedMediaItemSequence(items))).build(), sortie.absolutePath)
+                }
+            }
+        } finally { images.forEach { it.delete() } }
+        return sortie.takeIf { it.length() > 10_000 && (ipsVideo(it) ?: 0.0) >= 23.0 }
+    }
+
+    /** Image du plan avec son texte (et le bandeau) dessinés DEDANS, au format final : repli quand l'incrustation est refusée. */
+    private fun imageAvecTexte(src: File, texte: String, bandeauTexte: String, largeur: Int, hauteur: Int, tiktok: Boolean, dest: File): File? = runCatching {
+        val b = android.graphics.BitmapFactory.decodeFile(src.absolutePath) ?: return@runCatching null
+        val sortie = Bitmap.createBitmap(largeur, hauteur, Bitmap.Config.ARGB_8888)
+        val c = Canvas(sortie)
+        val k = maxOf(largeur.toFloat() / b.width, hauteur.toFloat() / b.height)
+        c.drawBitmap(b, null, android.graphics.RectF((largeur - b.width * k) / 2, (hauteur - b.height * k) / 2, (largeur + b.width * k) / 2, (hauteur + b.height * k) / 2),
+            Paint(Paint.FILTER_BITMAP_FLAG))
+        b.recycle()
+        fun poser(bmp: Bitmap, ancreY: Float) { c.drawBitmap(bmp, 0f, (1f - (ancreY + 1f) / 2f) * hauteur - bmp.height / 2f, null); bmp.recycle() }
+        if (texte.isNotBlank()) poser(if (tiktok) bandeau(texte.uppercase(), largeur, taille = 0.065f) else bandeau(texte, largeur), if (tiktok) -0.12f else -0.58f)
+        if (bandeauTexte.isNotBlank()) poser(bandeau(bandeauTexte.uppercase(), largeur, taille = 0.038f), 0.9f)
+        dest.outputStream().use { sortie.compress(Bitmap.CompressFormat.JPEG, 93, it) }
+        sortie.recycle()
+        dest
+    }.getOrNull()
+
     /** Encodeurs logiciels d'Android (Google) : fiables partout, à la différence de certains encodeurs matériels. */
     internal fun encodeurLogiciel(nom: String) = nom.startsWith("c2.android.") || nom.startsWith("OMX.google.")
 
@@ -807,6 +953,24 @@ object Montage {
             n to cote
         } finally { ex.release() }
     }.getOrDefault(0 to 0)
+
+    /** Cadence moyenne de toute la vidéo (images / seconde), telle que TikTok la mesure ; null si illisible. */
+    private fun cadenceMoyenne(f: File): Double? = runCatching {
+        val ex = android.media.MediaExtractor()
+        try {
+            ex.setDataSource(f.absolutePath)
+            val piste = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(android.media.MediaFormat.KEY_MIME)?.startsWith("video/") == true } ?: return@runCatching null
+            ex.selectTrack(piste)
+            var n = 0; var max = 0L; var min = Long.MAX_VALUE
+            while (true) {
+                val t = ex.sampleTime
+                if (t < 0) break
+                n++; if (t > max) max = t; if (t < min) min = t
+                if (!ex.advance()) break
+            }
+            if (n < 3 || max <= min) null else (n - 1) * 1_000_000.0 / (max - min)
+        } finally { ex.release() }
+    }.getOrNull()
 
     private fun dureeMs(f: File): Long? = runCatching {
         MediaMetadataRetriever().run {
@@ -1000,8 +1164,17 @@ object Montage {
     private suspend fun exporter(
         app: JarvisApp, segments: List<Segment>, voix: List<File>, musique: File?, avecTexte: Boolean, garderSon: Boolean,
         largeur: Int, hauteur: Int, chanson: Boolean, sortie: File, reperes: List<SousTitres.Repere> = emptyList(),
-        tiktok: Boolean = false, bandeau: String = "", logiciel: Boolean = true, portrait: Boolean = true
+        tiktok: Boolean = false, bandeau: String = "", logiciel: Boolean = true, portrait: Boolean = true, texteDansImages: Boolean = false
     ) {
+        // Repli : texte et bandeau dessinés dans les images (sans incrustation Media3), les vidéos restent sans texte.
+        val segments = if (!texteDansImages) segments else withContext(Dispatchers.IO) {
+            segments.mapIndexed { k, s ->
+                if (!s.image) s
+                else imageAvecTexte(s.fichier, s.texte, bandeau, largeur, hauteur, tiktok, File(sortie.parentFile, ".texte_${k}_${sortie.nameWithoutExtension}.jpg"))
+                    ?.let { s.copy(fichier = it) } ?: s
+            }
+        }
+        val ipsSources = HashMap<File, Double?>()
         val presentation = Presentation.createForWidthAndHeight(largeur, hauteur, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP)
         var debutMs = 0L
         val imageBandeau = if (bandeau.isNotBlank()) bandeau(bandeau.uppercase(), largeur, taille = 0.038f) else null
@@ -1009,6 +1182,9 @@ object Montage {
             val debutUs = debutMs * 1000
             debutMs += s.dureeMs
             val effets = mutableListOf<Effect>(presentation)
+            // Plans à 50 / 60 images/s ramenés à 30 : cadence régulière (TikTok mesure la cadence de la vidéo).
+            if (!s.image && (ipsSources.getOrPut(s.fichier) { ipsVideo(s.fichier) } ?: 30.0) > 31.0)
+                effets.add(0, androidx.media3.effect.FrameDropEffect.createDefaultFrameDropEffect(30f))
             if (s.image) {
                 // Image animée au montage, mouvement différent d'un plan à l'autre : zoom avant, zoom arrière,
                 // travelling horizontal, travelling vertical (compté depuis le début de CE plan).

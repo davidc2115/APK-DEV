@@ -246,11 +246,13 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                     // uniquement des plans libres de droits.
                     plans = (brut + " " + script + " " + derniereDemande()).let { demande ->
                         val images = Regex("(?i)images? (ia|g[ée]n[ée]r[ée]e?s?)|(à partir|depuis|avec) (d['e]s? |de |ces |mes )?images|illustrations?|comme (mon|l'|cet) ?exemple").containsMatchIn(demande)
-                        val stock = Regex("(?i)pixabay|pexels|libres? de droits").containsMatchIn(demande)
+                        // Plans libres de droits seulement si TU les demandes (l'IA écrit parfois « Pixabay » d'elle-même).
+                        val stock = Regex("(?i)pixabay|pexels|libres? de droits|vraies? vid[ée]os?|vid[ée]os? r[ée]elles?").containsMatchIn(derniereDemande())
                         when {
                             images && stock -> "mixte"    // les deux demandés : images pour les symboles, plans réels pour le reste (Pixabay accepté)
-                            images -> "images"
                             stock -> "stock"
+                            // TikTok de la chaîne : images IA dans le style de tes vidéos (plus de rue pavée ni de poignée de main au hasard).
+                            images || name == "tiktok_video" -> "images"
                             else -> a.optString("plans").ifBlank { "auto" }
                         }
                     },

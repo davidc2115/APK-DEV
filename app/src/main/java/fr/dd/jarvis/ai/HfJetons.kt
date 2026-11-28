@@ -51,6 +51,10 @@ object HfJetons {
                 }
             }
         }
+        // Tous les comptes sont maintenant épuisés (certains l'étaient déjà avant cet essai) : le dire clairement.
+        if (disponibles(app).isEmpty() && tous.size > 1)
+            throw ApiException(429, "quota gratuit épuisé sur tes ${tous.size} comptes Hugging Face (≈ 3 utilisations par jour et par compte, de retour 24 h après la première ; " +
+                "dernier refus : ${derniere?.message?.take(90)})")
         val n = liste.size
         throw ApiException(429, (derniere?.message ?: "refus de Hugging Face") + if (n > 1) " (essayé sur tes $n comptes)" else "")
     }

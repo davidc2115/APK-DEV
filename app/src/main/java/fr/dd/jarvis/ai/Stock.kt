@@ -89,7 +89,9 @@ object Stock {
     }.getOrNull()
 
     /** Premier plan libre de droits pour [requete] (anglais), pas encore utilisé dans ce montage ([pris]). */
-    suspend fun chercher(app: JarvisApp, requete: String, vertical: Boolean, pris: MutableSet<String>, francais: Boolean = false): Clip? = withContext(Dispatchers.IO) {
+    /** [strict] : le sujet principal doit être dans les étiquettes (TikTok : plus de plan sans rapport). */
+    suspend fun chercher(app: JarvisApp, requete: String, vertical: Boolean, pris: MutableSet<String>, francais: Boolean = false, strict: Boolean = false): Clip? = withContext(Dispatchers.IO) {
+        val ok = { q: String, desc: String -> if (strict) pertinentStrict(q, desc) else pertinent(q, desc) }
         val q = java.net.URLEncoder.encode(requete.trim().ifBlank { return@withContext null }, "UTF-8")
         val pexels = app.store.pexelsKey.value.trim()
         if (pexels.isNotBlank()) {
@@ -101,7 +103,7 @@ object Stock {
                 val id = "pexels:" + v.optLong("id")
                 if (id in pris || v.optInt("duration") < 3) continue
                 val etiquettes = v.optJSONArray("tags")?.let { t -> (0 until t.length()).joinToString(" ") { t.optString(it) } }.orEmpty()
-                if (!pertinent(requete, v.optString("url").substringAfter("/video/").replace('-', ' ') + " " + etiquettes)) continue
+                if (!ok(requete, v.optString("url").substringAfter("/video/").replace('-', ' ') + " " + etiquettes)) continue
                 val lien = choisirPexels(v, vertical) ?: continue
                 pris += id
                 return@withContext Clip(id, lien, "Pexels", v.optJSONObject("user")?.optString("name").orEmpty(), v.optString("url"), v.optInt("duration"))
@@ -115,7 +117,7 @@ object Stock {
                 val h = hits.optJSONObject(i) ?: continue
                 val id = "pixabay:" + h.optLong("id")
                 if (id in pris || h.optInt("duration") < 3) continue
-                if (!pertinent(requete, h.optString("tags") + " " + h.optString("pageURL").substringAfter("/videos/").replace('-', ' '))) continue
+                if (!ok(requete, h.optString("tags") + " " + h.optString("pageURL").substringAfter("/videos/").replace('-', ' '))) continue
                 val lien = choisirPixabay(h) ?: continue
                 pris += id
                 return@withContext Clip(id, lien, "Pixabay", h.optString("user"), h.optString("pageURL"), h.optInt("duration"))
