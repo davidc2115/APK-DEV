@@ -217,6 +217,10 @@ class Store(context: Context) {
     val autorisationsCommandes = SPref("autorisationsCommandes", "[]")
     val ghToken = SecretPref("ghToken")
     val scanAuto = BPref("scanAuto", true)
+    /** Chaque fichier créé dans le coffre reçoit un lien automatiquement (index de son dossier) : aucun orphelin dans le graphe. */
+    val liensAuto = BPref("liensAuto", true)
+    /** Dernier passage de liaison automatique (ms). */
+    val liensAutoLe = SPref("liensAutoLe", "")
     val sshHostDistant = SPref("sshHostDistant", "")
     val sshPortDistant = SPref("sshPortDistant", "")
     /** Dernier relevé SSH des services du serveur (Docker, systemd, pm2…) et sa date (ms) : fiche « infrastructure » d'Hermès. */

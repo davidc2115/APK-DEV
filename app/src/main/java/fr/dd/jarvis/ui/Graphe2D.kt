@@ -119,6 +119,18 @@ fun rememberConstellation(app: JarvisApp): ChargementConstellation {
     return etat
 }
 
+/**
+ * Le graphe montre des fichiers orphelins ou sans lien entrant : ils sont reliés tout de suite, automatiquement (index de
+ * leur dossier, aucune note modifiée) ; le graphe se recharge seul dès que le coffre a changé.
+ */
+@Composable
+fun LiaisonAutomatique(app: JarvisApp, c: Constellation?) {
+    val isoles = (c?.orphelins?.size ?: 0) + (c?.sansLienEntrant?.size ?: 0)
+    LaunchedEffect(isoles) {
+        if (isoles > 0 && fr.dd.jarvis.device.LiensAuto.actif(app)) fr.dd.jarvis.device.LiensAuto.signaler(app, delaiMs = 1_500)
+    }
+}
+
 /** Mise en page de la constellation pour l'état déplié/replié courant (recalculée à chaque bascule). */
 @Composable
 fun constellationDe(etat: ChargementConstellation): Constellation? {
@@ -256,6 +268,7 @@ fun GrapheCerveau2D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
     var hubListe by remember { mutableStateOf<String?>(null) }
     val c = constellationDe(etat)
     val relier = rememberRelier(app) { etat.version++ }
+    LiaisonAutomatique(app, c)
     if (c == null) ChargementEnCours(etat.erreur, enTete)
     else ConstellationVue(
         c = c, enTete = enTete,

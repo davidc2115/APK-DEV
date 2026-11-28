@@ -72,6 +72,7 @@ fun ObsidianOrb3D(app: JarvisApp, enTete: @Composable () -> Unit = {}) {
     var noteOuverte by remember { mutableStateOf<String?>(null) }
     var hubListe by remember { mutableStateOf<String?>(null) }
     val c = constellationDe(etat)
+    LiaisonAutomatique(app, c)
     if (c == null) ChargementEnCours(etat.erreur, enTete)
     else Orbe3DVue(c, enTete, onNote = { noteOuverte = it }, onHub = { cle -> if (c.hub(cle)?.type != TypeHub.PIECES && c.hub(cle)?.type != TypeHub.TAGS) hubListe = cle },
         onFichier = { chemin -> app.obsidian.ouvrirFichier(chemin) },

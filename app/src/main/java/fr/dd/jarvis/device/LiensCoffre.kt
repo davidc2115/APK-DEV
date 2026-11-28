@@ -19,6 +19,9 @@ object LiensCoffre {
     /** Dossiers dont JARVIS génère et relit les notes : jamais modifiés (on n'y transforme pas de mention). */
     private val DOSSIERS_PROTEGES = listOf("société/", "societe/", "jarvis/", "contacts/")
 
+    /** Clé de comparaison des chemins : minuscules, forme Unicode NFC (Android renvoie parfois les accents décomposés). */
+    fun cle(s: String): String = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFC).lowercase()
+
     fun estIndex(chemin: String): Boolean {
         val n = chemin.substringAfterLast('/').removeSuffix(".md")
         return n == INDEX_RACINE || n.startsWith(PREFIXE_INDEX)
@@ -40,10 +43,10 @@ object LiensCoffre {
 
     class Index(notes: Collection<String>, fichiers: Collection<String>) {
         val ids = notes.map { id(it) }
-        private val parId = ids.associateBy { it.lowercase() }
-        val parNom: Map<String, List<String>> = ids.groupBy { it.substringAfterLast('/').lowercase() }
-        private val fichiersParChemin = fichiers.associateBy { it.lowercase() }
-        private val fichiersParNom = fichiers.groupBy { it.substringAfterLast('/').lowercase() }
+        private val parId = ids.associateBy { cle(it) }
+        val parNom: Map<String, List<String>> = ids.groupBy { cle(it.substringAfterLast('/')) }
+        private val fichiersParChemin = fichiers.associateBy { cle(it) }
+        private val fichiersParNom = fichiers.groupBy { cle(it.substringAfterLast('/')) }
 
         private fun normaliser(chemin: String): String {
             val pile = ArrayList<String>()
@@ -56,13 +59,15 @@ object LiensCoffre {
             if (c.isBlank() || c.startsWith("#") || Regex("^[a-z][a-z0-9+.-]*:", RegexOption.IGNORE_CASE).containsMatchIn(c)) return null
             val essais = listOfNotNull(normaliser(c), dossierSource.takeIf { it.isNotBlank() }?.let { normaliser("$it/$c") })
             for (e in essais) {
-                val l = e.lowercase()
+                val l = cle(e)
                 parId[l.removeSuffix(".md")]?.let { return Cible(note = it) }
                 fichiersParChemin[l]?.let { return Cible(fichier = it) }
             }
-            val n = c.substringAfterLast('/').lowercase()
-            parNom[n.removeSuffix(".md")]?.firstOrNull()?.let { return Cible(note = it) }
-            fichiersParNom[n]?.firstOrNull()?.let { return Cible(fichier = it) }
+            // Par simple nom : seulement s'il n'y a qu'une note (ou un fichier) de ce nom. Avec des homonymes, on ne devine
+            // pas laquelle est visée (le graphe pouvait en choisir une autre) : elles sont toutes rangées dans leur index.
+            val n = cle(c.substringAfterLast('/'))
+            parNom[n.removeSuffix(".md")]?.singleOrNull()?.let { return Cible(note = it) }
+            fichiersParNom[n]?.singleOrNull()?.let { return Cible(fichier = it) }
             return null
         }
 
@@ -71,8 +76,10 @@ object LiensCoffre {
             val out = ArrayList<Cible>()
             WIKI.findAll(texte).forEach { m -> resoudre(m.groupValues[1], d)?.let { out += it } }
             MARKDOWN.findAll(texte).forEach { m ->
-                val cible = runCatching { java.net.URLDecoder.decode(m.groupValues[1].replace("+", "%2B"), "UTF-8") }.getOrDefault(m.groupValues[1])
-                resoudre(cible.substringBefore('#'), d)?.let { out += it }
+                // « # » = titre visé ; un « # » du nom de fichier est encodé (%23) : on coupe AVANT de décoder.
+                val brut = m.groupValues[1].substringBefore('#')
+                val cible = runCatching { java.net.URLDecoder.decode(brut.replace("+", "%2B"), "UTF-8") }.getOrDefault(brut)
+                resoudre(cible, d)?.let { out += it }
             }
             return out
         }
@@ -183,7 +190,8 @@ object LiensCoffre {
     }
 
     /** [notes] : chemin (.md) → texte (index générés compris) ; [fichiers] : chemins des autres fichiers du coffre. */
-    fun planifier(notes: Map<String, String>, fichiers: List<String>): Plan {
+    /** [mentions] = false : rien n'est écrit dans les notes, tout ce qui est isolé va dans les index (passage automatique). */
+    fun planifier(notes: Map<String, String>, fichiers: List<String>, mentions: Boolean = true): Plan {
         val idx = Index(notes.keys, fichiers)
         // Liens réels (hors index générés).
         val entrants = HashSet<String>(); val fichiersLies = HashSet<String>()
@@ -200,11 +208,11 @@ object LiensCoffre {
 
         // 1. Mentions en clair des notes isolées.
         val homonymes = idx.parNom.filterValues { it.size > 1 }.keys
-        val aChercher = isolees.mapNotNull { c ->
+        val aChercher = if (!mentions) emptyList() else isolees.mapNotNull { c ->
             val n = nom(c)
-            if (!titreUtilisable(n)) null else Mention(n, id(c), n.lowercase() in homonymes)
+            if (!titreUtilisable(n)) null else Mention(n, id(c), cle(n) in homonymes)
         }
-        val mentions = LinkedHashMap<String, List<Mention>>()
+        val aLier = LinkedHashMap<String, List<Mention>>()
         val lieesParMention = HashSet<String>()
         var total = 0
         val recherche = Recherche(aChercher)
@@ -212,7 +220,7 @@ object LiensCoffre {
             if (protegee(chemin)) continue
             val liees = lierMentions(texte, recherche, exclure = id(chemin)).second.toSet()
             if (liees.isEmpty()) continue
-            mentions[chemin] = aChercher.filter { it.cible in liees }
+            aLier[chemin] = aChercher.filter { it.cible in liees }
             lieesParMention += liees
             total += liees.size
         }
@@ -239,14 +247,24 @@ object LiensCoffre {
         if (indexDossiers.isNotEmpty() || racineNotes.isNotEmpty() || racineFichiers.isNotEmpty() || racineExiste)
             index["$INDEX_RACINE.md"] = if (indexDossiers.isEmpty() && racineNotes.isEmpty() && racineFichiers.isEmpty()) "" else page("📇 Index du coffre", "Relie chaque note et chaque fichier qui n'avait aucun lien (régénéré par JARVIS à chaque « Tout relier »).",
                 racineNotes, racineFichiers, sections.toString())
-        return Plan(mentions, total, index, restantes.size, fichiersIsoles.size, isolees.size + fichiersIsoles.size)
+        return Plan(aLier, total, index, restantes.size, fichiersIsoles.size, isolees.size + fichiersIsoles.size)
     }
 
-    private fun lien(chemin: String): String {
+    /** Caractères interdits dans un [[lien]] Obsidian (titre, bloc, alias, crochets). */
+    private val HORS_WIKI = Regex("[#|^\\[\\]]")
+
+    /**
+     * Lien vers une note ou un fichier. Un nom contenant « # », « | », « ^ » ou des crochets casse un [[lien]] (Obsidian
+     * le lit comme un titre ou un alias : le fichier restait orphelin) : lien Markdown à chemin encodé à la place.
+     */
+    internal fun lien(chemin: String): String {
         val estNote = chemin.endsWith(".md", true)
         val cible = if (estNote) id(chemin) else chemin
         val libelle = if (estNote) nom(chemin) else chemin.substringAfterLast('/')
-        return "[[$cible|$libelle]]"
+        if (!HORS_WIKI.containsMatchIn(chemin)) return "[[$cible|$libelle]]"
+        val encode = chemin.split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+        // Libellé : crochets en parenthèses, « # » en « ＃ » (sinon « #urgent » d'un nom de fichier deviendrait un faux tag).
+        return "[${libelle.replace('[', '(').replace(']', ')').replace('#', '＃')}]($encode)"
     }
 
     private fun page(titre: String, sousTitre: String, notes: List<String>, fichiers: List<String>, avant: String = ""): String = buildString {
@@ -277,7 +295,7 @@ object LiensCoffre {
      * Analyse tout le coffre et, si [appliquer], écrit les liens (notes de l'utilisateur) et les index. À appeler hors du
      * fil principal. [etape] : avancement lisible.
      */
-    fun relier(app: fr.dd.jarvis.JarvisApp, appliquer: Boolean, etape: (String) -> Unit = {}): Bilan {
+    fun relier(app: fr.dd.jarvis.JarvisApp, appliquer: Boolean, mentions: Boolean = true, etape: (String) -> Unit = {}): Bilan {
         val o = app.obsidian
         etape("Inventaire du coffre…")
         o.oublierCache()
@@ -285,9 +303,9 @@ object LiensCoffre {
         val fichiers = tout.filter { !it.second && !it.first.endsWith(".md", true) }.map { it.first }
         etape("Lecture des notes…")
         val notes = LinkedHashMap<String, String>()
-        o.parcourirContenus(limite = 2500) { chemin, texte -> notes[chemin.replace(java.io.File.separatorChar, '/')] = texte }
+        o.parcourirContenus(limite = 3000) { chemin, texte -> notes[chemin.replace(java.io.File.separatorChar, '/')] = texte }
         etape("Recherche des mentions et des fichiers isolés…")
-        val plan = planifier(notes, fichiers)
+        val plan = planifier(notes, fichiers, mentions)
         if (!appliquer || plan.rienAFaire) return Bilan(plan, 0, 0, emptyList())
         val erreurs = ArrayList<String>()
         var modifiees = 0; var ecrits = 0
@@ -306,6 +324,8 @@ object LiensCoffre {
             etape("Index des dossiers…")
             for ((chemin, contenu) in plan.index) {
                 if (contenu.isBlank()) { runCatching { if (notes.containsKey(chemin)) o.supprimerNote(chemin) }; continue }
+                // Index identique à celui déjà écrit : rien à faire (pas de réécriture à chaque passage automatique).
+                if (notes[chemin] == contenu) continue
                 runCatching { o.writeNote(chemin, contenu, append = false); ecrits++ }.onFailure { erreurs += "$chemin (${it.message})" }
             }
         }

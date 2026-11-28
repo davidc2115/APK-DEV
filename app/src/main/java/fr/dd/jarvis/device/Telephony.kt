@@ -73,6 +73,7 @@ object Telephony {
                 try {
                     val m = HashMap<String, MutableList<String>>()
                     app.obsidian.parcourirContenus { path, texte ->
+                        if (LiensCoffre.estIndex(path)) return@parcourirContenus   // index de liens : des noms de fichiers, pas de contacts
                         val nom = path.substringAfterLast('/').removeSuffix(".md")
                         NUMERO.findAll(texte).map { it.value.filter(Char::isDigit) }.filter { it.length >= 8 }.map { it.takeLast(8) }.toSet()
                             .forEach { k -> m.getOrPut(k) { mutableListOf() }.let { if (nom !in it && it.size < 3) it += nom } }

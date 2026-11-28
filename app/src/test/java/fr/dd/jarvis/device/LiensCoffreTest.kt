@@ -60,4 +60,39 @@ class LiensCoffreTest {
         assertTrue(LiensCoffre.estIndex("Clients/Index — Clients.md"))
         assertFalse(LiensCoffre.estIndex("Clients/Index des prix"))
     }
+
+    @Test fun passageAutomatiqueSansToucherAuxNotes() {
+        val notes = linkedMapOf(
+            "Journal/Lundi.md" to "Visite chez Jean Dupont.",
+            "Clients/Jean Dupont.md" to "Client depuis 2023.",
+        )
+        val p = LiensCoffre.planifier(notes, listOf("JARVIS/Images/phenix.png", "JARVIS/Apprentissage/index.json"), mentions = false)
+        assertTrue(p.mentions.isEmpty())
+        assertEquals(0, p.nbMentions)
+        // Tout ce qui est isolé est rangé dans l'index de son dossier, fichiers de données compris.
+        assertTrue(p.index.getValue("Clients/Index — Clients.md").contains("[[Clients/Jean Dupont|Jean Dupont]]"))
+        assertTrue(p.index.getValue("JARVIS/Images/Index — Images.md").contains("[[JARVIS/Images/phenix.png|phenix.png]]"))
+        assertTrue(p.index.getValue("JARVIS/Apprentissage/Index — Apprentissage.md").contains("index.json"))
+        assertTrue(p.index.getValue("Index du coffre.md").contains("[[JARVIS/Images/Index — Images|Index — Images]]"))
+    }
+
+    @Test fun nomsQuiCassentUnWikilien() {
+        // « # » (titre), « | » (alias), « ^ » (bloc), crochets : lien Markdown à chemin encodé, relu comme un vrai lien.
+        val lien = LiensCoffre.lien("Société/Factures/Facture #12 [Martin].pdf")
+        assertEquals("[Facture ＃12 (Martin).pdf](Soci%C3%A9t%C3%A9/Factures/Facture%20%2312%20%5BMartin%5D.pdf)", lien)
+        val idx = LiensCoffre.Index(emptyList(), listOf("Société/Factures/Facture #12 [Martin].pdf"))
+        assertEquals(listOf(LiensCoffre.Cible(fichier = "Société/Factures/Facture #12 [Martin].pdf")), idx.liens(lien, "Société/Factures/Index — Factures.md"))
+        assertEquals("[[Images/plan.pdf|plan.pdf]]", LiensCoffre.lien("Images/plan.pdf"))
+    }
+
+    @Test fun accentsDecomposesEtHomonymes() {
+        // Android renvoie parfois « é » décomposé (e + accent) : le lien compte quand même.
+        val idx = LiensCoffre.Index(listOf("Clients/H\u00e9l\u00e8ne.md"), emptyList())
+        assertEquals(listOf(LiensCoffre.Cible(note = "Clients/H\u00e9l\u00e8ne")), idx.liens("Voir [[He\u0301le\u0300ne]]", "Journal/x.md"))
+        // Deux notes « Notes » : un lien par simple nom ne dit pas laquelle, les deux restent rangées dans un index.
+        val notes = linkedMapOf("A/Notes.md" to "a", "B/Notes.md" to "b", "Accueil.md" to "[[Notes]]")
+        val p = LiensCoffre.planifier(notes, emptyList(), mentions = false)
+        assertTrue(p.index.getValue("A/Index — A.md").contains("[[A/Notes|Notes]]"))
+        assertTrue(p.index.getValue("B/Index — B.md").contains("[[B/Notes|Notes]]"))
+    }
 }

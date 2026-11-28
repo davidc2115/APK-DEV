@@ -1402,6 +1402,13 @@ fun SettingsScreen(app: JarvisApp, onAsk: (String) -> Unit = {}) {
                     }
                 }
                 Text("Les fiches Société et la mémoire durable utilisent le coffre configuré comme source de référence. Le contrôle des doublons est en lecture seule ; toute suppression exige une confirmation.", color = HudDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 6.dp).clickable {
+                    store.liensAuto.set(!store.liensAuto.value)
+                    if (store.liensAuto.value) fr.dd.jarvis.device.LiensAuto.signaler(app, delaiMs = 1_000)
+                }) {
+                    Text((if (store.liensAuto.value) "✅ " else "⬜ ") + "Aucun fichier orphelin : chaque fichier créé (notes, images, vidéos, PDF…) reçoit un lien dans le graphe " +
+                        "(rangé dans l'index de son dossier, sans modifier tes notes)", color = HudText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+                }
             }
         },
         VoletReglages("comptes", "discord", "Discord", "discord bot roles salons serveur") {

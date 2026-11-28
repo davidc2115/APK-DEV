@@ -122,6 +122,9 @@ class JarvisApp : Application() {
         mail = MailRepo(this, store)
         contacts = ContactsRepo(this)
         obsidian = ObsidianWriter(this, store)
+        // Aucun fichier orphelin : chaque fichier créé par JARVIS dans le coffre reçoit un lien (index de son dossier).
+        obsidian.apresCreation = { chemin -> fr.dd.jarvis.device.LiensAuto.signaler(this, chemin) }
+        fr.dd.jarvis.device.LiensAuto.auDemarrage(this)
         val graphDatabase = GraphDatabase.getInstance(this)
         val graphIndexer = GraphIndexer(graphDatabase, obsidian)
         knowledgeRepository = KnowledgeRepository(graphDatabase, graphIndexer)

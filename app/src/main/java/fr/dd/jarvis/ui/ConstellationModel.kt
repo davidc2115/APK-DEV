@@ -403,8 +403,10 @@ object ConstellationLayout {
         // Les index générés par « Tout relier » (Index du coffre, Index — dossier) ne sont jamais comptés comme isolés.
         val sansEntrant = notes.filter { (entrants[it.id] ?: 0) == 0 && !fr.dd.jarvis.device.LiensCoffre.estIndex(it.id) }
             .sortedBy { it.label.lowercase() }.map { Isole(it.label, noteId = it.id) }
-        val toutesCibles = data.references.map { it.rawTarget.substringAfterLast('/').lowercase() }.toHashSet()
-        val piecesOrphelines = pieces.filter { it.name.lowercase() !in toutesCibles && it.path.lowercase() !in toutesCibles }
+        // Fichier cité par son nom ou par son chemin (clés NFC : un accent décomposé par Android ne le rend pas orphelin).
+        val toutesCibles = data.references.flatMap { r -> listOf(r.rawTarget.substringAfterLast('/'), r.rawTarget) }
+            .map { fr.dd.jarvis.device.LiensCoffre.cle(it.trim()) }.toHashSet()
+        val piecesOrphelines = pieces.filter { fr.dd.jarvis.device.LiensCoffre.cle(it.name) !in toutesCibles && fr.dd.jarvis.device.LiensCoffre.cle(it.path) !in toutesCibles }
             .sortedBy { it.name.lowercase() }.map { Isole(it.name, chemin = it.path) }
         val notesOrphelines = notes.filter { degre(it.id) == 0 && !fr.dd.jarvis.device.LiensCoffre.estIndex(it.id) }
             .sortedBy { it.label.lowercase() }.map { Isole(it.label, noteId = it.id) }
