@@ -839,6 +839,8 @@ object Routeur {
      * libre (explication, conseil, rédaction créative, code) et ses compétences propres.
      */
     private val TIKTOK_JARVIS = Regex("\\btik ?tok\\b|\\b(reels?|shorts?)\\b|\\bmontages? video|\\bpixabay\\b|\\bpexels\\b|" +
+        // Personnages récurrents des vidéos (« crée le personnage Brennos », « cherche le personnage Vercingétorix »).
+        "\\b(cree|creer|enregistre|enregistrer|cherche|chercher|garde|garder|supprime|supprimer|liste|montre)\\b[^.?!]{0,25}\\bpersonnages?\\b|\\bmes personnages\\b|" +
         "\\b(cree|creer|fais|fait|faire|monte|monter|genere|generer|realise|realiser|prepare|preparer|lance|lancer)\\b[^.?!]{0,50}\\bvideos?\\b", RegexOption.IGNORE_CASE)
 
     /** Demande TikTok ou création de vidéo : à traiter par les outils de JARVIS. */

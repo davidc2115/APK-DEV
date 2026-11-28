@@ -14,7 +14,7 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
         // VRAIMENT générer une vidéo (tiktok_video) — sans ce mot-clé large, une demande du type « crée-moi une vidéo
         // sur X » (sans dire « tiktok ») ne proposait pas l'outil au modèle, qui répondait alors en inventant un faux
         // succès au lieu d'appeler quoi que ce soit.
-        val KEYWORDS = Regex("tiktok|tik tok|vid[ée]o|montage|clip|reels?|shorts?|niches?|concurren\\w*|hashtags?|tendances?|brouillons? tiktok|id[ée]es? de (vid[ée]os?|contenus?)|heures? (pour |de )?(poster|publier|publication)|moments? pour (poster|publier)", RegexOption.IGNORE_CASE)
+        val KEYWORDS = Regex("tiktok|tik tok|vid[ée]o|montage|clip|reels?|shorts?|niches?|concurren\\w*|hashtags?|tendances?|brouillons? tiktok|id[ée]es? de (vid[ée]os?|contenus?)|heures? (pour |de )?(poster|publier|publication)|moments? pour (poster|publier)|personnages?", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
         /** « les paroles à l'écran », « paroles affichées », « paroles en sous-titres » : du texte affiché, pas une chanson. */
         private val PAROLES_ECRAN = Regex("(?i)paroles? (à|a|sur) l['’ ]?[ée]cran|paroles? affich[ée]e?s?|paroles? en sous[- ]?titres?|paroles? écrites?")
@@ -32,7 +32,8 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 !Regex("(?i)(sans|pas de|aucuns?|retire[rsz]?|enl[eè]ve[rsz]?) (les |des )?(sous[- ]?titr|paroles)").containsMatchIn(phrase)
         val NAMES = setOf("tiktok_connexion", "tiktok_deconnexion", "tiktok_profil", "tiktok_mes_videos", "tiktok_analyse", "tiktok_script", "tiktok_video", "video_montage",
             "tiktok_tendances", "tiktok_niche", "tiktok_concurrents", "tiktok_propositions", "tiktok_brouillon", "tiktok_auto",
-            "tiktok_video_recuperer", "tiktok_video_analyser", "tiktok_horaires", "tiktok_idees_concurrents")
+            "tiktok_video_recuperer", "tiktok_video_analyser", "tiktok_horaires", "tiktok_idees_concurrents",
+            "personnage_creer", "personnage_chercher", "personnages_liste", "personnage_supprimer")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -115,7 +116,16 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
         tool("tiktok_horaires", "TikTok : MEILLEURES HEURES et MEILLEURS JOURS pour publier, calculés sur les vraies dates de publication et les vues de ses vidéos ET de celles de ses concurrents (performance relative à chaque compte, heure de Paris), avec un conseil final."),
         tool("tiktok_idees_concurrents", "TikTok : repère les vidéos des concurrents qui SURPERFORMENT (bien au-dessus des vues habituelles de leur compte), regarde en entier le contenu des meilleures, en tire les mécanismes qui marchent (accroches, formats, durées, sons…) et propose des idées ORIGINALES adaptées à la niche et au style de l'utilisateur (jamais de copie). Pour « prends des idées chez mes concurrents », « qu'est-ce qui marche chez eux ».",
             mapOf("comptes" to prop("Pseudos ou liens des concurrents, séparés par des virgules (optionnel : ceux enregistrés, ou détectés automatiquement)."),
-                "approfondir" to prop("Nombre de vidéos regardées en entier, 0 à 3 (défaut 2).")))
+                "approfondir" to prop("Nombre de vidéos regardées en entier, 0 à 3 (défaut 2)."))),
+        tool("personnage_creer", "Vidéos : enregistre un PERSONNAGE RÉCURRENT (nom + apparence + image de référence) qui gardera la même apparence dans toutes les vidéos où son nom est cité. « depuis » vide : personnage ORIGINAL dessiné par JARVIS d'après la description (invente une apparence qui ne ressemble à AUCUN personnage existant de BD, dessin animé, film ou jeu) ; « recherche » : personnage historique ou œuvre ancienne du DOMAINE PUBLIC (Vercingétorix, Jeanne d'Arc, Marianne…) trouvé sur Wikimedia Commons ; un nom de fichier : l'image fournie par l'utilisateur. Les personnages protégés par le droit d'auteur (Astérix, Obélix, Tintin, Mickey, Pikachu…) sont refusés.",
+            mapOf("nom" to prop("Nom du personnage (celui que l'utilisateur dira dans ses demandes de vidéo)."),
+                "description" to prop("Apparence précise, en anglais de préférence (âge, allure, visage, vêtements, couleurs, accessoires) — obligatoire pour un personnage original."),
+                "depuis" to prop("Vide = original dessiné ; « recherche » ou « recherche:N » (N-ième image trouvée par personnage_chercher) = domaine public ; sinon nom ou chemin de l'image de l'utilisateur.")),
+            listOf("nom")),
+        tool("personnage_chercher", "Vidéos : CHERCHE des images d'un personnage historique ou d'une œuvre ancienne du DOMAINE PUBLIC (tableaux, gravures, statues anciennes) sur Wikimedia Commons, pour en faire un personnage récurrent (ensuite personnage_creer avec depuis=« recherche:N »). Refuse les personnages protégés par le droit d'auteur.",
+            mapOf("nom" to prop("Personnage ou sujet à chercher (ex. « Vercingétorix », « Jeanne d'Arc », « guerrier gaulois gravure »).")), listOf("nom")),
+        tool("personnages_liste", "Vidéos : liste les personnages récurrents enregistrés (nom, origine, description)."),
+        tool("personnage_supprimer", "Vidéos : supprime un personnage récurrent enregistré.", mapOf("nom" to prop("Nom du personnage.")), listOf("nom"))
     )
 
     suspend fun execute(name: String, a: JSONObject): ToolResult = withContext(Dispatchers.IO) {
@@ -273,7 +283,9 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                     style = if (name == "tiktok_video") a.optString("style").trim().also { if (it.isNotBlank()) app.store.tiktokStyle.set(it) }.ifBlank { app.store.tiktokStyle.value.trim() } else "",
                     signature = if (name == "tiktok_video") app.store.tiktokSignature.value.trim() else ""
                 )
-                ToolResult(Montage.lancer(app, d), direct = true)
+                // Personnage protégé demandé (Astérix…) : dit clairement, au lieu de le remplacer en silence.
+                val avis = Personnages.refusProteges(Personnages.proteges(brut + " " + script + " " + derniereDemande()))
+                ToolResult(Montage.lancer(app, d) + if (avis.isNotBlank()) "\n\n$avis" else "", direct = true)
             }
             "tiktok_tendances" -> {
                 val theme = a.optString("theme").trim()
@@ -358,6 +370,48 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                         "ne la monte pas, ne la modifie pas et ne la renvoie pas en brouillon.")
             }
             "tiktok_video_analyser" -> ToolResult(TikTokEtude.analyser(app, a.optString("video").trim()), direct = true)
+            "personnage_creer" -> {
+                val nom = a.optString("nom").trim()
+                if (nom.isBlank()) return ToolResult("Donne un nom au personnage.")
+                val description = a.optString("description").trim()
+                Personnages.proteges("$nom $description").takeIf { it.isNotEmpty() }?.let { return ToolResult(Personnages.refusProteges(it), direct = true) }
+                val depuis = a.optString("depuis").trim()
+                val r = Regex("(?i)^recherche(?::\\s*(\\d+))?$").find(depuis)
+                when {
+                    r != null -> {
+                        val (p, c) = Personnages.depuisDomainePublic(app, nom, description, r.groupValues[1].toIntOrNull() ?: 1)
+                        ToolResult("🧑‍🎨 Personnage « ${p.nom} » enregistré depuis une image du domaine public :\n« ${c.titre} »" +
+                            (if (c.auteur.isNotBlank()) " — ${c.auteur}" else "") + " (${c.licence}, ${c.page})\n![${p.nom}](jarvis-img:${Personnages.apercu(p)})\n\n" +
+                            "Il sera repris tel quel dans chaque vidéo où tu le nommes (ex. « fais une vidéo TikTok avec ${p.nom} »).", direct = true)
+                    }
+                    depuis.isNotBlank() -> {
+                        val p = Personnages.depuisImage(app, nom, description, depuis)
+                        ToolResult("🧑‍🎨 Personnage « ${p.nom} » enregistré depuis ton image.\n![${p.nom}](jarvis-img:${Personnages.apercu(p)})\n\nIl sera repris dans chaque vidéo où tu le nommes.", direct = true)
+                    }
+                    else -> {
+                        if (description.isBlank()) return ToolResult("Décris l'apparence du personnage (âge, allure, vêtements, couleurs) pour que je le dessine.")
+                        val p = Personnages.creerOriginal(app, nom, description)
+                        ToolResult("🧑‍🎨 Personnage original « ${p.nom} » créé :\n![${p.nom}](jarvis-img:${Personnages.apercu(p)})\n\n" +
+                            "Il gardera cette apparence dans chaque vidéo où tu le nommes. Pas satisfait ? Demande « recrée ${p.nom} avec … ».", direct = true)
+                    }
+                }
+            }
+            "personnage_chercher" -> {
+                val nom = a.optString("nom").trim()
+                Personnages.proteges(nom).takeIf { it.isNotEmpty() }?.let { return ToolResult(Personnages.refusProteges(it), direct = true) }
+                val l = Personnages.chercherDomainePublic(nom)
+                if (l.isEmpty()) return ToolResult("Aucune image du domaine public trouvée pour « $nom » sur Wikimedia Commons. Essaie un autre nom (ou en anglais), ou crée un personnage original.", direct = true)
+                ToolResult("# 🔎 « $nom » — images du domaine public (Wikimedia Commons)\n" + l.mapIndexed { i, c ->
+                    "${i + 1}. « ${c.titre} »" + (if (c.auteur.isNotBlank()) " — ${c.auteur}" else "") + " · ${c.licence} · [voir l'image](${c.page})"
+                }.joinToString("\n") + "\n\nDis « garde la n° X comme personnage $nom » pour l'enregistrer.", direct = true)
+            }
+            "personnages_liste" -> {
+                val l = Personnages.tous(app)
+                ToolResult(if (l.isEmpty()) "Aucun personnage récurrent enregistré. Exemple : « crée le personnage Brennos, un vieux chef gaulois à la barbe grise ».\n" +
+                    "Personnage historique : « cherche le personnage Vercingétorix »."
+                    else "# 🧑‍🎨 Tes personnages récurrents\n" + l.joinToString("\n") { Personnages.ligne(it) }, direct = true)
+            }
+            "personnage_supprimer" -> ToolResult(if (Personnages.supprimer(app, a.optString("nom"))) "🗑️ Personnage « ${a.optString("nom").trim()} » supprimé." else "Aucun personnage « ${a.optString("nom").trim()} ».", direct = true)
             "tiktok_horaires" -> ToolResult(TikTokEtude.horaires(app), direct = true)
             "tiktok_idees_concurrents" -> ToolResult(TikTokEtude.ideesConcurrents(app, a.optString("comptes").trim(),
                 a.optString("approfondir").filter { it.isDigit() }.toIntOrNull() ?: 2), direct = true)

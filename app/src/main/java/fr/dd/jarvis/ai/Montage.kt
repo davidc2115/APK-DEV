@@ -259,13 +259,24 @@ object Montage {
         // première image de ce montage (le même sujet d'un plan à l'autre).
         val modelesChaine = if (d.tiktok) TikTokAuto.references(app).take(3) else emptyList()
         var modeleMontage: File? = null
+        // Personnages récurrents enregistrés que ta demande nomme, et si le scénario les a bien placés dans des plans.
+        val personnagesDemande = Personnages.cites(app, d.sujet + " " + d.script)
+        val personnagesNommes = sb.plans.any { Personnages.cites(personnagesDemande, it.visuel).isNotEmpty() }
         // Sujet récurrent de la chaîne (le phénix tricolore…) imposé aux plans qui n'en montrent aucun symbole.
         val ancre = if (!d.tiktok) "" else app.store.tiktokStyle.value.trim().takeIf { it.isNotBlank() && it.length <= 220 && Regex("(?i)[a-z]").containsMatchIn(it) }
             ?: if (Regex("(?i)ph[ée]nix|phoenix").containsMatchIn(d.sujet + " " + d.style)) ANCRE_PHENIX else ""
         suspend fun image(rang: Int, p: Plan): File? = imagesParPlan[rang] ?: if (imagesIaEpuisees) null else runCatching {
-            val modeles = modelesChaine + listOfNotNull(modeleMontage)
-            val prompt = (if (modeles.isNotEmpty()) "Keep exactly the same main subject design, color palette, lighting and mood as the reference images, in a new composition: " else "") +
-                interdits(ancrer(sansPersonnagesProteges(p.visuel), ancre)) + ", ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, cinematic lighting, highly detailed"
+            // Personnages récurrents nommés dans ce plan (ou, si le scénario ne les a nommés nulle part, ceux de la demande) :
+            // leur image de référence passe en premier, pour qu'ils aient la même apparence dans chaque plan et chaque vidéo.
+            val perso = Personnages.cites(personnagesDemande, p.visuel).ifEmpty { if (personnagesNommes) emptyList() else personnagesDemande }.take(2)
+            val refsPerso = perso.map { File(it.reference) }.filter { it.isFile }
+            val modeles = (refsPerso + modelesChaine + listOfNotNull(modeleMontage)).take(4)
+            val visuel = Personnages.decrire(sansPersonnagesProteges(p.visuel), perso)
+            val prompt = (if (refsPerso.isNotEmpty()) "${perso.joinToString(" and ") { it.nom }} must look exactly like in the first reference image" +
+                    "${if (refsPerso.size > 1) "s" else ""} (same face, body, clothes and colours), in a new pose and composition. " else "") +
+                (if (modeles.size > refsPerso.size) "Keep the same color palette, lighting and mood as the other reference images. " else "") +
+                interdits(ancrer(visuel, ancre), avecPersonnages = perso.isNotEmpty()) +
+                ", ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, cinematic lighting, highly detailed"
             // Image directement au bon format et nette (FLUX.2 klein 4B : ≈ 10 fois moins de quota que le 9B).
             ImageGen.generate(app, prompt, "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768, huggingFace = false, references = modeles).first
                 .also { if (modeleMontage == null) modeleMontage = ImageGen.reference(it, File(travail, "modele_montage.jpg")) }
@@ -676,6 +687,7 @@ object Montage {
             if (d.voixOff.isNotBlank() && d.voixOff.lowercase() !in setOf("auto", "aucune", "oui", "non")) append("Voix off imposée : ${d.voixOff}\n")
             if (n > 1) append("C'est la variante $k sur $n : choisis un angle, une accroche et des visuels DIFFÉRENTS des autres variantes.\n")
             if (d.style.isNotBlank()) append("Signature et ton de la chaîne (à respecter dans chaque plan, la voix off et l'image « signature ») : ${d.style}\n")
+            append(Personnages.consigneScenario(Personnages.cites(app, d.sujet + " " + d.script)))
             if (d.tiktok) {
                 // Ressembler aux vidéos de la chaîne : même sujet récurrent d'un plan à l'autre, textes courts et forts.
                 append("Fidélité à la chaîne : garde LE MÊME sujet principal (même apparence, mêmes couleurs) dans tous les plans, " +
@@ -805,22 +817,19 @@ object Montage {
     internal val SYMBOLES = Regex("(?i)ph[oeé]+ni|flag|drapeau|tricolo|marianne|rooster|\\bcoq|eiffel|triomphe|triumph|notre.?dame|mont.?saint|versailles|" +
         "firefighter|pompier|farmer|agricult|tractor|tracteur|soldier|soldat|\\bfrance|french|paris|chateau|château|cathedral")
 
-    private val PROTEGES = Regex("(?i)\\b(ast[ée]rix|ob[ée]lix|id[ée]fix|dogmatix|panoramix|getafix|abraracourcix|vitalstatistix)\\b(\\s+(et|and|,)\\s+(ast[ée]rix|ob[ée]lix|id[ée]fix|panoramix))*")
-
     /**
-     * Personnages protégés (Astérix, Obélix…) : jamais reproduits (droit d'auteur, retrait possible par TikTok) ; ils
-     * deviennent des guerriers gaulois ORIGINAUX, sans reprendre leur apparence.
+     * Personnages protégés (Astérix, Obélix, héros de BD, de films, de jeux…) : jamais reproduits (droit d'auteur, retrait
+     * possible par TikTok) ; ils deviennent des personnages ORIGINAUX (des guerriers gaulois pour l'univers d'Astérix).
      */
-    internal fun sansPersonnagesProteges(visuel: String): String =
-        PROTEGES.replace(visuel, "original ancient Gaulish warriors of our own design")
+    internal fun sansPersonnagesProteges(visuel: String): String = Personnages.remplacerProteges(visuel)
 
     /** Plan sans aucun symbole de la chaîne : le sujet récurrent ([ancre]) y est ajouté. */
     internal fun ancrer(visuel: String, ancre: String): String =
         if (ancre.isBlank() || SYMBOLES.containsMatchIn(visuel)) visuel else "$ancre, $visuel"
 
     /** Interdits de l'image : jamais de texte (« Unité » sur un t-shirt), ni de personnage inventé quand le plan n'en demande pas. */
-    internal fun interdits(visuel: String): String {
-        val personnes = Regex("(?i)firefighter|pompier|farmer|agricult|soldier|soldat|crowd|foule|people|person|\\bman\\b|woman|child|famil|marianne").containsMatchIn(visuel)
+    internal fun interdits(visuel: String, avecPersonnages: Boolean = false): String {
+        val personnes = avecPersonnages || Regex("(?i)firefighter|pompier|farmer|agricult|soldier|soldat|crowd|foule|people|person|\\bman\\b|woman|child|famil|marianne|warrior|guerrier|chief|chef|king|roi|queen|reine|knight|chevalier|character|personnage").containsMatchIn(visuel)
         return visuel + ", no text, no letters, no words, no writing on clothes or signs, no logo, no watermark" +
             if (personnes) ", no masks" else ", no people, no human figures, no masks"
     }
