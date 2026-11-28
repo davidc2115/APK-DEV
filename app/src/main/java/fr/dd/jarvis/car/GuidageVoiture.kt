@@ -194,7 +194,8 @@ object GuidageVoiture {
      * Lance le guidage et ne l'annonce que s'il a vraiment démarré. [appli] : Waze, Google Maps… (vide = Waze s'il est
      * installé). Renvoie la phrase à dire.
      */
-    suspend fun lancer(app: JarvisApp, destination: String, point: Pair<Double, Double>?, appli: String = ""): String {
+    /** [autreAppli] : si l'appli GPS choisie ne s'ouvre pas, essayer une fois l'autre appli installée (Waze ↔ Google Maps). */
+    suspend fun lancer(app: JarvisApp, destination: String, point: Pair<Double, Double>?, appli: String = "", autreAppli: Boolean = true): String {
         val journal = fr.dd.jarvis.voice.JournalVoix
         val nom = destination.ifBlank { point?.let { "${coord(it.first)}, ${coord(it.second)}" }.orEmpty() }
         val echecs = mutableListOf<String>()
@@ -250,6 +251,11 @@ object GuidageVoiture {
             val ouverte = attendreOuverture(t1, 6_000)
             if (!ouverte) {
                 journal.noter("voiture", "$nomAppli : aucune ouverture d'application détectée après l'intent · téléphone verrouillé : ${etat(verrou)}")
+                // Plan B : l'autre appli GPS installée (une appli peut refuser de s'ouvrir depuis l'arrière-plan, pas l'autre).
+                autre(dispo.keys, choix)?.takeIf { autreAppli && premier != null && !verrou }?.let { autreNom ->
+                    journal.noter("voiture", "$nomAppli ne s'ouvre pas : essai avec $autreNom")
+                    return "⚠️ $nomAppli ne s'est pas ouvert ; essai avec $autreNom : " + lancer(app, destination, point, autreNom, autreAppli = false)
+                }
                 if (premier == null) return "⚠️ La demande a été transmise à $nomAppli, mais je ne peux pas vérifier que l'application ou le guidage s'est ouvert. Active l'accès aux notifications et l'accessibilité de JARVIS pour un contrôle fiable."
                 val secours = notifier(app, destination, point, choix)
                 val blocage = blocageProbable(app)
@@ -289,7 +295,13 @@ object GuidageVoiture {
                 " · téléphone verrouillé : ${etat(verrou)} · écran : ${diagnosticEcran()}")
             val secours = notifier(app, destination, point, choix)
             return "⚠️ J'ai appuyé sur « $appui » dans $nomAppli pour $nom, mais l'aperçu de l'itinéraire est toujours affiché. " + phraseSecours(secours)
-        } else echecs += r.removePrefix("❌ ").take(120)
+        } else {
+            echecs += r.removePrefix("❌ ").take(120)
+            autre(dispo.keys, choix)?.takeIf { autreAppli }?.let { autreNom ->
+                journal.noter("voiture", "${choix.ifBlank { "Google Maps" }} refuse : essai avec $autreNom")
+                return "⚠️ ${choix.ifBlank { "Google Maps" }} : ${r.removePrefix("❌ ").take(100)} — essai avec $autreNom : " + lancer(app, destination, point, autreNom, autreAppli = false)
+            }
+        }
 
         // 3. Rien de vérifié : itinéraire prêt dans une notification à toucher, et réponse honnête.
         notifier(app, destination, point, choix)
@@ -301,6 +313,12 @@ object GuidageVoiture {
                 "Pour que je le lance tout seul : autorise « Afficher par-dessus les autres applis » pour JARVIS" +
                     (if (fr.dd.jarvis.service.JarvisAccessibilityService.instance == null) ", ou active son service d'accessibilité" else "") + "."
             }
+    }
+
+    /** L'autre appli GPS installée que [choix] (Waze ↔ Google Maps), ou null. */
+    internal fun autre(dispo: Collection<String>, choix: String): String? {
+        val c = choix.lowercase().ifBlank { "google maps" }
+        return dispo.firstOrNull { d -> val x = d.lowercase(); !(x.contains("waze") && c.contains("waze")) && !((x.contains("maps") || x.contains("google")) && (c.contains("maps") || c.contains("google"))) }
     }
 
     private fun verrouille(ctx: Context): Boolean =

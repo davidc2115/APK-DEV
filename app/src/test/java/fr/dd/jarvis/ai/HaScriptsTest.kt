@@ -72,4 +72,42 @@ class HaScriptsTest {
         assertNull(Plex.commandeAppliquee("volume", s("playing"), s("playing")))
         assertEquals("en pause", Plex.etatLecture(s("paused")))
     }
+
+    /** Objectifs dits naturellement. */
+    @Test fun objectifsCompris() {
+        assertEquals("eteindre", HaScripts.objectif("éteins le poêle").type)
+        assertEquals(HaScripts.Objectif("consigne", "21"), HaScripts.objectif("consigne à 21 degrés"))
+        assertEquals(HaScripts.Objectif("puissance", "3"), HaScripts.objectif("mets la puissance 3"))
+        assertEquals(HaScripts.Objectif("mode", "eco"), HaScripts.objectif("mode eco"))
+        assertEquals(HaScripts.Objectif("ouvrir", "50"), HaScripts.objectif("ouvre le volet à 50 %"))
+        assertEquals("allumer", HaScripts.objectif("allume").type)
+    }
+
+    /** Poêle : préréglage, puissance par « fan modes », interrupteur ou sélecteur du même appareil, extinction. */
+    @Test fun methodesPoele() {
+        val poele = JSONObject("""{"entity_id":"climate.poele_etage","state":"heat","attributes":{"friendly_name":"Poêle étage","supported_features":401,
+            "hvac_modes":["off","heat"],"preset_modes":["none","eco","comfort"],"fan_modes":["1","2","3","4","5"],"temperature":20,"min_temp":7,"max_temp":30}}""")
+        val freres = mapOf(
+            "switch.poele_etage_power" to JSONObject("""{"state":"on","attributes":{"friendly_name":"Poêle étage marche"}}"""),
+            "select.poele_etage_mode" to JSONObject("""{"state":"Auto","attributes":{"options":["Auto","Manuel","Éco"]}}"""))
+        val eco = HaScripts.methodesPour(HaScripts.objectif("mode eco"), "climate.poele_etage", poele, freres, emptySet(), null, "mcz")
+        assertEquals("climate.set_preset_mode", eco.first().etape!!.getString("action"))
+        assertTrue(eco.any { it.etape?.optString("action") == "select.select_option" && it.etape!!.getJSONObject("data").getString("option") == "Éco" })
+        val p3 = HaScripts.methodesPour(HaScripts.objectif("puissance 3"), "climate.poele_etage", poele, freres, emptySet(), null, "mcz")
+        assertEquals("climate.set_fan_mode", p3.first().etape!!.getString("action"))
+        val off = HaScripts.methodesPour(HaScripts.objectif("éteindre"), "climate.poele_etage", poele, freres, emptySet(), null, "mcz")
+        assertEquals(listOf("climate.turn_off", "climate.set_hvac_mode", "switch.turn_off"), off.mapNotNull { it.etape?.optString("action") })
+        val consigne = HaScripts.methodesPour(HaScripts.objectif("consigne 21"), "climate.poele_etage", poele, freres, emptySet(), null, "mcz")
+        assertEquals(21.0, consigne.first().etape!!.getJSONObject("data").getDouble("temperature"), 0.01)
+        val inconnu = HaScripts.methodesPour(HaScripts.objectif("mode turbo"), "climate.poele_etage", poele, freres, emptySet(), null, "mcz")
+        assertTrue(inconnu.single().etape == null && inconnu.single().note.contains("eco"))
+        assertEquals(listOf("consigne", "préréglages", "éteindre", "allumer"), HaScripts.fonctionsClimat(401).filter { it != "modes ventilation/puissance" })
+    }
+
+    /** Navigation : plan B avec l'autre appli GPS installée. */
+    @Test fun navigationAutreAppli() {
+        assertEquals("Google Maps", fr.dd.jarvis.car.GuidageVoiture.autre(listOf("Waze", "Google Maps"), "Waze"))
+        assertEquals("Waze", fr.dd.jarvis.car.GuidageVoiture.autre(listOf("Waze", "Google Maps"), ""))
+        assertNull(fr.dd.jarvis.car.GuidageVoiture.autre(listOf("Waze"), "Waze"))
+    }
 }

@@ -159,4 +159,124 @@ object HaScripts {
             "l'entité n'annonce pas « allumer » (intégration « $plateforme ») : chercher la méthode propre à cette intégration (Wake-on-LAN, télécommande IR/Broadlink, CEC, SmartThings…)")
         return out
     }
+
+    // ------------------------------------------------------------------ tout appareil, tout objectif (poêle, volet…)
+
+    private val FONCTIONS_CLIMAT = listOf(1 to "consigne", 2 to "plage de consigne", 4 to "humidité", 8 to "modes ventilation/puissance",
+        16 to "préréglages", 32 to "oscillation", 128 to "éteindre", 256 to "allumer")
+
+    /** Fonctions d'un climate (poêle, clim, thermostat) d'après supported_features. */
+    fun fonctionsClimat(features: Int): List<String> = FONCTIONS_CLIMAT.filter { (bit, _) -> features and bit != 0 }.map { it.second }
+
+    data class Objectif(val type: String, val valeur: String = "")
+
+    private fun sansAccents(t: String) = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "").trim()
+
+    /** « allumer », « éteins », « mode eco », « consigne 21 », « puissance 3 », « ouvrir à 50 % » → objectif. */
+    fun objectif(texte: String): Objectif {
+        val t = sansAccents(texte)
+        val nombre = Regex("(\\d+(?:[.,]\\d+)?)").find(t)?.groupValues?.get(1)?.replace(',', '.').orEmpty()
+        return when {
+            Regex("\\b(eteindre|eteins|eteint|arret|arreter|stop|couper|coupe|off)\\b").containsMatchIn(t) -> Objectif("eteindre")
+            Regex("\\b(consigne|temperature|degres?|°)").containsMatchIn(t) && nombre.isNotBlank() -> Objectif("consigne", nombre)
+            Regex("\\b(puissance|niveau|vitesse|flamme|power|level)\\b").containsMatchIn(t) -> Objectif("puissance", nombre.ifBlank { Regex("\\b(?:puissance|niveau|vitesse|flamme)\\s+(\\w+)").find(t)?.groupValues?.get(1).orEmpty() })
+            Regex("\\bmode\\s+(\\S+)").containsMatchIn(t) -> Objectif("mode", Regex("\\bmode\\s+(\\S+)").find(t)!!.groupValues[1])
+            Regex("\\b(ouvr\\w*|monte\\w*)\\b").containsMatchIn(t) -> Objectif("ouvrir", nombre)
+            Regex("\\b(ferm\\w*|descend\\w*|baisse\\w*)\\b").containsMatchIn(t) -> Objectif("fermer", nombre)
+            Regex("\\b(allum\\w*|demarr\\w*|marche|lance\\w*|on)\\b").containsMatchIn(t) -> Objectif("allumer")
+            else -> Objectif("autre", t)
+        }
+    }
+
+    private fun liste(a: JSONArray?): List<String> = a?.let { x -> (0 until x.length()).map { x.optString(it) } }.orEmpty()
+
+    /** L'option de [options] qui correspond le mieux à [voulu] (« eco » → « Eco », « ECO mode »). */
+    internal fun option(options: List<String>, voulu: String): String? {
+        val v = sansAccents(voulu)
+        if (v.isBlank()) return null
+        return options.firstOrNull { sansAccents(it) == v } ?: options.firstOrNull { sansAccents(it).contains(v) || v.contains(sansAccents(it)) && sansAccents(it).length >= 2 }
+    }
+
+    /**
+     * Façons d'atteindre [obj] sur l'appareil [entite] (état [etat]), d'après ce qu'il annonce et les entités du même
+     * appareil ([freres] : entité → état complet) — poêle à granulés (préréglages, « fan modes » utilisés comme puissance,
+     * interrupteur d'alimentation, sélecteur de mode, nombre de consigne), volet, chauffe-eau, etc.
+     */
+    fun methodesPour(obj: Objectif, entite: String, etat: JSONObject, freres: Map<String, JSONObject>, services: Set<String>, mac: String?, plateforme: String): List<Methode> {
+        val domaine = entite.substringBefore('.')
+        val at = etat.optJSONObject("attributes") ?: JSONObject()
+        val f = at.optInt("supported_features")
+        if (domaine == "media_player" && obj.type == "allumer") return methodesAllumage(entite, plateforme, f, freres.keys.toList(), services, mac)
+        val out = mutableListOf<Methode>()
+        fun nomFrere(id: String) = sansAccents(id + " " + freres[id]?.optJSONObject("attributes")?.optString("friendly_name").orEmpty())
+        val interrupteur = freres.keys.firstOrNull { it.startsWith("switch.") && Regex("power|alim|marche|on_off|allum|etat|state|poele|stove").containsMatchIn(nomFrere(it)) }
+            ?: freres.keys.firstOrNull { it.startsWith("switch.") }
+        val selecteurs = freres.keys.filter { it.startsWith("select.") || it.startsWith("input_select.") }
+        val nombres = freres.keys.filter { it.startsWith("number.") || it.startsWith("input_number.") }
+        val boutons = freres.keys.filter { it.startsWith("button.") }
+        fun choixSelecteur(voulu: String): Methode? = selecteurs.firstNotNullOfOrNull { id ->
+            option(liste(freres[id]?.optJSONObject("attributes")?.optJSONArray("options")), voulu)?.let { o ->
+                Methode("Sélecteur $id → « $o »", etape(if (id.startsWith("input_select.")) "input_select.select_option" else "select.select_option", id, JSONObject().put("option", o)), "option proposée par l'appareil")
+            }
+        }
+        when (domaine) {
+            "climate", "water_heater" -> {
+                val modes = liste(at.optJSONArray("hvac_modes")).ifEmpty { liste(at.optJSONArray("operation_list")) }
+                val presets = liste(at.optJSONArray("preset_modes"))
+                val ventil = liste(at.optJSONArray("fan_modes"))
+                when (obj.type) {
+                    "allumer" -> {
+                        if (f and 256 != 0) out += Methode("$domaine.turn_on", etape("$domaine.turn_on", entite), "l'appareil annonce « allumer »")
+                        listOf("heat", "auto", "heat_cool").firstOrNull { it in modes }?.let { m -> out += Methode("Mode « $m »", etape("climate.set_hvac_mode", entite, JSONObject().put("hvac_mode", m)), "modes proposés : ${modes.joinToString()}") }
+                        interrupteur?.let { out += Methode("Interrupteur $it", etape("switch.turn_on", it), "alimentation / marche de l'appareil") }
+                        boutons.firstOrNull { Regex("allum|on|start|demarr|marche").containsMatchIn(nomFrere(it)) }?.let { out += Methode("Bouton $it", etape("button.press", it), "bouton d'allumage de l'appareil") }
+                        choixSelecteur("on")?.let { out += it }; choixSelecteur("marche")?.let { out += it }
+                    }
+                    "eteindre" -> {
+                        if (f and 128 != 0) out += Methode("$domaine.turn_off", etape("$domaine.turn_off", entite), "l'appareil annonce « éteindre »")
+                        if ("off" in modes) out += Methode("Mode « off »", etape("climate.set_hvac_mode", entite, JSONObject().put("hvac_mode", "off")), "un poêle à granulés peut mettre plusieurs minutes à s'arrêter (phase d'extinction)")
+                        interrupteur?.let { out += Methode("Interrupteur $it", etape("switch.turn_off", it), "coupe la marche de l'appareil") }
+                        boutons.firstOrNull { Regex("eteind|off|stop|arret").containsMatchIn(nomFrere(it)) }?.let { out += Methode("Bouton $it", etape("button.press", it), "bouton d'extinction de l'appareil") }
+                        choixSelecteur("off")?.let { out += it }; choixSelecteur("arret")?.let { out += it }
+                    }
+                    "consigne" -> {
+                        val v = obj.valeur.toDoubleOrNull()
+                        if (v != null && f and 1 != 0) out += Methode("Consigne $v°", etape("climate.set_temperature", entite, JSONObject().put("temperature", v)),
+                            "plage ${at.optDouble("min_temp", 7.0)}–${at.optDouble("max_temp", 35.0)}°, pas ${at.optDouble("target_temp_step", 0.5)}")
+                        nombres.firstOrNull { Regex("consigne|setpoint|target|temp").containsMatchIn(nomFrere(it)) }?.let { id ->
+                            if (v != null) out += Methode("Nombre $id = $v", etape(if (id.startsWith("input_number.")) "input_number.set_value" else "number.set_value", id, JSONObject().put("value", v)), "consigne exposée à part par l'intégration")
+                        }
+                    }
+                    "mode", "puissance" -> {
+                        val voulu = obj.valeur
+                        option(presets, voulu)?.let { out += Methode("Préréglage « $it »", etape("climate.set_preset_mode", entite, JSONObject().put("preset_mode", it)), "préréglages : ${presets.joinToString()}") }
+                        option(ventil, voulu)?.let { out += Methode("Mode ventilation/puissance « $it »", etape("climate.set_fan_mode", entite, JSONObject().put("fan_mode", it)), "beaucoup de poêles exposent leur puissance ainsi : ${ventil.joinToString()}") }
+                        option(modes, voulu)?.let { out += Methode("Mode « $it »", etape("climate.set_hvac_mode", entite, JSONObject().put("hvac_mode", it)), "modes : ${modes.joinToString()}") }
+                        choixSelecteur(voulu)?.let { out += it }
+                        if (obj.type == "puissance") nombres.firstOrNull { Regex("puissance|power|niveau|level|flamme").containsMatchIn(nomFrere(it)) }?.let { id ->
+                            voulu.toDoubleOrNull()?.let { v -> out += Methode("Nombre $id = $v", etape(if (id.startsWith("input_number.")) "input_number.set_value" else "number.set_value", id, JSONObject().put("value", v)),
+                                "plage ${freres[id]?.optJSONObject("attributes")?.optDouble("min")}–${freres[id]?.optJSONObject("attributes")?.optDouble("max")}") }
+                        }
+                        if (out.isEmpty()) out += Methode("« $voulu » n'existe pas sur cet appareil", null,
+                            "préréglages : ${presets.joinToString().ifBlank { "aucun" }} ; ventilation/puissance : ${ventil.joinToString().ifBlank { "aucune" }} ; modes : ${modes.joinToString().ifBlank { "aucun" }}" +
+                                (if (selecteurs.isNotEmpty()) " ; sélecteurs : " + selecteurs.joinToString { s -> "$s (${liste(freres[s]?.optJSONObject("attributes")?.optJSONArray("options")).joinToString("/")})" } else ""))
+                    }
+                }
+            }
+            "cover" -> when (obj.type) {
+                "ouvrir", "fermer" -> {
+                    val pos = obj.valeur.toIntOrNull()
+                    if (pos != null && f and 4 != 0) out += Methode("Position $pos %", etape("cover.set_cover_position", entite, JSONObject().put("position", pos)), "le volet accepte une position")
+                    out += Methode(if (obj.type == "ouvrir") "cover.open_cover" else "cover.close_cover", etape(if (obj.type == "ouvrir") "cover.open_cover" else "cover.close_cover", entite), "service standard")
+                }
+                else -> {}
+            }
+            else -> {}
+        }
+        if (out.isEmpty()) when (obj.type) {
+            "allumer", "eteindre" -> out += Methode("$domaine.${if (obj.type == "allumer") "turn_on" else "turn_off"}", etape("$domaine.${if (obj.type == "allumer") "turn_on" else "turn_off"}", entite), "service standard de l'entité")
+            else -> out += Methode("Aucune méthode sûre détectée", null, "voir les services de l'intégration « $plateforme » et les entités du même appareil ; sinon chercher sur le web")
+        }
+        return out.distinctBy { it.etape?.toString() ?: it.titre }
+    }
 }

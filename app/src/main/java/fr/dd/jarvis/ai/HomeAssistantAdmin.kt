@@ -360,7 +360,8 @@ class HomeAssistantAdmin(
                 verifierEnregistrement(action, id, nom)
             }
             // ---- appareil : ce qu'il sait VRAIMENT faire, et comment l'allumer sur CETTE installation
-            "capacites", "appareil_analyser", "allumage" -> capacites(a.optString("entity_id").ifBlank { a.optString("recherche").ifBlank { a.optString("appareil") } })
+            "capacites", "appareil_analyser", "allumage" -> capacites(a.optString("entity_id").ifBlank { a.optString("recherche").ifBlank { a.optString("appareil") } },
+                a.optString("objectif").ifBlank { if (action == "allumage") "allumer" else "" })
             // ---- essai réel d'un script : lancé, puis état des appareils qu'il pilote avant / après
             "script_tester", "tester_script", "automatisation_tester" -> testerScript(a, action == "automatisation_tester")
             "automatisation_supprimer", "script_supprimer", "scene_supprimer" -> {
@@ -501,8 +502,11 @@ class HomeAssistantAdmin(
         return "⚠️ « $nom » a été enregistré, mais Home Assistant ne l'a pas encore chargé (aucune entité trouvée). Regarde le journal (action=journal) : la configuration contient peut-être une erreur."
     }
 
-    /** Ce que sait faire une entité (télé, enceinte, lumière…) et les façons qui marchent de l'allumer ici. */
-    private suspend fun capacites(cible: String): String {
+    /**
+     * Ce que sait faire une entité (télé, poêle, volet, chauffe-eau, lumière…) et les façons qui marchent ICI d'atteindre
+     * [objectifTexte] (« allumer », « éteindre », « mode eco », « consigne 21 », « puissance 3 », « ouvrir à 50 % »).
+     */
+    private suspend fun capacites(cible: String, objectifTexte: String = ""): String {
         if (cible.isBlank()) throw IllegalArgumentException("entity_id (ou recherche : nom de l'appareil) requis.")
         val etats = liste(rest("GET", "/api/states"))
         val n = normaliser(cible)
@@ -522,21 +526,40 @@ class HomeAssistantAdmin(
             val mac = appareil?.optJSONArray("connections")?.let { c -> (0 until c.length()).mapNotNull { c.optJSONArray(it) }.firstOrNull { it.optString(0) == "mac" }?.optString(1) }
             val freres = if (appareilId == null) emptyList() else registre.filter { it.optString("device_id") == appareilId && it.optString("entity_id") != id }.map { it.optString("entity_id") }
             val services = liste(rest("GET", "/api/services")).associate { it.optString("domain") to (it.optJSONObject("services")?.keys()?.asSequence()?.toList().orEmpty()) }
-            val methodes = HaScripts.methodesAllumage(id, plateforme, features, freres, services.keys, mac)
+            val parId = etats.associateBy { it.optString("entity_id") }
+            val obj = HaScripts.objectif(objectifTexte.ifBlank { "allumer" })
+            val methodes = HaScripts.methodesPour(obj, id, e, freres.associateWith { parId[it] ?: JSONObject() }, services.keys, mac, plateforme)
+            val libelleObjectif = when (obj.type) {
+                "allumer" -> "l'allumer"; "eteindre" -> "l'éteindre"; "consigne" -> "régler la consigne à ${obj.valeur}°"
+                "mode" -> "le mettre en mode « ${obj.valeur} »"; "puissance" -> "régler la puissance « ${obj.valeur} »"
+                "ouvrir" -> "l'ouvrir" + (if (obj.valeur.isNotBlank()) " à ${obj.valeur} %" else ""); "fermer" -> "le fermer"; else -> "« $objectifTexte »"
+            }
             buildString {
                 append("# 🔎 ${at.optString("friendly_name").ifBlank { id }} (`$id`)\n")
                 append("- État : ${e.optString("state")} · intégration : ${plateforme.ifBlank { "inconnue (sans identifiant unique)" }}")
                 appareil?.let { append(" · appareil : ${it.optString("manufacturer")} ${it.optString("model")}".trimEnd()) }
                 append("\n")
                 if (id.startsWith("media_player.")) append("- Fonctions annoncées : ${HaScripts.fonctionsMedia(features).joinToString().ifBlank { "aucune" }}\n")
+                if (id.startsWith("climate.") || id.startsWith("water_heater.")) {
+                    append("- Fonctions annoncées : ${HaScripts.fonctionsClimat(features).joinToString().ifBlank { "aucune" }}\n")
+                    listOf("hvac_modes" to "Modes", "preset_modes" to "Préréglages", "fan_modes" to "Ventilation / puissance", "operation_list" to "Modes de fonctionnement").forEach { (k, l) ->
+                        at.optJSONArray(k)?.takeIf { it.length() > 0 }?.let { arr -> append("- $l : ${(0 until arr.length()).joinToString { i -> arr.optString(i) }}\n") }
+                    }
+                    if (at.has("temperature") || at.has("min_temp")) append("- Consigne : ${at.opt("temperature")}° (plage ${at.opt("min_temp")}–${at.opt("max_temp")}°) · mesurée ${at.opt("current_temperature")}° · action en cours : ${at.optString("hvac_action").ifBlank { "?" }}\n")
+                }
                 at.optJSONArray("source_list")?.let { append("- Sources : ${(0 until it.length()).joinToString { k -> it.optString(k) }.take(300)}\n") }
-                if (freres.isNotEmpty()) append("- Autres entités du même appareil : ${freres.take(15).joinToString()}\n")
+                if (freres.isNotEmpty()) append("- Autres entités du même appareil : " + freres.take(15).joinToString { f ->
+                    val o = parId[f]
+                    val opts = o?.optJSONObject("attributes")?.optJSONArray("options")?.let { arr -> " [" + (0 until arr.length()).joinToString("/") { i -> arr.optString(i) } + "]" }.orEmpty()
+                    "$f (${o?.optString("state") ?: "?"})$opts"
+                } + "\n")
                 append("- Adresse MAC : ${mac ?: "inconnue"}\n")
                 services[plateforme]?.takeIf { it.isNotEmpty() }?.let { append("- Services propres à l'intégration $plateforme : ${it.joinToString()}\n") }
-                append("\n## Façons de l'allumer qui devraient marcher ici (de la plus sûre à la moins sûre)\n")
+                append("\n## Façons de $libelleObjectif qui devraient marcher ici (de la plus sûre à la moins sûre)\n")
                 methodes.forEachIndexed { k, m -> append("${k + 1}. **${m.titre}** — ${m.note}" + (m.etape?.let { "\n   étape de script : `$it`" } ?: "") + "\n") }
-                append("\nMarche à suivre : écris le script avec la méthode 1 (sequence = [étape]), TESTE-le (action=script_tester) ; si l'état ne change pas, passe à la méthode suivante. " +
-                    "Si aucune ne marche, fais chercher la méthode propre à cette intégration sur le web (hermes_deleguer : « Home Assistant $plateforme allumer la TV ») avant de conclure.")
+                append("\nMarche à suivre : action directe = ha_service avec l'étape de la méthode 1 ; script = sequence = [étape] puis TEST (action=script_tester). " +
+                    "Si l'appareil ne réagit pas, passe à la méthode suivante. Si aucune ne marche, fais chercher la méthode propre à cette intégration sur le web " +
+                    "(hermes_deleguer : « Home Assistant $plateforme $libelleObjectif ») avant de conclure.")
             }
         }
     }

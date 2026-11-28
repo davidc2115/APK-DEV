@@ -1413,7 +1413,8 @@ object Serveur {
             !verificationServiceConnue(service, donnees, domaine, avant) -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant ; état actuel « $etat »$detail. Le résultat fonctionnel n'est pas vérifiable automatiquement : ne le présente pas comme confirmé."
             suivi -> "⏳ $nom (`$id`) : $domaine.$service accepté par Home Assistant ; l'appareil n'a pas encore changé au bout de $secondes s (état « $etat »$detail) — il réagit lentement. " +
                 "Je continue de vérifier pendant quelques minutes et je te préviens par notification. Dis que la commande est envoyée et en cours de vérification, pas qu'elle est faite."
-            else -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant, mais l'état reste « $etat »$detail après $secondes s, même après relecture de l'appareil. Ne dis PAS que c'est fait : l'appareil n'a peut-être pas suivi."
+            else -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant, mais l'état reste « $etat »$detail après $secondes s, même après relecture de l'appareil. Ne dis PAS que c'est fait : l'appareil n'a peut-être pas suivi." +
+                "\n➡️ Cherche une autre façon qui marche sur CET appareil : ha_admin action=capacites entity_id=$id objectif=« ce que l'utilisateur voulait » (préréglage, mode de puissance, interrupteur, sélecteur du même appareil…), puis réessaie."
         }
     }
 
