@@ -125,7 +125,7 @@ object Capacites {
             i("Coffre Obsidian : chercher, lire, écrire, ranger, supprimer, contrôler les doublons et vérifier les modifications", "cherche « onduleur » dans mes notes|contrôle les doublons de mon coffre|vérifie les modifications dans Obsidian", "obsidian_chercher,obsidian_lire,obsidian_lister,obsidian_ecrire,obsidian_fichiers,obsidian_doublons,obsidian_synchroniser,obsidian_supprimer,graphe_suggere_lien", Voie.REFLEXE),
             i("Coffre Obsidian : relier les fichiers orphelins et les mentions non liées", "relie les fichiers sans lien de mon coffre|transforme les mentions non liées en liens", "obsidian_relier"),
             i("Créer des fichiers (PDF, Word, Excel, CSV…) et retrouver ceux déjà créés", "fais un tableau Excel de mes clients|quels fichiers as-tu créés ?", "creer_fichier,fichiers_generes"),
-            i("Documents importés : lire, analyser, résumer", "résume le PDF que je t'ai envoyé", "documents_lister,document_lire,document_analyser"),
+            i("Documents importés ou joints (bouton +) : lire, analyser, résumer, supprimer", "résume le PDF que je t'ai envoyé|supprime le fichier facture.pdf", "documents_lister,document_lire,document_analyser,document_supprimer"),
             i("Graphiques dans la conversation", "fais un graphique du chiffre d'affaires par mois", "graphique"),
             i("Mémoire : consignes, faits (lieux, surnoms), préférences apprises", "souviens-toi que ma femme c'est Angeline|qu'as-tu retenu ?", "memoire_ajouter,memoire_lire,memoire_oublier,memoire_faits,memoire_apprendre,memoire_apprentissages,apprentissage_durable"),
             i("Conversations : retrouver et reprendre une ancienne conversation", "reprends la conversation sur le devis Martin", "conversations"),

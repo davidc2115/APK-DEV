@@ -249,7 +249,9 @@ object ImageGen {
         if (n.isBlank() || n.lowercase() in setOf("derniere", "dernière", "dernier", "last", "recente", "récente")) {
             return dossier.listFiles()?.filter { it.isFile && !it.name.startsWith("ecran_") }?.maxByOrNull { it.lastModified() }
         }
+        // Sinon : image jointe à la conversation (bouton +) ou importée dans la bibliothèque.
         return File(dossier, n).takeIf { it.exists() }
+            ?: DocumentStore.find(app, n)?.takeIf { it.extension.lowercase() in setOf("png", "jpg", "jpeg", "webp", "bmp", "heic", "heif", "gif") }
     }
 
     /** Génère plusieurs images d'affilée (une par prompt) ; utile pour un livre de coloriage, une planche, etc. Une erreur sur un prompt n'arrête pas les autres. */

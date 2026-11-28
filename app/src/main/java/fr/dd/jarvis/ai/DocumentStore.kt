@@ -9,12 +9,41 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 
-/** Bibliothèque privée des documents importés. Les originaux sont conservés. */
+/**
+ * Bibliothèque privée des documents importés (Réglages › Documents), et pièces jointes de conversation (bouton + du
+ * chat) : celles-ci ne sont PAS gardées dans JARVIS ni copiées dans la galerie — juste une copie privée et temporaire
+ * (cache de l'appli, invisible des autres applis), effacée au bout de 2 jours. Les originaux ne sont jamais touchés.
+ */
 object DocumentStore {
     private const val MAX_IMPORT = 200L * 1024L * 1024L
+    private const val DUREE_PIECE_JOINTE = 48L * 3_600_000L
     fun directory(context: Context) = File(context.filesDir, "documents").apply { mkdirs() }
+    fun dossierPiecesJointes(context: Context) = File(context.cacheDir, "pieces_jointes").apply { mkdirs() }
 
-    fun importFile(context: Context, uri: Uri): String {
+    /** Importe dans la bibliothèque (gardé jusqu'à suppression). */
+    fun importFile(context: Context, uri: Uri): String = copier(context, uri, directory(context))
+
+    /** Pièce jointe de conversation : copie privée temporaire (2 jours), ni bibliothèque ni galerie. */
+    fun joindre(context: Context, uri: Uri): String {
+        purgerPiecesJointes(context)
+        return copier(context, uri, dossierPiecesJointes(context))
+    }
+
+    /** Efface les pièces jointes de plus de 2 jours. */
+    fun purgerPiecesJointes(context: Context, maintenant: Long = System.currentTimeMillis()) {
+        dossierPiecesJointes(context).listFiles()?.filter { it.isFile && maintenant - it.lastModified() > DUREE_PIECE_JOINTE }?.forEach { it.delete() }
+    }
+
+    fun piecesJointes(context: Context): List<File> =
+        dossierPiecesJointes(context).listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }.orEmpty()
+
+    /** Supprime un fichier de la bibliothèque (ou une pièce jointe) ; l'original sur le téléphone reste intact. */
+    fun supprimer(context: Context, name: String): File? {
+        val f = find(context, name) ?: return null
+        return f.takeIf { it.delete() }
+    }
+
+    private fun copier(context: Context, uri: Uri, dossier: File): String {
         val resolver = context.contentResolver
         val meta = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0).orEmpty() to if (c.isNull(1)) -1L else c.getLong(1) else "" to -1L
@@ -24,9 +53,9 @@ object DocumentStore {
         val safe = display.substringAfterLast('/').replace(Regex("[\\\\/:*?\"<>|]"), "_").take(120).ifBlank { "document" }
         val base = safe.substringBeforeLast('.', safe)
         val ext = safe.substringAfterLast('.', "").takeIf { it.isNotBlank() }?.let { ".$it" }.orEmpty()
-        var target = File(directory(context), safe)
+        var target = File(dossier, safe)
         var n = 2
-        while (target.exists()) { target = File(directory(context), "$base ($n)$ext"); n++ }
+        while (target.exists()) { target = File(dossier, "$base ($n)$ext"); n++ }
         val input = resolver.openInputStream(uri) ?: return "❌ Impossible de lire $display."
         input.use { ins -> target.outputStream().use { out ->
             val buffer = ByteArray(64 * 1024); var total = 0L
@@ -41,16 +70,22 @@ object DocumentStore {
     }
 
     fun files(context: Context): List<File> = directory(context).listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }.orEmpty()
+    /** Fichier par son nom : pièces jointes de la conversation d'abord (les plus récentes), puis la bibliothèque. */
     fun find(context: Context, name: String): File? {
-        val clean = name.substringAfterLast('/').trim()
-        return files(context).firstOrNull { it.name.equals(clean, true) || it.nameWithoutExtension.equals(clean, true) }
+        val clean = name.substringAfterLast('/').trim().trim('"', '\'', '«', '»', ' ')
+        if (clean.isBlank()) return null
+        fun dans(l: List<File>) = l.firstOrNull { it.name.equals(clean, true) || it.nameWithoutExtension.equals(clean, true) }
+        return dans(piecesJointes(context)) ?: dans(files(context))
     }
 
     fun list(context: Context): String {
         val all = files(context)
-        if (all.isEmpty()) return "La bibliothèque de documents est vide."
-        return all.joinToString("\n") { f ->
-            "- ${f.name} · ${(f.length() + 1023) / 1024} Ko · ${java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.FRENCH).format(java.util.Date(f.lastModified()))}"
+        val pj = piecesJointes(context)
+        fun ligne(f: File) = "- ${f.name} · ${(f.length() + 1023) / 1024} Ko · ${java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.FRENCH).format(java.util.Date(f.lastModified()))}"
+        if (all.isEmpty() && pj.isEmpty()) return "La bibliothèque de documents est vide."
+        return buildString {
+            append(if (all.isEmpty()) "La bibliothèque de documents est vide." else "Bibliothèque :\n" + all.joinToString("\n") { ligne(it) })
+            if (pj.isNotEmpty()) append("\n\nPièces jointes de la conversation (temporaires, effacées après 2 jours) :\n" + pj.joinToString("\n") { ligne(it) })
         }
     }
 

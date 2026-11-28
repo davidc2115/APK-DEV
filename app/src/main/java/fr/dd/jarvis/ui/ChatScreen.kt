@@ -82,9 +82,11 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
     }
     val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) attachmentScope.launch {
-            attachmentStatus = "Import des fichiers…"
+            attachmentStatus = "Ajout des fichiers…"
+            // Pièces jointes de la conversation seulement : ni bibliothèque JARVIS ni copie dans la galerie (copie privée
+            // temporaire, effacée après 2 jours).
             val results = withContext(Dispatchers.IO) {
-                uris.map { uri -> runCatching { DocumentStore.importFile(ctx, uri) }.getOrElse { "❌ ${it.message ?: "Import impossible"}" } }
+                uris.map { uri -> runCatching { DocumentStore.joindre(ctx, uri) }.getOrElse { "❌ ${it.message ?: "Fichier illisible"}" } }
             }
             pendingAttachments = pendingAttachments + results.filterNot { it.startsWith("❌") }
             attachmentStatus = results.filter { it.startsWith("❌") }.joinToString("\n")
@@ -100,9 +102,10 @@ fun ChatScreen(vm: ChatViewModel, store: Store, app: JarvisApp) {
             if (body.isNotBlank()) append(body)
             if (names.isNotEmpty()) {
                 if (isNotEmpty()) append("\n\n")
-                append("Fichiers joints : ")
-                append(names.joinToString(", "))
-                append(". Analyse ces documents et utilise les outils de lecture/analyse de documents disponibles pour répondre à ma demande.")
+                append("Fichiers joints à cette conversation : ")
+                append(names.joinToString(", ") { "« $it »" })
+                append(". Utilise-les pour ma demande avec leur nom exact : document_lire ou document_analyser pour les lire (PDF, Word, Excel, ZIP, images…) ; " +
+                    "generer_video (image = son nom) ou tiktok_video / video_montage (sources = son nom) pour en faire une vidéo.")
                 if (body.isBlank()) append(" Fais-en une synthèse claire.")
             }
         }

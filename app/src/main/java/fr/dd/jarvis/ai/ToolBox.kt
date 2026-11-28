@@ -141,7 +141,7 @@ class ToolBox(
         put(tool("changer_voix", "Change la voix de JARVIS (personnage) : homme, femme, jeune, âgé(e), grave, douce, IA/robot, narrateur, animatrice radio, murmure, Jarvis (par défaut), ou un nom de voix Gemini (Kore, Puck…). Sans précision : liste les voix. Pour ENREGISTRER un message avec une voix (Père Noël, lutin…) : message_vocal.",
             mapOf("voix" to prop("Description de la voix voulue, ex. « femme âgée », « jeune homme », « robot », « par défaut ». Vide = lister."),
                 "description" to prop("Facultatif : description libre (âge, ton, accent) pour une voix sur mesure, ex. « homme de 60 ans avec un accent du Sud »."))))
-        put(tool("routines", "Gestion complète des routines JARVIS : lister, consulter, lancer, créer, modifier partiellement ou complètement, activer/désactiver et supprimer. Toute modification conserve les paramètres non mentionnés. Permet de changer le déclencheur, les phrases, l'heure, les jours, le nom et les actions ; ajouter/retirer/remplacer une action sans réécrire les autres.",
+        put(tool("routines", "Gestion complète des routines JARVIS : lister, consulter, lancer, créer, modifier partiellement ou complètement, activer/désactiver et supprimer. « Mode lever », « mode coucher », « lance le mode X » où X est le nom d'une routine = action « lancer » (ce n'est PAS un mode d'énergie). Toute modification conserve les paramètres non mentionnés. Permet de changer le déclencheur, les phrases, l'heure, les jours, le nom et les actions ; ajouter/retirer/remplacer une action sans réécrire les autres.",
             mapOf("action" to prop("lister | consulter | lancer | creer | modifier | supprimer | activer | desactiver"),
                 "nom" to prop("Nom actuel ou distinctif de la routine à consulter/modifier/lancer/supprimer ; pour créer, nom de la nouvelle routine."),
                 "nouveau_nom" to prop("Nouveau nom de la routine (optionnel, modification uniquement)."),
@@ -289,8 +289,10 @@ class ToolBox(
         put(tool("fichiers_generes", "Liste les fichiers déjà créés par JARVIS (images de generer_image, documents de creer_fichier), les plus récents en premier, avec leur nom exact. À utiliser dès que l'utilisateur fait référence à une image ou un fichier déjà généré sans te redonner son nom exact, avant de dire que tu ne le retrouves pas.",
             mapOf("quoi" to prop("images, fichiers (documents) ou tous (par défaut)."), "max" to prop("Nombre maximum à lister (par défaut 20).")), listOf()))
         put(tool("documents_lister", "Liste les documents importés dans la bibliothèque privée de JARVIS, avec leurs noms exacts.", mapOf()))
-        put(tool("document_lire", "Extrait le texte d'un document importé pour l'analyser, le résumer, le convertir ou réutiliser son contenu. Extrait toutes les pages des PDF texte ; pour un PDF scanné, utilise document_analyser afin de lancer l'OCR visuel page par page.", mapOf("nom" to prop("Nom exact du fichier affiché dans la bibliothèque documentaire.")), listOf("nom")))
-        put(tool("document_analyser", "Analyse les documents importés : PDF, Word, Excel, PowerPoint, texte, images et vidéos. Pour les documents bureautiques, restitue les titres, tableaux, feuilles et diapositives.", mapOf("nom" to prop("Nom exact du fichier importé."), "question" to prop("Question ou objectif d'analyse.")), listOf("nom")))
+        put(tool("document_supprimer", "Supprime un fichier de la bibliothèque documentaire de JARVIS (ou une pièce jointe de la conversation), par son nom exact (documents_lister le donne). Seule la copie gardée par JARVIS est effacée : l'original sur le téléphone reste intact.",
+            mapOf("nom" to prop("Nom exact du fichier.")), listOf("nom")))
+        put(tool("document_lire", "Extrait le texte d'un document importé ou JOINT à la conversation (bouton +) pour l'analyser, le résumer, le convertir ou réutiliser son contenu. Extrait toutes les pages des PDF texte ; pour un PDF scanné, utilise document_analyser afin de lancer l'OCR visuel page par page.", mapOf("nom" to prop("Nom exact du fichier affiché dans la bibliothèque documentaire.")), listOf("nom")))
+        put(tool("document_analyser", "Analyse les documents importés ou JOINTS à la conversation (bouton +) : PDF, Word, Excel, PowerPoint, texte, images et vidéos. Pour les documents bureautiques, restitue les titres, tableaux, feuilles et diapositives.", mapOf("nom" to prop("Nom exact du fichier importé."), "question" to prop("Question ou objectif d'analyse.")), listOf("nom")))
         put(tool("analyser_image", "Analyse une image déjà générée par generer_image (ou envoyée par l'utilisateur) : décrit son contenu, répond à une question dessus, lit un texte qu'elle contient, etc.",
             mapOf("image" to prop("Nom de fichier de l'image (vu dans jarvis-img:... ou via fichiers_generes), ou « derniere » pour la dernière générée."),
                 "question" to prop("Ce qu'il faut regarder ou dire sur l'image (optionnel ; par défaut une description détaillée).")), listOf("image")))
@@ -520,9 +522,9 @@ class ToolBox(
                 "options" to prop("Réglages « cle=oui|non » séparés par « ; » : sirene_detection, notifications_ha, mms."),
                 "nouveau_nom" to prop("Nouveau nom (modifier).")
             ), listOf("action")))
-        put(tool("jarvis_mode_fonctionnement", "Règle le MODE DE FONCTIONNEMENT DE JARVIS (l'application elle-même) : économie, équilibré ou performance ; « etat » indique le mode actuel. C'est CET outil pour « passe en mode équilibré / économie / performance » sans le mot téléphone, et pour « le mode de fonctionnement de Jarvis ». Ne touche jamais au mode du téléphone.",
+        put(tool("jarvis_mode_fonctionnement", "Règle le MODE DE FONCTIONNEMENT DE JARVIS (l'application elle-même) : économie, équilibré ou performance ; « etat » indique le mode actuel. C'est CET outil pour « passe en mode équilibré / économie / performance » sans le mot téléphone, et pour « le mode de fonctionnement de Jarvis ». Ne touche jamais au mode du téléphone. JAMAIS pour un autre nom : « mode lever », « mode coucher », « mode réveil »… sont des ROUTINES (outil routines, action « lancer ») ou des modes (modes_jarvis).",
             mapOf("mode" to prop("economie | equilibre | performance | etat"))))
-        put(tool("telephone_mode_energie", "Règle UNIQUEMENT le MODE D'ALIMENTATION (batterie) DU TÉLÉPHONE, et SEULEMENT si l'utilisateur parle explicitement du téléphone, du portable, de la batterie ou de l'économiseur (sinon : jarvis_mode_fonctionnement) : économie d'énergie (économiseur de batterie), équilibré ou performance — directement par le système, sans piloter l'écran ; « etat » indique le mode actuel. Pour TOUT AUTRE mode (téléphone sécurisé, maison sécurisée, cinéma, nuit, vacances…), utilise modes_jarvis. À ne pas confondre non plus avec le mode de fonctionnement de l'application Jarvis.",
+        put(tool("telephone_mode_energie", "Règle UNIQUEMENT le MODE D'ALIMENTATION (batterie) DU TÉLÉPHONE, et SEULEMENT si l'utilisateur parle explicitement du téléphone, du portable, de la batterie ou de l'économiseur (sinon : jarvis_mode_fonctionnement) : économie d'énergie (économiseur de batterie), équilibré ou performance — directement par le système, sans piloter l'écran ; « etat » indique le mode actuel. Pour TOUT AUTRE mode (téléphone sécurisé, maison sécurisée, cinéma, nuit, vacances…), utilise modes_jarvis ; « mode lever », « mode coucher » ou le nom d'une routine = outil routines (action « lancer »). À ne pas confondre non plus avec le mode de fonctionnement de l'application Jarvis.",
             mapOf("mode" to prop("economie, equilibre, performance ou etat.")), listOf("mode")))
         put(tool("reseau_mobile", "Réseau mobile du téléphone (si l'utilisateur demande de l'AMÉLIORER : action=optimiser, qui agit — n'explique pas seulement) : qualité du signal et de la réception (5G / 4G / 3G, dBm, barres), opérateur, données mobiles, itinérance, APN, réception des SMS / MMS, qualité des appels — diagnostic, réglage et amélioration. action=diagnostic (lecture), optimiser (AGIT : plan selon la situation — mode avion, données, passage en 4G si la 5G décroche, activation des appels Wi-Fi, relance d'antenne — en une confirmation, puis avant / après et ce qui ne dépend d'aucun réglage), appels_wifi (active les appels Wi-Fi en « Wi-Fi de préférence »), reenregistrer (relance la recherche d'antenne par 5 s de mode avion, après accord), apn (APN de la SIM analysés : problèmes et améliorations possibles, valeurs de l'opérateur ; ouvrir=oui ouvre l'écran des APN), apn_configurer (crée et choisit un APN « JARVIS » aux bonnes valeurs — IPv4/IPv6, assistance GPS, MMS — après accord, sans toucher à ceux de l'opérateur, retour automatique s'il n'y a plus internet), apn_optimiser (JARVIS cherche LUI-MÊME le meilleur APN, au-delà des valeurs de l'opérateur : en partant de l'APN qui marche, il essaie d'autres noms d'APN, protocoles IPv4/IPv6 / IPv4 / IPv6 et MTU autour de celle du chemin réel, mesure chacun par le réseau mobile, re-mesure le gagnant face à l'origine et ne le garde que s'il est nettement meilleur ; il mémorise les essais pour la fois suivante ; en arrière-plan, après accord, ≈ 3 à 5 min, ≈ 40 Mo max), apn_restaurer (remet l'APN de l'opérateur), dns (compare le DNS de l'opérateur aux DNS privés Cloudflare / Google / Quad9), dns_appliquer (cible=cloudflare | google | quad9 : DNS privé activé, vérifié, réversible), dns_restaurer, mtu (MTU du lien et du chemin réel), messages (SMS / MMS qui n'arrivent pas), appels (appels qui coupent, son haché, messagerie directe), ouvrir (cible=apn | reseau | operateur | appels | appels_wifi | sms | mode_avion | sim : écran de réglage), type_reseau (cible=4g pour couper la 5G, 5g pour la remettre, avant pour revenir au réglage précédent ; après accord, avec Shizuku / ADB), sim (cartes SIM et à quoi sert chacune), debit (vrai test de débit par le réseau mobile : latence, descente, montée, ≈ 13 Mo), historique (où et quand la réception est mauvaise). Sans Shizuku / ADB, Android interdit aux applis d'écrire les APN : JARVIS donne les valeurs et ouvre l'écran.", mapOf(
             "action" to prop("diagnostic | optimiser | appels_wifi | reenregistrer | apn | apn_configurer | apn_optimiser | apn_restaurer | dns | dns_appliquer | dns_restaurer | mtu | messages | appels | ouvrir | type_reseau | sim | debit | historique"),
@@ -681,11 +683,23 @@ class ToolBox(
             a.optString("forcer").trim().lowercase() in setOf("true", "oui", "1")) { texte -> confirm(texte, false) })
         "modes_jarvis", "systeme_securite" -> systemeSecurite(a)
         "jarvis_reglages" -> ToolResult(reglagesJarvis())
-        "jarvis_mode_fonctionnement" -> ToolResult(when (val m = fr.dd.jarvis.societe.core.normaliser(a.optString("mode")).let { fr.dd.jarvis.ai.Brain.modeEnergieDans(it) ?: it }) {
-            "economie", "equilibre", "performance" -> fr.dd.jarvis.device.Energie.changerMode(app, m)
-            else -> "Mode de fonctionnement de Jarvis : " + fr.dd.jarvis.device.Energie.libelle(app)
-        }, direct = true)
-        "telephone_mode_energie" -> ToolResult(fr.dd.jarvis.device.ModeTelephone.appliquer(app, a.optString("mode").ifBlank { "etat" }))
+        "jarvis_mode_fonctionnement", "telephone_mode_energie" -> {
+            val brut = a.optString("mode").trim()
+            val n = fr.dd.jarvis.societe.core.normaliser(brut)
+            val m = fr.dd.jarvis.ai.Brain.modeEnergieDans(n)
+            // « mode lever », « mode coucher » : une ROUTINE (ou un mode de Jarvis), jamais un mode d'énergie. Avant, l'état
+            // actuel (« équilibré ») était renvoyé et semblait répondre à la demande.
+            if (m == null && n.isNotBlank() && n !in setOf("etat", "actuel", "quel", "lequel")) {
+                fr.dd.jarvis.device.Routines.parNom(app, brut)?.let { r -> return ToolResult(fr.dd.jarvis.device.Routines.executer(app, r, tools = this), direct = true) }
+                return ToolResult("« $brut » n'est pas un mode d'énergie (seulement économie, équilibré ou performance). " +
+                    "Si c'est une routine, utilise l'outil routines (action « lancer », nom « $brut ») ; si c'est un mode de Jarvis, modes_jarvis.")
+            }
+            if (name == "telephone_mode_energie") ToolResult(fr.dd.jarvis.device.ModeTelephone.appliquer(app, brut.ifBlank { "etat" }))
+            else ToolResult(when (m) {
+                "economie", "equilibre", "performance" -> fr.dd.jarvis.device.Energie.changerMode(app, m)
+                else -> "Mode de fonctionnement de Jarvis : " + fr.dd.jarvis.device.Energie.libelle(app)
+            }, direct = true)
+        }
         "delete_event" -> deleteEvent(a)
         "set_event_color" -> setEventColor(a)
         "set_calendar_color" -> setCalendarColor(a)
@@ -880,6 +894,11 @@ class ToolBox(
         "creer_fichier" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { fr.dd.jarvis.ai.Fichiers.creer(app, a) }.getOrElse { "❌ Création impossible : ${it.message}" } }, direct = true)
         "fichiers_generes" -> ToolResult(fr.dd.jarvis.ai.Fichiers.lister(app, a.optString("quoi"), a.optString("max").toIntOrNull() ?: 20))
         "documents_lister" -> ToolResult(fr.dd.jarvis.ai.DocumentStore.list(app))
+        "document_supprimer" -> {
+            val nom = a.optString("nom").trim()
+            ToolResult(fr.dd.jarvis.ai.DocumentStore.supprimer(app, nom)?.let { "🗑️ « ${it.name} » supprimé de JARVIS (l'original sur ton téléphone n'est pas touché)." }
+                ?: "Fichier introuvable dans JARVIS : « $nom ». " + fr.dd.jarvis.ai.DocumentStore.list(app), direct = true)
+        }
         "document_lire" -> ToolResult(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.dd.jarvis.ai.DocumentStore.extract(app, a.optString("nom")) }, direct = true)
         "document_analyser" -> try {
             val f = fr.dd.jarvis.ai.DocumentStore.find(app, a.optString("nom"))

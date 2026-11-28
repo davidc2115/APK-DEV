@@ -30,6 +30,7 @@ fun DocumentLibraryScreen(app: JarvisApp, onAsk: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var refresh by remember { mutableIntStateOf(0) }
     var status by remember { mutableStateOf("") }
+    var aSupprimer by remember { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) scope.launch {
             status = "Import en cours…"
@@ -65,6 +66,15 @@ fun DocumentLibraryScreen(app: JarvisApp, onAsk: (String) -> Unit) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         ActionDoc("Analyser") { onAsk("Analyse le fichier importé « ${file.name} ». Utilise document_analyser pour les PDF, images et vidéos ; document_lire pour les documents texte, bureautiques, KML et ZIP. Puis résume les informations utiles.") }
                         ActionDoc("Utiliser") { onAsk("Utilise le document importé « ${file.name} » comme source pour ma demande suivante. Commence par en extraire le contenu.") }
+                        ActionDoc(if (aSupprimer == file.name) "Annuler" else "Supprimer") { aSupprimer = if (aSupprimer == file.name) null else file.name }
+                    }
+                    if (aSupprimer == file.name) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Supprimer la copie gardée par JARVIS ? (l'original sur ton téléphone n'est pas touché)", color = HudDim, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                        ActionDoc("✓ Supprimer") {
+                            status = if (DocumentStore.supprimer(context, file.name) != null) "🗑️ ${file.name} supprimé." else "❌ Suppression impossible : ${file.name}"
+                            aSupprimer = null
+                            refresh++
+                        }
                     }
                 }
             }

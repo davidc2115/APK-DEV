@@ -709,6 +709,9 @@ object Montage {
                 }
                 s.startsWith("jarvis-video-ia:") -> VideoGen.fichier(app, s)?.let { out += it }
                 s.startsWith("jarvis-img:") -> ImageGen.fichier(app, s.removePrefix("jarvis-img:"))?.let { out += it }
+                // Fichier joint à la conversation (bouton +) ou importé dans la bibliothèque.
+                DocumentStore.find(app, s)?.takeIf { it.extension.lowercase() in VIDEO + IMAGE } != null ->
+                    out += DocumentStore.find(app, s)!!
                 else -> {
                     val telephone = runCatching { File(Stockage.racine(), s.trim('/')).takeIf { it.isFile && it.canRead() } }.getOrNull()
                     if (telephone != null) out += telephone

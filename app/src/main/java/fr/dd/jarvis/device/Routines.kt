@@ -106,9 +106,43 @@ object Routines {
     internal fun cle(s: String): String = norm(s).replace(Regex("^(ok |hey |dis |bon )?jarvis "), "").replace(Regex(" (s il te plait|s il vous plait|stp|merci|jarvis)$"), "")
         .replace(ORDRE, "").removePrefix("mode ").removePrefix("routine ").trim()
 
+    private val PETITS_MOTS = setOf("du", "de", "d", "la", "le", "l", "les", "des", "ma", "mon", "mes", "ta", "ton", "un", "une")
+
+    /** Racine d'un mot, tolérante à la dictée : « levé », « lever », « levée » → « lev » ; « couché », « coucher » → « couch ». */
+    internal fun racine(mot: String): String = if (mot.length >= 4) mot.replace(Regex("(ers|er|ees|ee|es|ez|e|s)$"), "").ifBlank { mot } else mot
+
+    /** Nom réduit à ses racines, sans petits mots (« routine du lever » → « lev »). */
+    internal fun racines(s: String): String = cle(s).split(' ').filter { it.isNotBlank() && it !in PETITS_MOTS }.joinToString(" ") { racine(it) }
+
+    private fun distance(a: String, b: String): Int {
+        val d = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prec = d[0]; d[0] = i
+            for (j in 1..b.length) { val t = d[j]; d[j] = minOf(d[j] + 1, d[j - 1] + 1, prec + if (a[i - 1] == b[j - 1]) 0 else 1); prec = t }
+        }
+        return d[b.length]
+    }
+
+    /** Deux noms désignent-ils la même routine ? Mêmes racines, ou une seule lettre d'écart sur un nom assez long. */
+    internal fun memeNom(a: String, b: String): Boolean {
+        val x = racines(a); val y = racines(b)
+        if (x.length < 3 || y.length < 3) return false
+        // Une lettre d'écart tolérée seulement pour un nom d'un seul mot assez long (« je parle » ≠ « je pars »).
+        return x == y || (' ' !in x && ' ' !in y && minOf(x.length, y.length) >= 5 && distance(x, y) <= 1)
+    }
+
+    /**
+     * « … mode lever », « tu peux lancer le mode lever », « active-moi la routine du coucher maintenant » : ce qui suit
+     * « mode / routine / scénario » dans une phrase courte, ou null.
+     */
+    private val APRES_MODE = Regex("\\b(?:mode|routine|scenario)\\s+(.+?)(?:\\s+(?:maintenant|tout de suite|direct|stp|svp|merci|please|steuplait))*$")
+
+    internal fun nomCite(texte: String): String? = APRES_MODE.find(essentiel(texte))?.groupValues?.get(1)?.trim()?.takeIf { it.length >= 3 }
+
     /**
      * La phrase dite déclenche-t-elle cette routine ? Phrase exacte, ou nom / phrase de la routine précédés d'un ordre
-     * (« mode coucher », « active le mode coucher », « lance la routine coucher », « passe en mode coucher »).
+     * (« mode coucher », « active le mode coucher », « lance la routine coucher », « passe en mode coucher »), y compris
+     * dans une tournure plus longue (« tu peux lancer le mode lever ») et avec les variantes de dictée (« mode levé »).
      */
     internal fun correspond(r: Routine, texte: String): Boolean {
         if (!r.active) return false
@@ -117,7 +151,11 @@ object Routines {
         if (r.declencheur == "phrase" && r.phrases.any { norm(it) == e }) return true
         val c = cle(texte)
         if (c.length < 3) return false
-        return cle(r.nom) == c || (r.declencheur == "phrase" && r.phrases.any { cle(it) == c })
+        if (cle(r.nom) == c || (r.declencheur == "phrase" && r.phrases.any { cle(it) == c })) return true
+        // Tolérance : racines (« levé » / « lever »), ou nom cité après « mode / routine » dans la phrase.
+        val noms = listOf(r.nom) + (if (r.declencheur == "phrase") r.phrases else emptyList())
+        val cite = nomCite(texte)
+        return noms.any { n -> memeNom(n, c) || (cite != null && memeNom(n, cite)) }
     }
 
     fun parPhrase(app: JarvisApp, texte: String): Routine? = if (texte.length > 80) null else liste(app).firstOrNull { correspond(it, texte) }
@@ -133,6 +171,7 @@ object Routines {
         if (c.length < 3) return null
         fun egal(x: String) = cle(x).removePrefix("mode ").trim() == c
         return l.firstOrNull { egal(it.nom) } ?: l.firstOrNull { r -> r.phrases.any { egal(it) } }
+            ?: l.firstOrNull { memeNom(it.nom, c) } ?: l.firstOrNull { r -> r.phrases.any { memeNom(it, c) } }
     }
 
     /** Description d'une routine demandée (« liste les actions du mode lever »), ou null. */
@@ -145,8 +184,11 @@ object Routines {
     fun description(app: JarvisApp, texte: String): String? = if (texte.length > 120) null else description(liste(app), texte)
 
     /** Routine désignée par son nom (« coucher », « mode coucher ») : repli de l'activation d'un mode. */
-    fun parNom(app: JarvisApp, nom: String): Routine? = cle(nom).takeIf { it.length >= 3 }?.let { c ->
-        liste(app).firstOrNull { it.active && (cle(it.nom) == c || it.phrases.any { p -> cle(p) == c }) }
+    fun parNom(app: JarvisApp, nom: String): Routine? = parNom(liste(app), nom)
+
+    internal fun parNom(l: List<Routine>, nom: String): Routine? = cle(nom).takeIf { it.length >= 3 }?.let { c ->
+        l.firstOrNull { it.active && (cle(it.nom) == c || it.phrases.any { p -> cle(p) == c }) }
+            ?: l.firstOrNull { it.active && (memeNom(it.nom, c) || it.phrases.any { p -> memeNom(p, c) }) }
     }
 
     internal fun joursOk(jours: String, jour: DayOfWeek): Boolean = when (jours) {
