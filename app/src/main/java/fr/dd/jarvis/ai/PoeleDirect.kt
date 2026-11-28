@@ -518,14 +518,17 @@ object PoeleDirect {
                 fr.dd.jarvis.voice.JournalVoix.noter("maison", "poêle : ${c.domaine}.${c.service} → ${c.id}")
                 val nom = toutes.firstOrNull { it.optString("entity_id") == c.id }?.optJSONObject("attributes")?.optString("friendly_name").orEmpty().ifBlank { c.id }
                 val r = runCatching { Serveur.haService(app, c.domaine, c.service, c.id, c.donnees?.let { JSONObject(it.toString()) }) }.getOrElse { "❌ ${it.message}" }
-                // Pas confirmé en 2,5 s : relu encore jusqu'à 12 s (poêle lent) avant de parler d'échec.
-                val tard = !r.startsWith("✅") && !r.startsWith("❌") && !r.contains("INDISPONIBLE") && confirmerLongtemps(app, c.id) { o ->
+                // Pas confirmé tout de suite : si Home Assistant suit déjà l'appareil en arrière-plan (« ⏳ », poêle lent), on
+                // n'attend pas plus ici ; sinon relu encore jusqu'à 12 s avant de parler d'échec.
+                val suiviEnFond = r.startsWith("⏳")
+                val tard = !suiviEnFond && !r.startsWith("✅") && !r.startsWith("❌") && !r.contains("INDISPONIBLE") && confirmerLongtemps(app, c.id) { o ->
                     Serveur.confirmeService(c.domaine, c.service, c.donnees ?: JSONObject(), o)
                 } != null
                 when {
                     r.startsWith("✅") || tard -> "🔥 $nom : mode $nomMode ${if (d.activer) "activé" else "retiré"}."
                     r.contains("INDISPONIBLE") -> "⚠️ $nom est indisponible dans Home Assistant : mode $nomMode non appliqué."
-                    else -> "⚠️ $nom : mode $nomMode demandé, mais Home Assistant ne le confirme pas (l'appareil n'a peut-être pas suivi)."
+                    suiviEnFond -> "⏳ $nom : mode $nomMode demandé ; le poêle réagit lentement. Je te préviens par notification dès que Home Assistant le confirme (ou s'il ne suit pas)."
+                    else -> "⚠️ $nom : mode $nomMode demandé, mais Home Assistant ne le confirme toujours pas après relecture (l'appareil n'a peut-être pas suivi)."
                 }
             }
         }

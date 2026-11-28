@@ -1,6 +1,7 @@
 package fr.dd.jarvis.ai
 
 import org.json.JSONObject
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -72,4 +73,36 @@ class HaServiceConfirmationTest {
         assertTrue(retour.contains("INCONNU"))
     }
 
+
+    /** Appareils lents : délai plus long, suivi en arrière-plan et message « en cours de vérification » (pas « pas suivi »). */
+    @Test fun appareilLentSuiviSansConclureTropTot() {
+        assertTrue(Serveur.budgetMs("climate") > Serveur.budgetMs("light"))
+        assertTrue(Serveur.suiviLong("climate") && Serveur.suiviLong("media_player") && Serveur.suiviLong("cover"))
+        assertFalse(Serveur.suiviLong("light"))
+        val d = JSONObject().put("hvac_mode", "off")
+        val poele = etat("heat", JSONObject().put("friendly_name", "poele etage").put("temperature", 20.0).put("current_temperature", 18.5))
+        val r = Serveur.compteRenduService("climate", "set_hvac_mode", "climate.poele_etage", d, poele, suivi = true, dureeMs = 8_000)
+        assertTrue(r, r.startsWith("⏳") && r.contains("notification") && !r.contains("Ne dis PAS"))
+        val sansSuivi = Serveur.compteRenduService("climate", "set_hvac_mode", "climate.poele_etage", d, poele, dureeMs = 8_000)
+        assertTrue(sansSuivi, sansSuivi.contains("après 8 s") && sansSuivi.contains("relecture"))
+        assertEquals("1 min 30", SuiviHa.duree(90_000)); assertEquals("4 min", SuiviHa.duree(240_000)); assertEquals("45 s", SuiviHa.duree(45_000))
+    }
+
+    /** Lecture, pause, volume +/−, piste suivante, scène, script : confirmés par le changement d'état. */
+    @Test fun confirmationParChangement() {
+        val lecture = etat("paused", JSONObject().put("volume_level", 0.30).put("media_content_id", "a"))
+        assertTrue(Serveur.verificationServiceConnue("media_play_pause", JSONObject(), "media_player", lecture))
+        assertTrue(Serveur.confirmeService("media_player", "media_play_pause", JSONObject(), etat("playing"), lecture))
+        assertFalse(Serveur.confirmeService("media_player", "media_play_pause", JSONObject(), etat("paused"), lecture))
+        assertTrue(Serveur.confirmeService("media_player", "volume_up", JSONObject(), etat("on", JSONObject().put("volume_level", 0.35)), lecture))
+        assertFalse(Serveur.confirmeService("media_player", "volume_up", JSONObject(), etat("on", JSONObject().put("volume_level", 0.30)), lecture))
+        assertTrue(Serveur.confirmeService("media_player", "media_next_track", JSONObject(), etat("playing", JSONObject().put("media_content_id", "b")), lecture))
+        assertTrue(Serveur.confirmeService("media_player", "play_media", JSONObject(), etat("playing")))
+        assertTrue(Serveur.confirmeService("media_player", "media_pause", JSONObject(), etat("paused")))
+        val scene = etat("2026-11-28T10:00:00+00:00")
+        assertTrue(Serveur.confirmeService("scene", "turn_on", JSONObject(), etat("2026-11-28T13:05:00+00:00"), scene))
+        assertFalse(Serveur.confirmeService("scene", "turn_on", JSONObject(), scene, scene))
+        assertTrue(Serveur.confirmeService("script", "turn_on", JSONObject(), etat("on")))
+        assertTrue(Serveur.confirmeService("cover", "set_cover_position", JSONObject().put("position", 50), etat("open", JSONObject().put("current_position", 51))))
+    }
 }

@@ -1231,14 +1231,22 @@ object Serveur {
     }
 
     /**
-     * Exécute un service puis CONFIRME le résultat : Home Assistant renvoie les états changés pendant l'appel ; pour un
-     * appareil plus lent (Zigbee, télé, poêle…), l'état est relu pendant un budget global de ~2,5 s.
-     * Les actions sans état de confirmation standard ne déclenchent pas cette attente : elles sont signalées
-     * comme acceptées, mais non vérifiées. Le compte rendu distingue aussi les états inconnus et les transitions.
+     * Exécute un service puis CONFIRME le résultat : Home Assistant renvoie les états changés pendant l'appel ; sinon
+     * l'état est relu (toutes les 0,4 s), puis Home Assistant est prié de RELIRE l'appareil (update_entity, utile pour
+     * les intégrations qui n'interrogent l'appareil que toutes les 30 à 60 s), le tout pendant un délai adapté au type
+     * d'appareil (3 s pour une lampe, 8 s pour un poêle, une télé ou un volet). Un appareil lent pas encore confirmé
+     * est encore vérifié en arrière-plan pendant quelques minutes, avec une notification du résultat ([SuiviHa]).
+     * Les services sans état standard (lecture/pause, volume +/−, piste suivante, bouton, scène, script) sont confirmés
+     * par un CHANGEMENT par rapport à l'état d'avant la commande.
      */
-    /** Services dont le résultat peut être confirmé à partir de l’état standard de l’entité HA. */
-    internal fun verificationServiceConnue(service: String, donnees: JSONObject): Boolean = when (service) {
-        "turn_on", "turn_off", "open_cover", "close_cover", "open", "close", "lock", "unlock" -> true
+    /** Services confirmés par un changement par rapport à l'état d'avant (et non par un état cible). */
+    internal fun parChangement(domaine: String, service: String): Boolean =
+        service in setOf("media_play_pause", "volume_up", "volume_down", "media_next_track", "media_previous_track", "toggle", "press", "trigger") ||
+            (domaine in setOf("scene", "script", "button", "input_button") && service in setOf("turn_on", "press", "apply"))
+
+    /** Services dont le résultat peut être confirmé à partir de l'état de l'entité HA ([avant] : état d'avant la commande). */
+    internal fun verificationServiceConnue(service: String, donnees: JSONObject, domaine: String = "", avant: JSONObject? = null): Boolean = when (service) {
+        "turn_on", "turn_off", "open_cover", "close_cover", "open", "close", "lock", "unlock", "open_valve", "close_valve" -> true
         "set_temperature" -> donnees.has("temperature")
         "set_hvac_mode" -> donnees.has("hvac_mode")
         "set_preset_mode" -> donnees.has("preset_mode")
@@ -1248,57 +1256,92 @@ object Serveur {
         "select_source" -> donnees.has("source")
         "select_option" -> donnees.has("option")
         "set_value" -> donnees.has("value")
-        else -> false
+        "set_cover_position" -> donnees.has("position")
+        "set_percentage" -> donnees.has("percentage")
+        "play_media", "media_play", "media_pause", "media_stop" -> true
+        else -> avant != null && parChangement(domaine, service)
     }
     internal fun compteRenduSansEntite(domaine: String, service: String): String =
         "✅ Appel $domaine.$service accepté par Home Assistant (aucun état cible à relire : l'affichage ou la lecture sur l'appareil n'est pas confirmé)."
+
+    /** Délai de vérification immédiate selon le type d'appareil : une lampe répond vite, un poêle ou une télé non. */
+    internal fun budgetMs(domaine: String): Long = when (domaine) {
+        "light", "switch", "input_boolean", "input_number", "input_select", "input_text", "input_button", "button", "scene", "script",
+        "automation", "number", "select", "siren" -> 3_000L
+        else -> 8_000L
+    }
+
+    /** Appareils lents (poêle, chauffe-eau, volet, télé, serrure…) : vérifiés encore quelques minutes en arrière-plan. */
+    internal fun suiviLong(domaine: String) = domaine in setOf("climate", "water_heater", "cover", "valve", "media_player", "lock", "vacuum",
+        "humidifier", "fan", "alarm_control_panel", "lawn_mower")
+
+    private fun lireEtat(app: JarvisApp, id: String): JSONObject? = runCatching { JSONObject(ha(app, "GET", "/api/states/$id")) }.getOrNull()
 
     fun haService(app: JarvisApp, domaine: String, service: String, entite: String, donnees: JSONObject?): String {
         val corps = donnees ?: JSONObject()
         val ids = entite.split(",").map { it.trim() }.filter { it.isNotBlank() }
         if (ids.isNotEmpty()) corps.put("entity_id", if (ids.size > 1) JSONArray(ids) else ids.first())
         val demandes = JSONObject(corps.toString())
+        // État d'avant : nécessaire pour confirmer lecture/pause, volume +/−, piste suivante, scène, script, bouton.
+        val avants: Map<String, JSONObject?> = if (ids.size <= 4 && (parChangement(domaine, service) || domaine == "media_player")) ids.associateWith { lireEtat(app, it) } else emptyMap()
         val reponse = ha(app, "POST", "/api/services/$domaine/$service", corps)
         if (ids.isEmpty()) return compteRenduSansEntite(domaine, service)
+        val debut = System.currentTimeMillis()
         val changes = HashMap<String, JSONObject>()
         runCatching { JSONArray(reponse) }.getOrNull()?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { changes[it.optString("entity_id")] = it } }
-        // Un seul budget de 2,5 s pour toute la commande, mais des lectures en tours :
-        // chaque entité a ainsi une chance d'être vérifiée, au lieu de laisser la première
-        // consommer tout le délai avant même de regarder les suivantes.
+        // Lectures en tours (chaque entité a sa chance) : d'abord rapides, puis après une relecture forcée de l'appareil.
         val observations = ids.associateWith { changes[it] }.toMutableMap()
         val aVerifier = ids.filterTo(linkedSetOf()) { id ->
-            verificationServiceConnue(service, demandes) &&
-                (observations[id] == null || !confirmeService(domaine, service, demandes, observations[id]!!))
+            verificationServiceConnue(service, demandes, domaine, avants[id]) &&
+                (observations[id] == null || !confirmeService(domaine, service, demandes, observations[id]!!, avants[id]))
         }
-        val limite = System.currentTimeMillis() + 2_500
+        val limite = debut + budgetMs(domaine)
+        var relu = false
         while (aVerifier.isNotEmpty() && System.currentTimeMillis() < limite) {
-            Thread.sleep(400)
+            Thread.sleep(if (relu) 1_000 else 400)
+            if (!relu && System.currentTimeMillis() - debut >= 2_500) {
+                relu = true
+                // Pas encore confirmé : Home Assistant interroge l'appareil tout de suite (intégrations lentes, cloud…).
+                runCatching { ha(app, "POST", "/api/services/homeassistant/update_entity", JSONObject().put("entity_id", JSONArray(aVerifier.toList()))) }
+            }
             for (id in aVerifier.toList()) {
                 if (System.currentTimeMillis() >= limite) break
-                val nouvelEtat = runCatching { JSONObject(ha(app, "GET", "/api/states/$id")) }.getOrNull()
+                val nouvelEtat = lireEtat(app, id)
                 if (nouvelEtat != null) {
                     observations[id] = nouvelEtat
-                    if (confirmeService(domaine, service, demandes, nouvelEtat)) aVerifier.remove(id)
+                    if (confirmeService(domaine, service, demandes, nouvelEtat, avants[id])) aVerifier.remove(id)
                 }
             }
         }
+        val duree = System.currentTimeMillis() - debut
         return ids.joinToString("\n") { id ->
             var o = observations[id]
-            if (o == null) o = runCatching { JSONObject(ha(app, "GET", "/api/states/$id")) }.getOrNull()
-            compteRenduService(domaine, service, id, demandes, o)
+            if (o == null) o = lireEtat(app, id)
+            val etat = o?.optString("state").orEmpty()
+            val suivi = o != null && id in aVerifier && suiviLong(domaine) && etat !in setOf("unavailable", "unknown") &&
+                verificationServiceConnue(service, demandes, domaine, avants[id])
+            if (suivi) SuiviHa.planifier(app, domaine, service, id, demandes, avants[id], o?.optJSONObject("attributes")?.optString("friendly_name").orEmpty().ifBlank { id })
+            compteRenduService(domaine, service, id, demandes, o, avants[id], suivi = suivi, dureeMs = duree)
         }
     }
 
     /** L'état relu correspond-il au résultat attendu ? Retourne false dès qu'aucune confirmation fiable n'est possible. */
-    internal fun confirmeService(domaine: String, service: String, donnees: JSONObject, o: JSONObject): Boolean {
+    internal fun confirmeService(domaine: String, service: String, donnees: JSONObject, o: JSONObject, avant: JSONObject? = null): Boolean {
         val etat = o.optString("state")
         if (etat in setOf("unavailable", "unknown")) return false
         val a = o.optJSONObject("attributes") ?: JSONObject()
+        val av = avant?.optJSONObject("attributes") ?: JSONObject()
+        val etatAvant = avant?.optString("state")
+        fun change(cle: String) = avant != null && a.opt(cle)?.toString() != av.opt(cle)?.toString() && a.has(cle)
         return when {
+            // Scène, bouton : leur état est l'heure de la dernière activation ; script : « on » pendant qu'il tourne.
+            domaine in setOf("scene", "button", "input_button") && service in setOf("turn_on", "press", "apply") -> avant != null && etat != etatAvant
+            domaine == "script" && service in setOf("turn_on", "toggle") -> etat == "on" || change("last_triggered")
+            service == "trigger" -> change("last_triggered")
             service == "turn_on" -> etat !in setOf("off", "standby")
             service == "turn_off" -> etat in setOf("off", "standby")
-            service in setOf("open_cover", "open") -> etat == "open"
-            service in setOf("close_cover", "close") -> etat == "closed"
+            service in setOf("open_cover", "open", "open_valve") -> etat == "open"
+            service in setOf("close_cover", "close", "close_valve") -> etat == "closed"
             service == "lock" -> etat == "locked"
             service == "unlock" -> etat in setOf("unlocked", "open")
             service == "set_temperature" && donnees.has("temperature") ->
@@ -1316,19 +1359,37 @@ object Serveur {
                 a.optString("source").equals(donnees.optString("source"), true)
             service == "select_option" && donnees.has("option") -> etat.equals(donnees.optString("option"), true)
             service == "set_value" && donnees.has("value") -> etat == donnees.opt("value").toString() || etat.toDoubleOrNull() == donnees.optDouble("value", Double.NaN)
+            service == "set_cover_position" && donnees.has("position") && a.has("current_position") ->
+                kotlin.math.abs(a.optInt("current_position") - donnees.optInt("position")) <= 2
+            service == "set_percentage" && donnees.has("percentage") && a.has("percentage") ->
+                kotlin.math.abs(a.optInt("percentage") - donnees.optInt("percentage")) <= 2
+            // Lecteurs : lecture lancée / en pause / arrêtée, ou nouveau média.
+            service in setOf("play_media", "media_play") -> etat in setOf("playing", "buffering") ||
+                (service == "play_media" && etat !in setOf("off", "standby", "idle") && (change("media_content_id") || change("media_title")))
+            service == "media_pause" -> etat == "paused"
+            service == "media_stop" -> etat !in setOf("playing", "buffering")
+            service == "media_play_pause" -> avant != null && etat != etatAvant && etat in setOf("playing", "paused", "buffering")
+            service in setOf("volume_up", "volume_down") && avant != null && a.has("volume_level") -> {
+                val diff = a.optDouble("volume_level") - av.optDouble("volume_level", a.optDouble("volume_level"))
+                if (service == "volume_up") diff > 0.001 || a.optDouble("volume_level") >= 0.999 else diff < -0.001 || a.optDouble("volume_level") <= 0.001
+            }
+            service in setOf("media_next_track", "media_previous_track") -> change("media_content_id") || change("media_title")
+            service == "toggle" -> avant != null && etat != etatAvant
             else -> false
         }
     }
 
     internal fun serviceEnTransition(service: String, etat: String): Boolean = when (service) {
-        "open_cover", "open" -> etat == "opening"
-        "close_cover", "close" -> etat == "closing"
+        "open_cover", "open", "open_valve" -> etat == "opening"
+        "close_cover", "close", "close_valve" -> etat == "closing"
+        "set_cover_position" -> etat in setOf("opening", "closing")
         "lock" -> etat == "locking"
         "unlock" -> etat == "unlocking"
         else -> false
     }
 
-    internal fun compteRenduService(domaine: String, service: String, id: String, donnees: JSONObject, o: JSONObject?): String {
+    internal fun compteRenduService(domaine: String, service: String, id: String, donnees: JSONObject, o: JSONObject?, avant: JSONObject? = null,
+                                    suivi: Boolean = false, dureeMs: Long = 2_500): String {
         if (o == null) return "⚠️ $domaine.$service envoyé pour `$id`, mais son état n'a pas pu être relu."
         val etat = o.optString("state")
         val a = o.optJSONObject("attributes") ?: JSONObject()
@@ -1339,15 +1400,20 @@ object Serveur {
             if (a.has("brightness") && etat == "on") add("luminosité ${(a.optInt("brightness") * 100 / 255)} %")
             if (a.has("volume_level") && domaine == "media_player") add("volume ${(a.optDouble("volume_level") * 100).toInt()} %")
             if (a.has("source") && domaine == "media_player") add("source ${a.optString("source")}")
+            if (a.has("media_title") && domaine == "media_player") add("« ${a.optString("media_title").take(60)} »")
             if (a.has("current_position") && domaine == "cover") add("position ${a.optInt("current_position")} %")
         }.joinToString(", ").let { if (it.isBlank()) "" else " ($it)" }
+        val secondes = ((dureeMs + 500) / 1000).coerceAtLeast(1)
         return when {
             etat == "unavailable" -> "⚠️ $nom (`$id`) est INDISPONIBLE dans Home Assistant : la commande $domaine.$service a été acceptée mais l'appareil ne répond pas (hors ligne, intégration déconnectée…)."
             etat == "unknown" -> "⚠️ $nom (`$id`) est en état INCONNU dans Home Assistant : $domaine.$service a été accepté, mais aucune confirmation fiable n'est possible."
-            serviceEnTransition(service, etat) -> "⏳ $nom (`$id`) : $domaine.$service est bien lancé, mais l'appareil est encore en transition (« $etat »)$detail. L'action n'est pas encore terminée."
-            !verificationServiceConnue(service, donnees) -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant ; état actuel « $etat »$detail. Le résultat fonctionnel n'est pas vérifiable automatiquement : ne le présente pas comme confirmé."
-            confirmeService(domaine, service, donnees, o) -> "✅ $nom (`$id`) : $domaine.$service confirmé — état « $etat »$detail."
-            else -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant, mais l'état reste « $etat »$detail après 2,5 s. Ne dis PAS que c'est fait : l'appareil n'a peut-être pas suivi (ou il réagit lentement)."
+            confirmeService(domaine, service, donnees, o, avant) -> "✅ $nom (`$id`) : $domaine.$service confirmé — état « $etat »$detail."
+            serviceEnTransition(service, etat) -> "⏳ $nom (`$id`) : $domaine.$service est bien lancé, mais l'appareil est encore en transition (« $etat »)$detail. L'action n'est pas encore terminée." +
+                (if (suivi) " Je continue de vérifier et je te préviens par notification." else "")
+            !verificationServiceConnue(service, donnees, domaine, avant) -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant ; état actuel « $etat »$detail. Le résultat fonctionnel n'est pas vérifiable automatiquement : ne le présente pas comme confirmé."
+            suivi -> "⏳ $nom (`$id`) : $domaine.$service accepté par Home Assistant ; l'appareil n'a pas encore changé au bout de $secondes s (état « $etat »$detail) — il réagit lentement. " +
+                "Je continue de vérifier pendant quelques minutes et je te préviens par notification. Dis que la commande est envoyée et en cours de vérification, pas qu'elle est faite."
+            else -> "⚠️ $nom (`$id`) : $domaine.$service accepté par Home Assistant, mais l'état reste « $etat »$detail après $secondes s, même après relecture de l'appareil. Ne dis PAS que c'est fait : l'appareil n'a peut-être pas suivi."
         }
     }
 

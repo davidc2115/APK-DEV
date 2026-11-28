@@ -339,10 +339,30 @@ class HomeAssistantAdmin(
             }
             "automatisation_lire", "script_lire", "scene_lire" -> rest("GET", chemin(action, a)).toString().let { if (it.length > 6000) it.take(6000) + "…" else it }
             "automatisation_ecrire", "script_ecrire", "scene_ecrire" -> {
-                val conf = json(a, "configuration") ?: throw IllegalArgumentException("configuration (JSON complet) requise : lis d'abord l'existante si tu modifies.")
-                if (!ok("${if (a.optString("id").isBlank()) "créer" else "modifier"} « ${conf.optString("alias").ifBlank { a.optString("id") }} » ?")) return "Annulé."
-                rest("POST", chemin(action, a, creer = true), conf); "✅ Enregistré et rechargé : « ${conf.optString("alias").ifBlank { a.optString("id") }} »."
+                val brute = json(a, "configuration") ?: throw IllegalArgumentException("configuration (JSON complet) requise : lis d'abord l'existante si tu modifies.")
+                // Format attendu par CETTE version de Home Assistant (script : « sequence » ; « service: » / « action: » ;
+                // déclencheurs « platform: » / « trigger: »), sinon refus « extra keys not allowed ».
+                val version = versionHa()
+                val conf = when (action) {
+                    "script_ecrire" -> HaScripts.normaliserScript(brute, version)
+                    "automatisation_ecrire" -> HaScripts.normaliserAutomatisation(brute, version)
+                    else -> brute
+                }
+                val nom = conf.optString("alias").ifBlank { conf.optString("name").ifBlank { a.optString("id") } }
+                if (!ok("${if (a.optString("id").isBlank() && a.optString("entity_id").isBlank()) "créer" else "modifier"} « $nom » ?")) return "Annulé."
+                val ch = chemin(action, a, creer = true)
+                try { rest("POST", ch, conf) } catch (e: IllegalStateException) {
+                    throw IllegalStateException("Home Assistant refuse « $nom » : ${e.message?.substringAfter(" : ")?.take(400)}. " +
+                        "Corrige la configuration (champs attendus pour un ${action.substringBefore('_')} : " +
+                        (if (action == "script_ecrire") "alias, sequence (liste d'étapes {action, target, data}), mode" else if (action == "automatisation_ecrire") "alias, triggers, conditions, actions, mode" else "name, entities") + ") et réessaie.")
+                }
+                val id = ch.substringAfterLast('/')
+                verifierEnregistrement(action, id, nom)
             }
+            // ---- appareil : ce qu'il sait VRAIMENT faire, et comment l'allumer sur CETTE installation
+            "capacites", "appareil_analyser", "allumage" -> capacites(a.optString("entity_id").ifBlank { a.optString("recherche").ifBlank { a.optString("appareil") } })
+            // ---- essai réel d'un script : lancé, puis état des appareils qu'il pilote avant / après
+            "script_tester", "tester_script", "automatisation_tester" -> testerScript(a, action == "automatisation_tester")
             "automatisation_supprimer", "script_supprimer", "scene_supprimer" -> {
                 if (!ok("SUPPRIMER « ${a.optString("id").ifBlank { a.optString("entity_id") }} » ?")) return "Annulé."
                 rest("DELETE", chemin(action, a)); "🗑️ Supprimé."
@@ -452,6 +472,118 @@ class HomeAssistantAdmin(
         }
     }
 
+    @Volatile private var version: String? = null
+
+    /** Version de Home Assistant (« 2025.11.3 »), vide si illisible. */
+    private fun versionHa(): String = version ?: runCatching { (rest("GET", "/api/config") as? JSONObject)?.optString("version").orEmpty() }.getOrDefault("").also { version = it }
+
+    /** Après l'écriture : l'entité existe-t-elle vraiment (rechargement fait par Home Assistant) ? */
+    private suspend fun verifierEnregistrement(action: String, id: String, nom: String): String {
+        val etats = { liste(rest("GET", "/api/states")) }
+        repeat(4) { essai ->
+            if (essai > 0) kotlinx.coroutines.delay(1_500)
+            val l = runCatching { etats() }.getOrDefault(emptyList())
+            val trouvee = when (action) {
+                "script_ecrire" -> l.firstOrNull { it.optString("entity_id") == "script.$id" }
+                "automatisation_ecrire" -> l.firstOrNull { it.optString("entity_id").startsWith("automation.") && it.optJSONObject("attributes")?.optString("id") == id }
+                else -> l.firstOrNull { it.optString("entity_id").startsWith("scene.") && it.optJSONObject("attributes")?.optString("id") == id }
+            }
+            if (trouvee != null) {
+                val eid = trouvee.optString("entity_id")
+                return "✅ « $nom » enregistré et chargé par Home Assistant : `$eid` (état ${trouvee.optString("state")})." +
+                    when (action) {
+                        "script_ecrire" -> "\n➡️ Teste-le maintenant pour vérifier qu'il FONCTIONNE : ha_admin action=script_tester entity_id=$eid."
+                        "automatisation_ecrire" -> if (trouvee.optString("state") == "off") "\n⚠️ Elle est désactivée (état off)." else "\n➡️ Pour l'essayer tout de suite : ha_admin action=automatisation_tester entity_id=$eid."
+                        else -> ""
+                    }
+            }
+        }
+        return "⚠️ « $nom » a été enregistré, mais Home Assistant ne l'a pas encore chargé (aucune entité trouvée). Regarde le journal (action=journal) : la configuration contient peut-être une erreur."
+    }
+
+    /** Ce que sait faire une entité (télé, enceinte, lumière…) et les façons qui marchent de l'allumer ici. */
+    private suspend fun capacites(cible: String): String {
+        if (cible.isBlank()) throw IllegalArgumentException("entity_id (ou recherche : nom de l'appareil) requis.")
+        val etats = liste(rest("GET", "/api/states"))
+        val n = normaliser(cible)
+        val e = etats.firstOrNull { it.optString("entity_id") == cible.trim() }
+            ?: etats.filter { normaliser(it.optString("entity_id") + " " + it.optJSONObject("attributes")?.optString("friendly_name").orEmpty()).contains(n) }
+                .sortedBy { if (it.optString("entity_id").startsWith("media_player.")) 0 else 1 }.firstOrNull()
+            ?: return "Aucune entité ne correspond à « $cible » (cherche avec ha_entites)."
+        val id = e.optString("entity_id")
+        val at = e.optJSONObject("attributes") ?: JSONObject()
+        val features = at.optInt("supported_features")
+        return ws { w ->
+            val registre = liste(w.cmd("config/entity_registry/list"))
+            val entree = registre.firstOrNull { it.optString("entity_id") == id }
+            val plateforme = entree?.optString("platform").orEmpty()
+            val appareilId = entree?.optString("device_id")?.takeIf { it.isNotBlank() && it != "null" }
+            val appareil = appareilId?.let { d -> liste(w.cmd("config/device_registry/list")).firstOrNull { it.optString("id") == d } }
+            val mac = appareil?.optJSONArray("connections")?.let { c -> (0 until c.length()).mapNotNull { c.optJSONArray(it) }.firstOrNull { it.optString(0) == "mac" }?.optString(1) }
+            val freres = if (appareilId == null) emptyList() else registre.filter { it.optString("device_id") == appareilId && it.optString("entity_id") != id }.map { it.optString("entity_id") }
+            val services = liste(rest("GET", "/api/services")).associate { it.optString("domain") to (it.optJSONObject("services")?.keys()?.asSequence()?.toList().orEmpty()) }
+            val methodes = HaScripts.methodesAllumage(id, plateforme, features, freres, services.keys, mac)
+            buildString {
+                append("# 🔎 ${at.optString("friendly_name").ifBlank { id }} (`$id`)\n")
+                append("- État : ${e.optString("state")} · intégration : ${plateforme.ifBlank { "inconnue (sans identifiant unique)" }}")
+                appareil?.let { append(" · appareil : ${it.optString("manufacturer")} ${it.optString("model")}".trimEnd()) }
+                append("\n")
+                if (id.startsWith("media_player.")) append("- Fonctions annoncées : ${HaScripts.fonctionsMedia(features).joinToString().ifBlank { "aucune" }}\n")
+                at.optJSONArray("source_list")?.let { append("- Sources : ${(0 until it.length()).joinToString { k -> it.optString(k) }.take(300)}\n") }
+                if (freres.isNotEmpty()) append("- Autres entités du même appareil : ${freres.take(15).joinToString()}\n")
+                append("- Adresse MAC : ${mac ?: "inconnue"}\n")
+                services[plateforme]?.takeIf { it.isNotEmpty() }?.let { append("- Services propres à l'intégration $plateforme : ${it.joinToString()}\n") }
+                append("\n## Façons de l'allumer qui devraient marcher ici (de la plus sûre à la moins sûre)\n")
+                methodes.forEachIndexed { k, m -> append("${k + 1}. **${m.titre}** — ${m.note}" + (m.etape?.let { "\n   étape de script : `$it`" } ?: "") + "\n") }
+                append("\nMarche à suivre : écris le script avec la méthode 1 (sequence = [étape]), TESTE-le (action=script_tester) ; si l'état ne change pas, passe à la méthode suivante. " +
+                    "Si aucune ne marche, fais chercher la méthode propre à cette intégration sur le web (hermes_deleguer : « Home Assistant $plateforme allumer la TV ») avant de conclure.")
+            }
+        }
+    }
+
+    /** Lance un script (ou une automatisation) et compare l'état des appareils qu'il pilote avant / après. */
+    private suspend fun testerScript(a: JSONObject, automatisation: Boolean): String {
+        val dom = if (automatisation) "automation" else "script"
+        val eid = a.optString("entity_id").trim().ifBlank { a.optString("id").trim().takeIf { it.isNotBlank() }?.let { if (it.contains('.')) it else "$dom.$it" } }
+            ?: throw IllegalArgumentException("entity_id du $dom requis (ex. $dom.allumer_la_tele).")
+        val etat0 = runCatching { rest("GET", "/api/states/$eid") as? JSONObject }.getOrNull() ?: return "❌ `$eid` n'existe pas dans Home Assistant."
+        val conf = runCatching {
+            if (automatisation) rest("GET", "/api/config/automation/config/${etat0.optJSONObject("attributes")?.optString("id")}").toString()
+            else rest("GET", "/api/config/script/config/${eid.substringAfter('.')}").toString()
+        }.getOrDefault("")
+        val cibles = HaScripts.entitesCitees(conf).filter { it != eid }.take(8)
+        val avant = cibles.associateWith { c -> runCatching { (rest("GET", "/api/states/$c") as? JSONObject)?.optString("state") }.getOrNull() }
+        if (automatisation) rest("POST", "/api/services/automation/trigger", JSONObject().put("entity_id", eid).put("skip_condition", true))
+        else rest("POST", "/api/services/script/turn_on", JSONObject().put("entity_id", eid))
+        // Laisse le temps aux appareils (une télé met plusieurs secondes), en relisant jusqu'à un changement.
+        val fin = System.currentTimeMillis() + (a.optString("attente").toLongOrNull()?.coerceIn(3, 60) ?: 15) * 1000
+        var apres: Map<String, String?> = avant
+        while (System.currentTimeMillis() < fin) {
+            kotlinx.coroutines.delay(2_000)
+            apres = cibles.associateWith { c -> runCatching { (rest("GET", "/api/states/$c") as? JSONObject)?.optString("state") }.getOrNull() }
+            if (cibles.isNotEmpty() && cibles.all { apres[it] != avant[it] }) break
+        }
+        val trace = runCatching {
+            ws { w ->
+                val itemId = if (automatisation) etat0.optJSONObject("attributes")?.optString("id").orEmpty() else eid.substringAfter('.')
+                liste(w.cmd("trace/list", JSONObject().put("domain", dom).put("item_id", itemId))).maxByOrNull { it.optJSONObject("timestamp")?.optString("start").orEmpty() }
+            }
+        }.getOrNull()
+        val erreur = trace?.optString("error")?.takeIf { it.isNotBlank() && it != "null" }
+        val lignes = cibles.joinToString("\n") { c -> "- `$c` : ${avant[c] ?: "?"} → ${apres[c] ?: "?"}" + if (apres[c] != avant[c]) " ✅" else " (inchangé)" }
+        val change = cibles.any { apres[it] != avant[it] }
+        return buildString {
+            append(when {
+                erreur != null -> "❌ `$eid` a échoué : $erreur"
+                change -> "✅ `$eid` lancé : les appareils ont réagi."
+                cibles.isEmpty() -> "ℹ️ `$eid` lancé" + (trace?.optString("script_execution")?.takeIf { it.isNotBlank() }?.let { " (exécution : $it)" } ?: "") + " ; aucun appareil à relire dans sa configuration."
+                else -> "⚠️ `$eid` lancé sans erreur, mais AUCUN appareil n'a changé d'état : la méthode utilisée ne marche pas sur cet appareil."
+            })
+            if (lignes.isNotBlank()) append("\n").append(lignes)
+            if (!change && cibles.isNotEmpty()) append("\n➡️ Essaie la méthode suivante proposée par ha_admin action=capacites (Wake-on-LAN, télécommande, CEC…), réécris le script puis reteste.")
+        }
+    }
+
     private fun chemin(action: String, a: JSONObject, creer: Boolean = false): String {
         val type = action.substringBefore('_')
         val dom = mapOf("automatisation" to "automation", "script" to "script", "scene" to "scene").getValue(type)
@@ -460,8 +592,10 @@ class HomeAssistantAdmin(
             id = if (dom == "script") eid.substringAfter('.') else
                 (runCatching { (rest("GET", "/api/states/$eid") as? JSONObject)?.optJSONObject("attributes")?.optString("id") }.getOrNull() ?: "")
         }
-        if (id.isBlank() && creer) id = if (dom == "script") normaliser(json(a, "configuration")?.optString("alias").orEmpty()).replace(' ', '_').ifBlank { "script_${System.currentTimeMillis()}" }
+        // Identifiant de script : strictement [a-z0-9_] (une apostrophe ou un tiret le faisait refuser).
+        if (id.isBlank() && creer) id = if (dom == "script") HaScripts.slug(json(a, "configuration")?.optString("alias").orEmpty()).ifBlank { "script_${System.currentTimeMillis()}" }
             else System.currentTimeMillis().toString()
+        if (dom == "script") id = HaScripts.slug(id).ifBlank { id }
         if (id.isBlank()) throw IllegalArgumentException("id (ou entity_id) requis.")
         return "/api/config/$dom/config/$id"
     }

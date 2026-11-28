@@ -502,9 +502,53 @@ object Plex {
                 (if (!l.enLigne) " — ce lecteur est actuellement hors ligne." else "."))
         }
         val alerte = if (l.maison != false) runCatching { problemesReseauLocal(app) }.getOrDefault(emptyList()) else emptyList()
-        return "▶️ « ${titre(media)} » lancé sur ${l.libelle}" + (if (offsetMs > 0) " (reprise à ${duree(offsetMs)})" else "") +
-            (if (proto == "https") " — flux par la connexion distante du serveur." else ".") +
-            (if (alerte.isNotEmpty()) "\n⚠️ Si la télé demande un abonnement (« lecture à distance ») : " + alerte.joinToString(" ") + " Dis « répare la lecture locale de Plex »." else "")
+        // Vérification réelle : la lecture doit apparaître dans les sessions du serveur Plex sur CE lecteur.
+        val session = attendreSession(app, l.id, 15_000) { it != null && it.optString("ratingKey") == ratingKey }
+        val ailleurs = if (session == null) sessionSur(app, l.id) else null
+        val suite = (if (offsetMs > 0) " (reprise à ${duree(offsetMs)})" else "") + (if (proto == "https") " — flux par la connexion distante du serveur." else ".")
+        val conseil = if (alerte.isNotEmpty()) "\n⚠️ Si la télé demande un abonnement (« lecture à distance ») : " + alerte.joinToString(" ") + " Dis « répare la lecture locale de Plex »." else ""
+        return when {
+            session != null -> "▶️ « ${titre(media)} » en lecture sur ${l.libelle}$suite (confirmé par Plex : ${etatLecture(session)})$conseil"
+            ailleurs != null -> "⚠️ Commande reçue par ${l.libelle}, mais il lit autre chose (« ${titre(ailleurs)} ») : « ${titre(media)} » n'a pas démarré.$conseil"
+            else -> "⏳ « ${titre(media)} » envoyé à ${l.libelle}$suite Plex ne montre pas encore la lecture au bout de 15 s : l'appli Plex de la télé doit être ouverte et active " +
+                "(un écran « Reprendre / Depuis le début » peut attendre une touche). Ne dis pas que la lecture a démarré.$conseil"
+        }
+    }
+
+    /** Session de lecture en cours sur le lecteur [idLecteur] (identifiant de machine), ou null. */
+    fun sessionSur(app: JarvisApp, idLecteur: String): JSONObject? = runCatching { liste(mc(app, "/status/sessions")) }.getOrDefault(emptyList())
+        .firstOrNull { it.optJSONObject("Player")?.optString("machineIdentifier") == idLecteur }
+
+    /** Relit les sessions Plex (toutes les 1,5 s, jusqu'à [ms]) jusqu'à ce que [ok] soit vrai ; la session trouvée, ou null. */
+    fun attendreSession(app: JarvisApp, idLecteur: String, ms: Long, ok: (JSONObject?) -> Boolean): JSONObject? {
+        val fin = System.currentTimeMillis() + ms
+        while (true) {
+            val s = sessionSur(app, idLecteur)
+            if (ok(s)) return s ?: JSONObject()
+            if (System.currentTimeMillis() >= fin) return null
+            Thread.sleep(1_500)
+        }
+    }
+
+    /** « lecture en cours », « en pause », « chargement ». */
+    fun etatLecture(session: JSONObject): String = when (session.optJSONObject("Player")?.optString("state")) {
+        "playing" -> "lecture en cours"; "paused" -> "en pause"; "buffering" -> "chargement"; else -> "session ouverte"
+    }
+
+    /**
+     * Commande de lecture (pause, lecture, stop, suivant…) bien appliquée ? [avant] / [apres] : sessions du lecteur avant
+     * et après. null = pas vérifiable par les sessions (volume).
+     */
+    internal fun commandeAppliquee(commande: String, avant: JSONObject?, apres: JSONObject?): Boolean? {
+        val etat = apres?.optJSONObject("Player")?.optString("state")
+        return when (commande) {
+            "pause" -> etat == "paused"
+            "lecture", "play", "reprendre" -> etat == "playing" || etat == "buffering"
+            "stop", "arreter" -> apres == null
+            "suivant", "precedent" -> apres != null && avant != null && apres.optString("ratingKey") != avant.optString("ratingKey")
+            "avancer", "reculer", "aller_a" -> apres != null && avant != null && apres.optLong("viewOffset") != avant.optLong("viewOffset")
+            else -> null
+        }
     }
 
     fun lancer(app: JarvisApp, media: JSONObject, appareil: JSONObject, offsetMs: Long = 0): String {
@@ -936,8 +980,16 @@ class PlexTools(private val app: JarvisApp, private val confirm: suspend (String
             "aller_a" -> "/player/playback/seekTo" to mapOf("offset" to ((a.optString("valeur").replace(',', '.').toDoubleOrNull() ?: 0.0) * 60_000).toLong().toString(), "type" to "video")
             else -> return ToolResult("Commande inconnue (pause, lecture, stop, suivant, precedent, avancer, reculer, volume, aller_a).")
         }
+        val avant = Plex.sessionSur(app, id)
         Plex.request(app, chemin, q + ("commandID" to cmd), id)
-        return ToolResult("✅ ${a.optString("commande")} envoyé à ${d.optString("name")}.", direct = true)
+        // Vérification par les sessions du serveur Plex (sauf le volume, que Plex ne renvoie pas).
+        if (Plex.commandeAppliquee(c, avant, avant) == null) return ToolResult("✅ ${a.optString("commande")} envoyé à ${d.optString("name")} (Plex ne permet pas de relire ce réglage).", direct = true)
+        if (avant == null && c !in setOf("stop", "arreter")) return ToolResult("⚠️ ${a.optString("commande")} envoyé à ${d.optString("name")}, mais aucune lecture Plex n'y est en cours : rien à commander.", direct = true)
+        val apres = Plex.attendreSession(app, id, 8_000) { Plex.commandeAppliquee(c, avant, it) == true }
+        return ToolResult(
+            if (apres != null) "✅ ${a.optString("commande")} : confirmé sur ${d.optString("name")}" + (Plex.sessionSur(app, id)?.let { " (${Plex.etatLecture(it)})" } ?: " (lecture arrêtée)") + "."
+            else "⚠️ ${a.optString("commande")} envoyé à ${d.optString("name")}, mais Plex ne le confirme pas au bout de 8 s" +
+                (Plex.sessionSur(app, id)?.let { " (toujours : ${Plex.etatLecture(it)})" } ?: "") + ". Ne dis pas que c'est fait.", direct = true)
     }
 
     private fun playlists(a: JSONObject): ToolResult {
