@@ -14,7 +14,7 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
         // VRAIMENT générer une vidéo (tiktok_video) — sans ce mot-clé large, une demande du type « crée-moi une vidéo
         // sur X » (sans dire « tiktok ») ne proposait pas l'outil au modèle, qui répondait alors en inventant un faux
         // succès au lieu d'appeler quoi que ce soit.
-        val KEYWORDS = Regex("tiktok|tik tok|vid[ée]o|montage|clip|reels?|shorts?|niches?|concurren\\w*|hashtags?|tendances?|brouillons? tiktok|id[ée]es? de (vid[ée]os?|contenus?)", RegexOption.IGNORE_CASE)
+        val KEYWORDS = Regex("tiktok|tik tok|vid[ée]o|montage|clip|reels?|shorts?|niches?|concurren\\w*|hashtags?|tendances?|brouillons? tiktok|id[ée]es? de (vid[ée]os?|contenus?)|heures? (pour |de )?(poster|publier|publication)|moments? pour (poster|publier)", RegexOption.IGNORE_CASE)
         fun concerned(t: String) = KEYWORDS.containsMatchIn(t)
         /** « les paroles à l'écran », « paroles affichées », « paroles en sous-titres » : du texte affiché, pas une chanson. */
         private val PAROLES_ECRAN = Regex("(?i)paroles? (à|a|sur) l['’ ]?[ée]cran|paroles? affich[ée]e?s?|paroles? en sous[- ]?titres?|paroles? écrites?")
@@ -31,7 +31,8 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
             (Regex("(?i)sous[- ]?titr|subtitles?|captions?").containsMatchIn(phrase) || PAROLES_ECRAN.containsMatchIn(phrase)) &&
                 !Regex("(?i)(sans|pas de|aucuns?|retire[rsz]?|enl[eè]ve[rsz]?) (les |des )?(sous[- ]?titr|paroles)").containsMatchIn(phrase)
         val NAMES = setOf("tiktok_connexion", "tiktok_deconnexion", "tiktok_profil", "tiktok_mes_videos", "tiktok_analyse", "tiktok_script", "tiktok_video", "video_montage",
-            "tiktok_tendances", "tiktok_niche", "tiktok_concurrents", "tiktok_propositions", "tiktok_brouillon", "tiktok_auto")
+            "tiktok_tendances", "tiktok_niche", "tiktok_concurrents", "tiktok_propositions", "tiktok_brouillon", "tiktok_auto",
+            "tiktok_video_recuperer", "tiktok_video_analyser", "tiktok_horaires", "tiktok_idees_concurrents")
     }
 
     private fun prop(d: String) = JSONObject().put("type", "string").put("description", d)
@@ -47,10 +48,10 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
         tool("tiktok_profil", "TikTok : informations du compte connecté (nom, abonnés, nombre de vidéos, total de likes)."),
         tool("tiktok_mes_videos", "TikTok : liste les dernières vidéos du compte connecté avec leurs statistiques (vues, likes, commentaires, partages).",
             mapOf("nombre" to prop("Nombre de vidéos à récupérer, 1 à 20 (optionnel, défaut 15)."))),
-        tool("tiktok_analyse", "TikTok : analyse les vidéos du compte (statistiques + bonnes pratiques générales du réseau social) pour dire ce qui marche, ce qui ne marche pas, et comment améliorer les vues/likes. Si l'utilisateur demande d'analyser UNE vidéo précise (par son titre ou son sujet, ex. « analyse ma vidéo sur les pompiers »), passe ce titre/sujet dans le paramètre « video » pour une analyse ciblée sur cette seule vidéo — n'utilise JAMAIS tiktok_mes_videos pour ça (qui ne fait que lister, sans analyser). Sans « video », analyse l'ensemble des dernières vidéos. Ne compare PAS à des vidéos concurrentes précises (données non disponibles publiquement) : s'appuie sur les statistiques propres au compte et les tendances générales connues de TikTok.",
+        tool("tiktok_analyse", "TikTok : analyse l'ENSEMBLE des vidéos du compte (statistiques réelles : médianes, engagement, jours, heures, durées, hashtags) pour dire ce qui marche, ce qui ne marche pas et comment améliorer les vues/likes. Pour UNE vidéo précise, utilise plutôt tiktok_video_analyser (qui la regarde en entier) ; pour les concurrents, tiktok_concurrents ou tiktok_idees_concurrents ; pour les heures, tiktok_horaires.",
             mapOf(
-                "nombre" to prop("Nombre de vidéos à analyser, 1 à 60 (optionnel, défaut 40 ; ignoré si « video » est donné)."),
-                "video" to prop("Titre ou mot-clé identifiant UNE vidéo précise du compte à analyser seule, plutôt que l'ensemble (optionnel).")
+                "nombre" to prop("Nombre de vidéos à analyser, 1 à 60 (optionnel, défaut 40)."),
+                "video" to prop("Titre ou mot-clé d'UNE vidéo : l'analyse complète (la vidéo regardée en entier) est alors faite sur elle seule (optionnel).")
             )),
         tool("tiktok_script", "TikTok : écrit un script complet et prêt à tourner pour une nouvelle vidéo à partir d'un sujet (accroche, découpage de plans minuté, textes à l'écran, appel à l'action, légende + hashtags). S'appuie sur les statistiques des vidéos précédentes du compte si connecté, pour repérer ce qui marche déjà. Enregistre le script dans le coffre Obsidian (dossier « Scripts TikTok »).",
             mapOf(
@@ -105,7 +106,16 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
         tool("tiktok_propositions", "TikTok : propose des idées de vidéos à poster (avec accroche, script minuté, texte à l'écran, son, légende, hashtags et moment de publication), fondées sur les statistiques du compte, les tendances France, la niche et les concurrents. Enregistrées dans le coffre (TikTok/Propositions).",
             mapOf("nombre" to prop("Nombre d'idées, 1 à 6 (défaut 3)."), "theme" to prop("Thème imposé (optionnel ; sinon la niche enregistrée)."))),
         tool("tiktok_brouillon", "TikTok : envoie une vidéo dans les BROUILLONS (boîte de réception) du compte TikTok connecté ; l'utilisateur ajoute le son et publie depuis l'appli TikTok. Par défaut, la dernière vidéo TikTok montée par JARVIS.",
-            mapOf("fichier" to prop("Vidéo à envoyer (optionnel) : « derniere » (défaut), jarvis-video-ia:nom.mp4, ou chemin du téléphone (DCIM/Camera/xxx.mp4).")))
+            mapOf("fichier" to prop("Vidéo à envoyer (optionnel) : « derniere » (défaut), jarvis-video-ia:nom.mp4, tiktok_moi_….mp4 (vidéo récupérée par tiktok_video_recuperer), ou chemin du téléphone (DCIM/Camera/xxx.mp4)."))),
+        tool("tiktok_video_recuperer", "TikTok : RÉCUPÈRE une vidéo directement depuis TikTok (sans filigrane) dans l'espace privé de JARVIS (jamais dans la galerie, gardée 2 jours). Renvoie le nom du fichier, à passer ensuite dans « sources » de tiktok_video pour la MODIFIER / la refaire (nouvelle accroche, textes, voix, coupes…), ou dans tiktok_brouillon pour la renvoyer en brouillon. Seules les vidéos de l'utilisateur peuvent être retravaillées ou renvoyées ; celle d'un concurrent ne sert qu'à l'analyse.",
+            mapOf("video" to prop("La vidéo : « la dernière » (défaut), « la plus vue », « la moins vue », un numéro (1 = la plus récente), un mot de son titre, ou un lien TikTok."),
+                "brouillon" to prop("« true » pour la renvoyer telle quelle dans les brouillons TikTok du compte (uniquement une vidéo de l'utilisateur)."))),
+        tool("tiktok_video_analyser", "TikTok : analyse COMPLÈTE d'UNE vidéo (la sienne ou celle d'un concurrent) : JARVIS la télécharge et l'IA la REGARDE en entier (images, textes à l'écran, voix, musique, rythme), chiffres réels à l'appui (comparés aux vues médianes du compte) : accroche notée, structure, appel à l'action, pourquoi ces résultats, améliorations concrètes (ou mécanismes à reprendre si c'est un concurrent). Pour « analyse ma dernière vidéo », « pourquoi ma vidéo X a marché », « analyse cette vidéo : lien ».",
+            mapOf("video" to prop("La vidéo : « la dernière » (défaut), « la plus vue », un numéro, un mot de son titre, ou un lien TikTok (n'importe quel compte)."))),
+        tool("tiktok_horaires", "TikTok : MEILLEURES HEURES et MEILLEURS JOURS pour publier, calculés sur les vraies dates de publication et les vues de ses vidéos ET de celles de ses concurrents (performance relative à chaque compte, heure de Paris), avec un conseil final."),
+        tool("tiktok_idees_concurrents", "TikTok : repère les vidéos des concurrents qui SURPERFORMENT (bien au-dessus des vues habituelles de leur compte), regarde en entier le contenu des meilleures, en tire les mécanismes qui marchent (accroches, formats, durées, sons…) et propose des idées ORIGINALES adaptées à la niche et au style de l'utilisateur (jamais de copie). Pour « prends des idées chez mes concurrents », « qu'est-ce qui marche chez eux ».",
+            mapOf("comptes" to prop("Pseudos ou liens des concurrents, séparés par des virgules (optionnel : ceux enregistrés, ou détectés automatiquement)."),
+                "approfondir" to prop("Nombre de vidéos regardées en entier, 0 à 3 (défaut 2).")))
     )
 
     suspend fun execute(name: String, a: JSONObject): ToolResult = withContext(Dispatchers.IO) {
@@ -121,6 +131,11 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
 
     private fun vraiArg(a: JSONObject, k: String) = a.optString(k).trim().lowercase() in setOf("true", "oui", "1", "yes")
 
+    /** Les vidéos des autres comptes servent à l'analyse et aux idées, jamais à être republiées ou remontées. */
+    private fun refusConcurrent(auteur: String) = "🚫 Cette vidéo appartient au compte @${auteur.ifBlank { "?" }}, pas au tien : je ne la remonte pas et ne la renvoie pas " +
+        "sur ton compte (ce serait republier son travail, et TikTok sanctionne le contenu non original). Je peux l'analyser en entier pour en tirer des idées originales " +
+        "pour ta chaîne (« analyse cette vidéo » ou « prends des idées chez mes concurrents »)."
+
     /** Vidéo à envoyer : la dernière montée par JARVIS (TikTok d'abord), un fichier jarvis-video-ia:…, ou un chemin du téléphone. */
     private fun fichierVideo(s: String): java.io.File? {
         if (s.isBlank() || s.lowercase().startsWith("derni")) {
@@ -128,6 +143,8 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
             return (l.filter { it.name.startsWith("tiktok_") }.ifEmpty { l }).maxByOrNull { it.lastModified() }
         }
         if (s.startsWith("jarvis-video-ia:")) return VideoGen.fichier(app, s)
+        // Vidéo récupérée depuis TikTok (tiktok_video_recuperer) ou jointe à la conversation.
+        DocumentStore.find(app, s)?.takeIf { it.extension.lowercase() in setOf("mp4", "mov", "webm", "m4v") }?.let { return it }
         return runCatching { java.io.File(fr.dd.jarvis.ai.Stockage.racine(), s.trim('/')).takeIf { it.isFile && it.canRead() } }.getOrNull()
             ?: VideoGen.fichier(app, "jarvis-video-ia:" + s.substringAfterLast('/'))
     }
@@ -167,32 +184,21 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 ToolResult("# 🎬 Tes ${vids.length()} dernières vidéos\n" + (0 until vids.length()).joinToString("\n") { video(vids.getJSONObject(it)) }, direct = true)
             }
             "tiktok_analyse" -> {
-                if (!TikTok.connecte(app)) return ToolResult("Aucun compte TikTok connecté : utilise tiktok_connexion.")
                 val filtre = a.optString("video").trim()
-                if (filtre.isNotBlank()) {
-                    val vids = TikTok.mesVideos(app, 50)
-                    if (vids.length() == 0) return ToolResult("Aucune vidéo trouvée sur ce compte : rien à analyser.")
-                    val tous = (0 until vids.length()).map { vids.getJSONObject(it) }
-                    val mot = filtre.lowercase()
-                    val trouvees = tous.filter { titre(it).lowercase().contains(mot) }
-                    when {
-                        trouvees.isEmpty() -> return ToolResult("Aucune vidéo ne correspond à « $filtre ». Vidéos disponibles :\n" + tous.joinToString("\n") { video(it) }, direct = true)
-                        trouvees.size > 1 -> return ToolResult("Plusieurs vidéos correspondent à « $filtre », précise laquelle :\n" + trouvees.joinToString("\n") { video(it) }, direct = true)
-                    }
-                    val v = trouvees[0]
-                    return ToolResult("Statistiques de CETTE vidéo précise du compte TikTok de l'utilisateur (titre : « ${titre(v)} ») :\n${video(v)}\n\n" +
-                        "Analyse UNIQUEMENT cette vidéo (ne parle d'AUCUNE autre vidéo du compte) : ce qui explique probablement ses résultats (durée, sujet, moment de publication), ce qui a bien fonctionné et ce qui aurait pu être amélioré, puis 2-3 suggestions concrètes pour une prochaine vidéo similaire. Précise que tu n'as pas accès aux vidéos concurrentes ni aux tendances en temps réel du réseau.")
-                }
+                // UNE vidéo : elle est téléchargée et regardée en entier (plus seulement ses chiffres).
+                if (filtre.isNotBlank()) return ToolResult(TikTokEtude.analyser(app, filtre), direct = true)
                 val n = (a.optString("nombre").toIntOrNull() ?: 40).coerceIn(1, 60)
-                val vids = TikTok.mesVideos(app, n)
-                if (vids.length() == 0) return ToolResult("Aucune vidéo trouvée sur ce compte : rien à analyser.")
+                val vids = TikTokEtude.mesVideos(app, n)
+                if (vids.isEmpty()) return ToolResult("Aucune vidéo trouvée sur ce compte : rien à analyser.")
                 // Chiffres calculés par JARVIS (médianes, engagement, jours, heures, durées, hashtags) + la liste brute.
-                val tableau = TikTokAnalyse.bilan((0 until vids.length()).map { TikTokAnalyse.depuisApi(vids.getJSONObject(it)) }) +
-                    "\n\nDétail :\n" + (0 until vids.length()).joinToString("\n") { video(vids.getJSONObject(it)) }
-                // Les données renvoyées ici (titres + stats) nourrissent l'analyse que fera le cerveau (second passage, pas de « direct »)
-                // car il doit raisonner et donner des conseils — le texte seul serait juste une liste brute.
-                ToolResult("Statistiques des vidéos du compte TikTok de l'utilisateur :\n$tableau\n\n" +
-                    "Analyse ces statistiques (quelles vidéos marchent le mieux et pourquoi probablement — durée, sujet, moment), et donne des conseils concrets pour améliorer les vues/likes en t'appuyant sur les bonnes pratiques générales connues de TikTok (accroche dans les 1ers secondes, durée optimale, fréquence de publication, usage des sons tendance, sous-titres, appel à l'interaction, heures de publication). Précise clairement que tu n'as pas accès aux vidéos concurrentes ni aux tendances en temps réel du réseau, seulement à des bonnes pratiques générales et aux statistiques propres au compte.")
+                val pubs = vids.map { TikTokAnalyse.depuisTikWm(it) }
+                val med = TikTokAnalyse.mediane(vids.map { it.vues })
+                val tableau = TikTokAnalyse.bilan(pubs) + "\n\nDétail :\n" + vids.joinToString("\n") { "- " + TikTokEtude.stats(it, med) + " — « ${TikTokAnalyse.accroche(it.titre, 12)} »" }
+                // Les données renvoyées ici nourrissent l'analyse que fera le cerveau (second passage, pas de « direct »).
+                ToolResult("Statistiques RÉELLES des vidéos du compte TikTok de l'utilisateur :\n$tableau\n\n" +
+                    "Analyse ces statistiques (quelles vidéos marchent le mieux et pourquoi probablement — durée, sujet, accroche écrite, moment), et donne des conseils concrets pour améliorer les vues/likes " +
+                    "(accroche des premières secondes, durée, fréquence, sons, appel à l'interaction, heures). Propose ensuite, si c'est utile : regarder une vidéo en entier (tiktok_video_analyser), " +
+                    "les meilleures heures (tiktok_horaires) ou les idées qui marchent chez les concurrents (tiktok_idees_concurrents).")
             }
             "tiktok_script" -> {
                 val sujet = a.optString("sujet").trim()
@@ -220,6 +226,9 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                     niche.isNotBlank() && (brut.isBlank() || Regex("(?i)\\bniche\\b").containsMatchIn(brut)) -> (if (brut.isBlank()) "" else "$brut — ") + "niche du compte : $niche"
                     else -> brut
                 }
+                // Une vidéo de concurrent récupérée pour l'analyse ne sert jamais de matière à un montage.
+                a.optString("sources").split(';', '\n').firstNotNullOfOrNull { TikTokEtude.auteurConcurrent(it.trim().trim('"', '\'')) }
+                    ?.let { return ToolResult(refusConcurrent(it)) }
                 val script = a.optString("script").trim()
                 if (sujet.isBlank() && script.isBlank() && a.optString("sources").isBlank()) return ToolResult("Précise le sujet de la vidéo (ou enregistre ta niche dans Réglages › TikTok).")
                 fun vrai(k: String, def: Boolean) = a.optString(k).trim().lowercase().let { if (it.isBlank()) def else it in setOf("true", "oui", "1", "yes") }
@@ -300,17 +309,25 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
                 if (liste.isEmpty()) return ToolResult("Quels comptes concurrents analyser ? Donne leurs pseudos (ex. « @solaire.pro, @elec_martin »).")
                 if (vraiArg(a, "memoriser")) { app.store.tiktokConcurrents.set(liste.joinToString(", ") { "@$it" }); app.store.tiktokConcurrentsAuto.set(false) }
                 val n = (a.optString("nombre").toIntOrNull() ?: 20).coerceIn(5, 30)
+                val toutes = mutableListOf<TikWm.Video>()
                 val fiches = liste.take(5).map { c ->
-                    runCatching { TikTokAnalyse.concurrent(TikWm.compte(c), TikWm.videosDe(c, n)) }.getOrElse { "## @$c\n(indisponible : ${it.message?.take(140)})" }
+                    runCatching { val v = TikWm.videosDe(c, n); toutes += v; TikTokAnalyse.concurrent(TikWm.compte(c), v) }.getOrElse { "## @$c\n(indisponible : ${it.message?.take(140)})" }
                 }
-                val moi = if (TikTok.connecte(app)) runCatching {
-                    val v = TikTok.mesVideos(app, 40)
-                    "## 🙋 Ton compte\n" + TikTokAnalyse.bilan((0 until v.length()).map { TikTokAnalyse.depuisApi(v.getJSONObject(it)) })
-                }.getOrDefault("") else ""
-                ToolResult("Données RÉELLES des concurrents (tikwm)" + (if (moi.isNotBlank()) " et du compte de l'utilisateur (API officielle)" else "") + " :\n\n" +
-                    (fiches + listOfNotNull(moi.ifBlank { null })).joinToString("\n\n") + "\n\n" +
+                // Les vidéos qui sortent du lot chez chacun (× ses vues médianes) : ce qui marche vraiment, pas seulement les gros comptes.
+                val succes = TikTokEtude.surperformances(toutes).take(8).takeIf { it.isNotEmpty() }?.let { l ->
+                    "## 🚀 Vidéos qui surperforment (× vues médianes de leur compte)\n" + l.joinToString("\n") { (v, r) ->
+                        "- @${v.auteur} · ${"%.1f".format(java.util.Locale.FRANCE, r)}× · ${TikTokAnalyse.nombre(v.vues)} vues · ${v.dureeS} s · « ${TikTokAnalyse.accroche(v.titre, 12)} » ${v.lien}"
+                    }
+                }.orEmpty()
+                val moi = runCatching {
+                    val v = TikTokEtude.mesVideos(app, 40)
+                    if (v.isEmpty()) "" else "## 🙋 Ton compte\n" + TikTokAnalyse.bilan(v.map { TikTokAnalyse.depuisTikWm(it) })
+                }.getOrDefault("")
+                ToolResult("Données RÉELLES des concurrents (tikwm)" + (if (moi.isNotBlank()) " et du compte de l'utilisateur" else "") + " :\n\n" +
+                    (fiches + listOfNotNull(succes.ifBlank { null }, moi.ifBlank { null })).joinToString("\n\n") + "\n\n" +
                     "Compare avec ces chiffres uniquement : ce que chaque concurrent fait mieux (rythme, durées, accroches, hashtags, sons, moments de publication), " +
-                    "ce que l'utilisateur fait mieux, puis 5 actions concrètes à appliquer dès cette semaine." +
+                    "ce qui fait décoller leurs vidéos qui surperforment, ce que l'utilisateur fait mieux, puis 5 actions concrètes à appliquer dès cette semaine. " +
+                    "Termine en proposant de regarder en entier leurs meilleures vidéos pour en tirer des idées originales (tiktok_idees_concurrents) et de calculer les meilleures heures (tiktok_horaires)." +
                     (if (vraiArg(a, "memoriser")) " Indique que ces comptes sont enregistrés comme concurrents suivis." else ""))
             }
             "tiktok_propositions" -> {
@@ -320,8 +337,30 @@ class TikTokTools(private val app: JarvisApp, private val confirm: suspend (Stri
             "tiktok_brouillon" -> {
                 if (!TikTok.connecte(app)) return ToolResult("Aucun compte TikTok connecté : utilise tiktok_connexion.")
                 val f = fichierVideo(a.optString("fichier").trim()) ?: return ToolResult("Aucune vidéo trouvée à envoyer (donne le nom de la vidéo ou monte-en une d'abord).")
+                TikTokEtude.auteurConcurrent(f.name)?.let { return ToolResult(refusConcurrent(it)) }
                 ToolResult(TikTok.envoyerBrouillon(app, f), direct = true)
             }
+            "tiktok_video_recuperer" -> {
+                val (c, f) = TikTokEtude.recuperer(app, a.optString("video").trim())
+                val v = c.video
+                val titreV = TikTokAnalyse.accroche(v.titre, 12).ifBlank { "vidéo ${v.id}" }
+                if (vraiArg(a, "brouillon")) {
+                    if (!c.aMoi) return ToolResult(refusConcurrent(v.auteur))
+                    if (!TikTok.connecte(app)) return ToolResult("Vidéo récupérée (« ${f.name} »), mais aucun compte TikTok n'est connecté pour l'envoyer en brouillon : utilise tiktok_connexion.")
+                    return ToolResult("📥 « $titreV » récupérée depuis TikTok.\n" + TikTok.envoyerBrouillon(app, f), direct = true)
+                }
+                val med = runCatching { TikTokAnalyse.mediane((if (c.aMoi) TikTokEtude.mesVideos(app, 30) else TikWm.videosDe(v.auteur, 25)).map { it.vues }) }.getOrNull()
+                ToolResult("📥 Vidéo récupérée depuis TikTok, sans filigrane : « $titreV »\n${TikTokEtude.stats(v, med)}\n" +
+                    "Fichier privé (pas dans la galerie, gardé 2 jours) : ${f.name} (${(f.length() / 1024 / 1024.0).let { "%.1f".format(java.util.Locale.FRANCE, it) }} Mo)\n\n" +
+                    if (c.aMoi) "C'est une vidéo de l'utilisateur : pour la MODIFIER, appelle tiktok_video avec sources=« ${f.name} » (et garder_son=true pour garder sa voix d'origine) en décrivant les changements " +
+                        "dans le sujet (nouvelle accroche, textes, coupes…) ; pour la renvoyer telle quelle en brouillon : tiktok_brouillon avec fichier=« ${f.name} » ; pour l'analyser en entier : tiktok_video_analyser."
+                    else "C'est une vidéo du compte @${v.auteur} (pas celui de l'utilisateur) : elle peut seulement être ANALYSÉE (tiktok_video_analyser) pour s'en inspirer ; " +
+                        "ne la monte pas, ne la modifie pas et ne la renvoie pas en brouillon.")
+            }
+            "tiktok_video_analyser" -> ToolResult(TikTokEtude.analyser(app, a.optString("video").trim()), direct = true)
+            "tiktok_horaires" -> ToolResult(TikTokEtude.horaires(app), direct = true)
+            "tiktok_idees_concurrents" -> ToolResult(TikTokEtude.ideesConcurrents(app, a.optString("comptes").trim(),
+                a.optString("approfondir").filter { it.isDigit() }.toIntOrNull() ?: 2), direct = true)
             else -> ToolResult("Outil TikTok inconnu.")
         }
     }

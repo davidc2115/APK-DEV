@@ -729,6 +729,83 @@ class GeminiClient(private val ring: KeyRing, private val model: () -> String) {
         return sb.toString().trim().ifBlank { throw IllegalStateException("réponse vide") }
     }
 
+    /** Client des vidéos (envoi + analyse d'une vidéo entière) : jusqu'à 5 min. */
+    private val lent = Http.client.newBuilder().callTimeout(300, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(240, java.util.concurrent.TimeUnit.SECONDS).writeTimeout(240, java.util.concurrent.TimeUnit.SECONDS).build()
+
+    /**
+     * Fait REGARDER une vidéo entière à Gemini (images + son) et répond à [question]. Jusqu'à 13 Mo : envoyée dans la
+     * requête ; au-delà : API Fichiers de Google (envoi, attente du traitement, puis suppression du fichier chez Google).
+     */
+    suspend fun analyserVideo(fichier: java.io.File, question: String, mime: String = "video/mp4"): String =
+        ring.run { key -> withContext(Dispatchers.IO) { callVideo(key, fichier, mime, question) } }
+
+    private fun callVideo(key: String, fichier: java.io.File, mime: String, question: String): String {
+        if (!fichier.isFile || fichier.length() <= 0) throw IllegalStateException("vidéo introuvable ou vide")
+        var nomGoogle: String? = null
+        try {
+            val partie = if (fichier.length() <= 13L * 1024 * 1024) {
+                JSONObject().put("inline_data", JSONObject().put("mime_type", mime)
+                    .put("data", android.util.Base64.encodeToString(fichier.readBytes(), android.util.Base64.NO_WRAP)))
+            } else {
+                val (nom, uri) = envoyerFichier(key, fichier, mime)
+                nomGoogle = nom
+                JSONObject().put("file_data", JSONObject().put("mime_type", mime).put("file_uri", uri))
+            }
+            val body = JSONObject().put("contents", JSONArray().put(JSONObject().put("role", "user")
+                .put("parts", JSONArray().put(partie).put(JSONObject().put("text", question)))))
+                .put("generationConfig", JSONObject().put("temperature", 0.4).put("maxOutputTokens", 4096))
+            val req = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent")
+                .header("x-goog-api-key", key).post(body.toString().toRequestBody(Http.JSON)).build()
+            val (code, text) = GeminiPasserelle.executer(lent, req)
+            if (code !in 200..299) throw ApiException(code, "Gemini $code : ${text.take(300)}")
+            val parts = JSONObject(text).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+            val sb = StringBuilder()
+            if (parts != null) for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text", ""))
+            return sb.toString().trim().ifBlank { throw IllegalStateException("réponse vide de Gemini") }
+        } finally {
+            nomGoogle?.let { n -> runCatching {
+                Http.texte(Http.client, Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/$n").header("x-goog-api-key", key).delete().build())
+            } }
+        }
+    }
+
+    /** API Fichiers (envoi « resumable ») : démarrage, envoi du fichier en flux, attente de l'état ACTIVE. Renvoie (nom, uri). */
+    private fun envoyerFichier(key: String, fichier: java.io.File, mime: String): Pair<String, String> {
+        val debut = Request.Builder().url("https://generativelanguage.googleapis.com/upload/v1beta/files")
+            .header("x-goog-api-key", key)
+            .header("X-Goog-Upload-Protocol", "resumable").header("X-Goog-Upload-Command", "start")
+            .header("X-Goog-Upload-Header-Content-Length", fichier.length().toString()).header("X-Goog-Upload-Header-Content-Type", mime)
+            .post(JSONObject().put("file", JSONObject().put("display_name", fichier.name)).toString().toRequestBody(Http.JSON)).build()
+        val adresse = lent.newCall(debut).execute().use { r ->
+            if (!r.isSuccessful) throw ApiException(r.code, "Gemini (envoi de la vidéo) ${r.code} : ${r.body?.string().orEmpty().take(200)}")
+            r.header("x-goog-upload-url") ?: throw IllegalStateException("Gemini n'a pas donné d'adresse d'envoi")
+        }
+        val flux = object : okhttp3.RequestBody() {
+            override fun contentType() = mime.toMediaType()
+            override fun contentLength() = fichier.length()
+            override fun writeTo(sink: okio.BufferedSink) { fichier.inputStream().use { sink.outputStream().let { o -> it.copyTo(o); o.flush() } } }
+        }
+        val envoi = Request.Builder().url(adresse).header("X-Goog-Upload-Offset", "0").header("X-Goog-Upload-Command", "upload, finalize").post(flux).build()
+        var f = lent.newCall(envoi).execute().use { r ->
+            val t = r.body?.string().orEmpty()
+            if (!r.isSuccessful) throw ApiException(r.code, "Gemini (envoi de la vidéo) ${r.code} : ${t.take(200)}")
+            JSONObject(t).optJSONObject("file") ?: throw IllegalStateException("Gemini n'a pas confirmé l'envoi de la vidéo")
+        }
+        val nom = f.optString("name")
+        val limite = System.currentTimeMillis() + 150_000
+        while (f.optString("state") == "PROCESSING" && System.currentTimeMillis() < limite) {
+            Thread.sleep(3_000)
+            val (code, t) = Http.texte(Http.client, Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/$nom").header("x-goog-api-key", key).build())
+            if (code in 200..299) f = JSONObject(t)
+        }
+        when (f.optString("state")) {
+            "FAILED" -> throw IllegalStateException("Google n'a pas pu lire la vidéo (format refusé)")
+            "PROCESSING" -> throw IllegalStateException("Google traite encore la vidéo après 2 min 30 : réessaie dans un instant")
+        }
+        return nom to f.optString("uri").ifBlank { throw IllegalStateException("adresse de la vidéo envoyée manquante") }
+    }
+
     /** Vision rapide (pilotage de l'écran) : consigne système + image, réflexion minimale, réponse JSON. */
     suspend fun visionJson(system: String, bytes: ByteArray, mimeType: String, question: String): String =
         ring.run { key -> withContext(Dispatchers.IO) { callVision(key, system, bytes, mimeType, question, true) } }
