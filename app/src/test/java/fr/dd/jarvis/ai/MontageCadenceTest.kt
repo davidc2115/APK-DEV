@@ -34,4 +34,24 @@ class MontageCadenceTest {
         val pompiers = Montage.interdits("firefighters in front of a burning barn")
         assertTrue(pompiers.contains("no text") && !pompiers.contains("no people"))
     }
+
+    /** Le meilleur export garde le son et le texte : 1 ou 2 images abîmées valent mieux qu'une vidéo muette sans accroche. */
+    @Test fun meilleurExportGardeSonEtTexte() {
+        val completLegerDefaut = Montage.scoreExport(avecSon = true, avecTexte = true, abimees = 4, cote = 1080)
+        val muetSansTexte = Montage.scoreExport(avecSon = false, avecTexte = false, abimees = 1, cote = 720)
+        assertTrue(completLegerDefaut > muetSansTexte)
+        val completPropreBasse = Montage.scoreExport(true, true, 0, 432)
+        val completUneImageHd = Montage.scoreExport(true, true, 1, 1080)
+        assertTrue(completUneImageHd > completPropreBasse)                     // 1 image abîmée en HD plutôt que du 432p flou
+        assertTrue(Montage.scoreExport(true, true, 0, 720) > completUneImageHd) // propre en 720p : le mieux
+        assertTrue(Montage.scoreExport(true, false, 0, 1080) > Montage.scoreExport(false, true, 0, 1080)) // le son d'abord
+    }
+
+    /** Personnages protégés jamais reproduits : remplacés par des guerriers gaulois originaux. */
+    @Test fun personnagesProtegesRemplaces() {
+        val v = Montage.sansPersonnagesProteges("a tricolor phoenix with Astérix et Obélix standing beside it")
+        assertFalse(v.contains("Astérix", true) || v.contains("Obélix", true))
+        assertTrue(v.contains("original ancient Gaulish warriors"))
+        assertEquals("a phoenix over Paris", Montage.sansPersonnagesProteges("a phoenix over Paris"))
+    }
 }

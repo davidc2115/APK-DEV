@@ -221,7 +221,7 @@ object Montage {
                 .also { if (it.isEmpty()) echecs += "signature : rien trouvé dans « ${d.signature.take(60)} »" }
             d.style.isNotBlank() && sb.signature.isNotBlank() && ImageGen.disponible(app) -> {
                 progres("🎨 Image de signature (${d.style.take(40)})…")
-                runCatching { listOf(ImageGen.generate(app, sb.signature + ", epic, highly detailed, ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, no text, no letters",
+                runCatching { listOf(ImageGen.generate(app, sansPersonnagesProteges(sb.signature) + ", epic, highly detailed, ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, no text, no letters",
                     "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768, huggingFace = false).first to true) }
                     .recoverCatching { listOfNotNull(ImageGen.banque(app, sb.signature, emptySet()).firstOrNull()?.let { it to true }).ifEmpty { throw it } }
                     .getOrElse { echecs += "image de signature : ${it.message?.take(160)}"; emptyList() }
@@ -265,7 +265,7 @@ object Montage {
         suspend fun image(rang: Int, p: Plan): File? = imagesParPlan[rang] ?: if (imagesIaEpuisees) null else runCatching {
             val modeles = modelesChaine + listOfNotNull(modeleMontage)
             val prompt = (if (modeles.isNotEmpty()) "Keep exactly the same main subject design, color palette, lighting and mood as the reference images, in a new composition: " else "") +
-                interdits(ancrer(p.visuel, ancre)) + ", ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, cinematic lighting, highly detailed"
+                interdits(ancrer(sansPersonnagesProteges(p.visuel), ancre)) + ", ${if (vertical) "vertical portrait 9:16" else "horizontal 16:9"} composition, cinematic lighting, highly detailed"
             // Image directement au bon format et nette (FLUX.2 klein 4B : ≈ 10 fois moins de quota que le 9B).
             ImageGen.generate(app, prompt, "flux-2-klein-4b", if (vertical) 768 else 1344, if (vertical) 1344 else 768, huggingFace = false, references = modeles).first
                 .also { if (modeleMontage == null) modeleMontage = ImageGen.reference(it, File(travail, "modele_montage.jpg")) }
@@ -281,9 +281,11 @@ object Montage {
         suspend fun photo(i: Int, p: Plan): File? {
             if (!Stock.disponible(app)) return null
             val requetes = listOf(p.recherche, Stock.motsCles(p.visuel), Stock.motsCles(p.visuel, 2)).filter { it.isNotBlank() }.distinct()
-            val clip = requetes.firstNotNullOfOrNull { q -> Stock.chercherImage(app, q, vertical, pris, illustration = p.source == "image") }
+            // TikTok : la photo doit montrer un symbole de la niche (drapeau, monument, phénix…), pas seulement les mots du plan.
+            val exige = if (d.tiktok && ancre.isNotBlank()) SYMBOLES else null
+            val clip = requetes.firstNotNullOfOrNull { q -> Stock.chercherImage(app, q, vertical, pris, illustration = p.source == "image", exige = exige) }
                 ?: Stock.motsClesFr(d.sujet).let { mots -> listOf(mots.joinToString(" "), mots.firstOrNull().orEmpty()) }
-                    .filter { it.isNotBlank() }.distinct().firstNotNullOfOrNull { q -> Stock.chercherImage(app, q, vertical, pris, francais = true, illustration = p.source == "image") }
+                    .filter { it.isNotBlank() }.distinct().firstNotNullOfOrNull { q -> Stock.chercherImage(app, q, vertical, pris, francais = true, illustration = p.source == "image", exige = exige) }
             val f = clip?.let { Stock.telecharger(it, File(travail, "photo_$i.jpg")) }?.takeIf { imageUtilisable(it) }
             if (clip != null && f != null) credits += clip
             return f
@@ -316,7 +318,9 @@ object Montage {
                             ?.also { horsSujet++ }
                 } else (if (Stock.disponible(app)) reel(i, p)?.let { Media(i, it, false, p.texte) } else null)
                     ?: (if (modePlans != "stock") (image(rang, p) ?: banque(rang, p) ?: photo(i, p))?.let { Media(i, it, true, p.texte) } else null)
-                if (m != null) medias += m
+                // TikTok : rien de pertinent pour ce plan → une image déjà retenue de CE montage (autre mouvement), jamais un plan hors sujet.
+                val retenu = m ?: if (d.tiktok && img) medias.filter { it.image }.let { l -> l.getOrNull(i % maxOf(1, l.size)) }?.let { Media(i, it.fichier, true, p.texte) } else null
+                if (retenu != null) medias += retenu
             }
             if (raisonImages.isNotBlank()) echecs += "images IA indisponibles (" + raisonImages + ")" +
                 (if (depuisBanque > 0) " : $depuisBanque reprise${if (depuisBanque > 1) "s" else ""} de ta banque d'images JARVIS sur le même sujet" else "")
@@ -340,7 +344,7 @@ object Montage {
                     val reste = limite - System.currentTimeMillis()
                     if (reste < 60_000L) break
                     progres("🎥 Animation IA de l'image ${k + 1}/${aAnimer.size} (Hugging Face, quota gratuit)…")
-                    val prompt = sb.plans.getOrNull((existants.size + m.i) % sb.plans.size)?.visuel.orEmpty() +
+                    val prompt = sansPersonnagesProteges(sb.plans.getOrNull((existants.size + m.i) % sb.plans.size)?.visuel.orEmpty()) +
                         ". Animate this exact image: flames flicker, feathers and smoke move, embers fly, slow epic camera push-in, keep the composition, no text."
                     val clip = withTimeoutOrNull(reste) {
                         runCatching { withContext(Dispatchers.IO) { VideoGen.genereClip(app, prompt, 4, vertical, image = m.fichier) } }
@@ -526,37 +530,41 @@ object Montage {
             segments[k] = sg.copy(fichier = c)
         }
         data class Essai(val avecTexte: Boolean, val avecSon: Boolean, val l: Int, val h: Int, val libelle: String, val logiciel: Boolean = true, val portrait: Boolean = true,
-                         val texteDansImages: Boolean = false)
+                         val texteDansImages: Boolean = false, val hevc: Boolean = false)
         val (l720, h720) = if (vertical) 720 to 1280 else 1280 to 720
-        val reglagePlein = reglageLogiciel(largeur, hauteur)
-        val reglage720 = reglageLogiciel(l720, h720)
+        // Encodeur logiciel (fiable) : la plus grande taille qu'il accepte ici ; sur certains téléphones, pas la HD.
+        val tailleSw = tailleLogicielle(largeur, hauteur)
+        val pleineSw = tailleSw?.takeIf { min(it.first, it.second) >= min(largeur, hauteur) * 9 / 10 }
         val essais = listOfNotNull(
-            reglagePlein?.let { Essai(true, true, largeur, hauteur, "complet", portrait = it) },
-            if (reglagePlein == null && largeur != l720 && reglage720 != null) Essai(true, true, l720, h720, "en 720p", portrait = reglage720) else null,
+            pleineSw?.let { Essai(true, true, it.first, it.second, "complet", portrait = it.third) },
             Essai(true, true, largeur, hauteur, "encodeur matériel", logiciel = false),
-            if (reglage720 != null && largeur != l720 && reglagePlein != null) Essai(true, true, l720, h720, "en 720p", portrait = reglage720) else null,
-            // Incrustation refusée par le téléphone : le texte est dessiné dans les images elles-mêmes (pleine résolution).
-            (reglagePlein ?: reglage720)?.let { p -> Essai(false, true, if (reglagePlein != null) largeur else l720, if (reglagePlein != null) hauteur else h720,
-                "avec le texte dessiné dans les images", portrait = p, texteDansImages = d.textes) },
-            Essai(false, true, l720, h720, "sans texte à l'écran", logiciel = reglage720 != null, portrait = reglage720 ?: true),
-            Essai(false, false, l720, h720, "sans texte ni son", logiciel = reglage720 != null, portrait = reglage720 ?: true)
+            // Autre bloc d'encodage du téléphone (H.265, accepté par TikTok) quand le H.264 matériel abîme des images.
+            Essai(true, true, largeur, hauteur, "encodeur matériel HEVC", logiciel = false, hevc = true),
+            tailleSw?.takeIf { pleineSw == null }?.let { Essai(true, true, it.first, it.second, "en ${min(it.first, it.second)}p (encodeur logiciel)", portrait = it.third) },
+            Essai(false, true, largeur, hauteur, "avec le texte dessiné dans les images", logiciel = pleineSw != null, portrait = pleineSw?.third ?: true, texteDansImages = d.textes),
+            Essai(false, true, l720, h720, "sans texte à l'écran", logiciel = false),
+            Essai(false, false, l720, h720, "sans texte ni son", logiciel = false)
         )
-        val complets = setOf("complet", "en 720p", "encodeur matériel", "avec le texte dessiné dans les images")
+        val complets = setOf("complet", "encodeur matériel", "encodeur matériel HEVC", "avec le texte dessiné dans les images")
         var abandons = ""
         var raisonAbandon = ""
         var ok = false
-        var secours: File? = null
-        var secoursScore = Long.MIN_VALUE
-        var secoursAbimees = 0
-        var secoursLibelle = ""
-        var secoursCote = 0
-        for ((avecTexte, avecSon, l, h, libelle, logiciel, portrait, texteDansImages) in essais) {
+        var meilleur: File? = null
+        var meilleurScore = Long.MIN_VALUE
+        var meilleurAbimees = 0
+        var meilleurLibelle = ""
+        var meilleurCote = 0
+        var meilleurComplet = false
+        for ((avecTexte, avecSon, l, h, libelle, logiciel, portrait, texteDansImages, hevc) in essais) {
+            val complet = avecSon && (avecTexte || texteDansImages || !d.textes)
+            // Une version complète (texte + son) existe déjà : une version qui retire le texte ou le son ne peut pas être meilleure.
+            if (meilleurComplet && !complet) continue
             progres("🎞️ Montage" + (if (libelle != "complet") " ($libelle)" else "") + "…")
             val r = runCatching {
                 exporter(app, segments, if (avecSon) voix else emptyList(), if (avecSon) musique else null, avecTexte, d.garderSon && avecSon, l, h, avecParoles, sortie,
                     if (avecTexte && avecSon) reperes else emptyList(), tiktok = d.tiktok,
                     bandeau = if ((avecTexte || texteDansImages) && d.tiktok) app.store.tiktokBandeau.value.trim().ifBlank { sb.bandeau } else "",
-                    logiciel = logiciel, portrait = portrait, texteDansImages = texteDansImages)
+                    logiciel = logiciel, portrait = portrait, texteDansImages = texteDansImages, hevc = hevc)
             }
             if (r.isFailure) {
                 val raison = r.exceptionOrNull()?.let { e -> (e.message ?: e.javaClass.simpleName) + (e.cause?.message?.let { " ($it)" } ?: "") }.orEmpty()
@@ -565,24 +573,25 @@ object Montage {
             }
             progres("🔎 Vérification de la vidéo…")
             val (abimees, cote) = withContext(Dispatchers.IO) { analyser(sortie) }
-            val pleineTaille = cote == 0 || cote >= min(l, h) * 9 / 10
-            if (abimees == 0 && pleineTaille) { ok = true; if (libelle !in complets) abandons = libelle; break }
+            val pleineTaille = cote == 0 || cote >= min(largeur, hauteur) * 9 / 10
+            if (abimees == 0 && pleineTaille && complet) { ok = true; meilleur = null; break }
             val defaut = if (abimees > 0) "$abimees images abîmées par l'encodeur du téléphone" else "résolution réduite à ${cote}p par l'encodeur"
             if (raisonAbandon.isBlank()) raisonAbandon = defaut
             echecs += "montage $libelle : $defaut, refait autrement"
-            // Meilleur export de secours : sans défaut d'abord, puis la plus grande résolution, puis le moins d'images abîmées.
-            val score = if (abimees == 0) 1_000_000L + cote else -abimees.toLong()
-            if (score > secoursScore) {
-                secours = File(travail, "secours.mp4").also { sortie.copyTo(it, overwrite = true) }
-                secoursScore = score; secoursAbimees = abimees; secoursLibelle = libelle; secoursCote = cote
+            val score = scoreExport(avecSon, avecTexte || texteDansImages || !d.textes, abimees, cote)
+            if (score > meilleurScore) {
+                meilleur = File(travail, "meilleur.mp4").also { sortie.copyTo(it, overwrite = true) }
+                meilleurScore = score; meilleurAbimees = abimees; meilleurLibelle = libelle; meilleurCote = cote; meilleurComplet = complet
             }
         }
-        if (!ok && secours != null) {
-            secours.copyTo(sortie, overwrite = true)
+        if (!ok && meilleur != null) {
+            meilleur.copyTo(sortie, overwrite = true)
             ok = true
-            if (secoursLibelle !in complets) abandons = secoursLibelle
-            echecs += if (secoursAbimees > 0) "aucun export sans défaut : vidéo gardée avec $secoursAbimees images abîmées (encodeur vidéo du téléphone défaillant)"
-                else "vidéo en ${secoursCote}p : le téléphone a refusé de l'encoder en pleine résolution"
+            if (meilleurLibelle !in complets && !meilleurLibelle.startsWith("en ")) abandons = meilleurLibelle
+            echecs += when {
+                meilleurAbimees > 0 -> "vidéo gardée avec $meilleurAbimees image${if (meilleurAbimees > 1) "s" else ""} abîmée${if (meilleurAbimees > 1) "s" else ""} par l'encodeur vidéo du téléphone (bref défaut possible à l'image) : aucun export parfait n'était possible"
+                else -> "vidéo en ${meilleurCote}p : seul l'encodeur logiciel du téléphone donne une image sans défaut, et il ne sait pas faire plus grand"
+            }
         }
         travail.deleteRecursively()
         if (!ok) return "❌ Le montage a échoué sur ce téléphone :\n- " + regrouper(echecs).joinToString("\n- ")
@@ -673,7 +682,13 @@ object Montage {
                     "décors et ambiance cohérents ; textes à l'écran de 1 à 4 mots, percutants, dans le ton de la chaîne.\n" +
                     "Chaque plan montre ce sujet principal OU un symbole évident de la niche (pour une niche patriotique française : drapeau tricolore, " +
                     "coq gaulois, Marianne, monuments français, pompiers, agriculteurs, paysages de France). JAMAIS de personnage inventé sans rapport, " +
-                    "de masque, de portail magique, de rue ou d'objet quelconque, ni de texte écrit DANS l'image (vêtements, panneaux).\n")
+                    "de masque, de portail magique, de rue ou d'objet quelconque, ni de texte écrit DANS l'image (vêtements, panneaux).\n" +
+                    "Personnages protégés par le droit d'auteur (Astérix, Obélix, héros de BD, de films ou de jeux) : jamais ; à la place, des guerriers gaulois " +
+                    "ORIGINAUX, sans reprendre leur apparence.\n" +
+                    "ACCROCHE ET ENGAGEMENT (obligatoires) : le texte du 1er plan et la 1re phrase de la voix off sont une accroche percutante (question ou affirmation " +
+                    "choc, 6 mots au plus) ; le DERNIER plan et la fin de la voix off invitent à réagir : une question qui appelle une réponse en commentaire, " +
+                    "puis « like » et « partage » (ex. texte « TU EN PENSES QUOI ? 🇫🇷 », voix : « Dis-moi en commentaire… et partage si tu es fier d'être Français ») ; " +
+                    "la légende reprend cette question.\n")
                 app.store.tiktokBandeau.value.takeIf { it.isNotBlank() }?.let { append("Bandeau habituel en haut des vidéos : $it\n") }
             }
         }
@@ -787,8 +802,17 @@ object Montage {
     /** Sujet récurrent des vidéos de la chaîne quand elle parle de phénix (repris dans chaque plan qui n'en montre aucun symbole). */
     internal const val ANCRE_PHENIX = "a majestic phoenix with blue, white and red flaming wings in the colours of the French flag"
 
-    private val SYMBOLES = Regex("(?i)ph[oeé]+ni|flag|drapeau|tricolo|marianne|rooster|\\bcoq|eiffel|triomphe|triumph|notre.?dame|mont.?saint|versailles|" +
+    internal val SYMBOLES = Regex("(?i)ph[oeé]+ni|flag|drapeau|tricolo|marianne|rooster|\\bcoq|eiffel|triomphe|triumph|notre.?dame|mont.?saint|versailles|" +
         "firefighter|pompier|farmer|agricult|tractor|tracteur|soldier|soldat|\\bfrance|french|paris|chateau|château|cathedral")
+
+    private val PROTEGES = Regex("(?i)\\b(ast[ée]rix|ob[ée]lix|id[ée]fix|dogmatix|panoramix|getafix|abraracourcix|vitalstatistix)\\b(\\s+(et|and|,)\\s+(ast[ée]rix|ob[ée]lix|id[ée]fix|panoramix))*")
+
+    /**
+     * Personnages protégés (Astérix, Obélix…) : jamais reproduits (droit d'auteur, retrait possible par TikTok) ; ils
+     * deviennent des guerriers gaulois ORIGINAUX, sans reprendre leur apparence.
+     */
+    internal fun sansPersonnagesProteges(visuel: String): String =
+        PROTEGES.replace(visuel, "original ancient Gaulish warriors of our own design")
 
     /** Plan sans aucun symbole de la chaîne : le sujet récurrent ([ancre]) y est ajouté. */
     internal fun ancrer(visuel: String, ancre: String): String =
@@ -910,6 +934,32 @@ object Montage {
             if (octets[i].toInt() == 0) { if (++suite >= 16) return true } else suite = 0
         }
         return false
+    }
+
+    /**
+     * Note d'un export pour choisir le meilleur : le SON compte le plus (voix off), puis le texte (accroche), puis une
+     * image sans défaut (1 ou 2 images abîmées valent mieux qu'une image floue en très basse résolution), puis la taille.
+     */
+    internal fun scoreExport(avecSon: Boolean, avecTexte: Boolean, abimees: Int, cote: Int): Long {
+        val qualite = when {
+            abimees == 0 -> if (cote == 0 || cote >= 540) 1_000L else 400L
+            abimees <= 2 -> 600L - abimees * 50L
+            abimees <= 6 -> 300L - abimees * 20L
+            else -> -abimees.toLong()
+        }
+        return (if (avecSon) 4_000L else 0L) + (if (avecTexte) 2_000L else 0L) + qualite + cote / 10
+    }
+
+    /** Plus grande taille (même format) que l'encodeur logiciel accepte : (largeur, hauteur, portrait direct ?) ou null. */
+    private fun tailleLogicielle(largeur: Int, hauteur: Int): Triple<Int, Int, Boolean>? {
+        val vertical = hauteur >= largeur
+        val cotes = listOf(1080, 720, 576, 540, 480, 432, 360).filter { it <= min(largeur, hauteur) }
+        for (c in cotes) {
+            val long = (c * 16 / 9 + 15) / 16 * 16
+            val (l, h) = if (vertical) c to long else long to c
+            reglageLogiciel(l, h)?.let { return Triple(l, h, it) }
+        }
+        return null
     }
 
     /**
@@ -1164,7 +1214,8 @@ object Montage {
     private suspend fun exporter(
         app: JarvisApp, segments: List<Segment>, voix: List<File>, musique: File?, avecTexte: Boolean, garderSon: Boolean,
         largeur: Int, hauteur: Int, chanson: Boolean, sortie: File, reperes: List<SousTitres.Repere> = emptyList(),
-        tiktok: Boolean = false, bandeau: String = "", logiciel: Boolean = true, portrait: Boolean = true, texteDansImages: Boolean = false
+        tiktok: Boolean = false, bandeau: String = "", logiciel: Boolean = true, portrait: Boolean = true, texteDansImages: Boolean = false,
+        hevc: Boolean = false
     ) {
         // Repli : texte et bandeau dessinés dans les images (sans incrustation Media3), les vidéos restent sans texte.
         val segments = if (!texteDansImages) segments else withContext(Dispatchers.IO) {
@@ -1259,11 +1310,12 @@ object Montage {
                 }
                 val encodeur = androidx.media3.transformer.DefaultEncoderFactory.Builder(app)
                     .setVideoEncoderSelector(selecteur)
+                    // Image clé chaque seconde : un éventuel défaut de l'encodeur ne se propage pas plus d'une seconde.
                     .setRequestedVideoEncoderSettings(androidx.media3.transformer.VideoEncoderSettings.Builder()
-                        .setBitrate(if (largeur * hauteur >= 1080 * 1920) 12_000_000 else 8_000_000).build())
+                        .setBitrate(if (largeur * hauteur >= 1080 * 1920) 12_000_000 else 8_000_000).setiFrameIntervalSeconds(1f).build())
                     .setEnableFallback(true).build()
                 val transformer = Transformer.Builder(app)
-                    .setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264)
+                    .setVideoMimeType(if (hevc) androidx.media3.common.MimeTypes.VIDEO_H265 else androidx.media3.common.MimeTypes.VIDEO_H264)
                     // Portrait direct, ou image couchée + rotation (comme les vidéos filmées) si l'encodeur n'accepte que le paysage.
                     .setPortraitEncodingEnabled(portrait)
                     .setEncoderFactory(encodeur)

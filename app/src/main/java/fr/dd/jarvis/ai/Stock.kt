@@ -141,7 +141,7 @@ object Stock {
      */
     /** [illustration] : un symbole (phénix, allégorie) → illustrations ; sinon des photos. Jamais de vecteurs (fond transparent = noir). */
     suspend fun chercherImage(app: JarvisApp, requete: String, vertical: Boolean, pris: MutableSet<String>, francais: Boolean = false,
-                              illustration: Boolean = false): Clip? = withContext(Dispatchers.IO) {
+                              illustration: Boolean = false, exige: Regex? = null): Clip? = withContext(Dispatchers.IO) {
         val q = java.net.URLEncoder.encode(requete.trim().ifBlank { return@withContext null }, "UTF-8")
         val pexels = app.store.pexelsKey.value.trim()
         if (pexels.isNotBlank()) {
@@ -152,7 +152,8 @@ object Stock {
                 val p = photos.optJSONObject(i) ?: continue
                 val id = "pexels-img:" + p.optLong("id")
                 if (id in pris) continue
-                if (!pertinentStrict(requete, p.optString("alt") + " " + p.optString("url").substringAfter("/photo/").replace('-', ' '))) continue
+                val descP = p.optString("alt") + " " + p.optString("url").substringAfter("/photo/").replace('-', ' ')
+                if (!pertinentStrict(requete, descP) || (exige != null && !exige.containsMatchIn(descP))) continue
                 val lien = imagePexels(p) ?: continue
                 pris += id
                 return@withContext Clip(id, lien, "Pexels", p.optString("photographer"), p.optString("url"), 0)
@@ -169,7 +170,8 @@ object Stock {
                 val id = "pixabay-img:" + h.optLong("id")
                 if (id in pris) continue
                 if (h.optString("type").contains("vector", ignoreCase = true)) continue
-                if (!pertinentStrict(requete, h.optString("tags") + " " + h.optString("pageURL").substringAfter(".com/").replace('-', ' ').replace('/', ' '))) continue
+                val descH = h.optString("tags") + " " + h.optString("pageURL").substringAfter(".com/").replace('-', ' ').replace('/', ' ')
+                if (!pertinentStrict(requete, descH) || (exige != null && !exige.containsMatchIn(descH))) continue
                 val lien = imagePixabay(h) ?: continue
                 pris += id
                 return@withContext Clip(id, lien, "Pixabay", h.optString("user"), h.optString("pageURL"), 0)
